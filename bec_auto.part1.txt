@@ -1,0 +1,250 @@
+-- Continuous known-recipe service, no user-specified order count. Preview is read-only.
+-- Request missing main-network fluids. Never retry an uncertain request/transfer.
+local c = require("component")
+local ser = require("serialization")
+local computer = require("computer")
+local fs = require("filesystem")
+local sides = require("sides")
+local event = require("event")
+local mode = (...) or "preview"
+local JOURNAL = "/home/bec_auto.journal"
+local MAIN = "3afdc4cf-04e3-4ae9-8be6-e753c23a249d"
+local SUB = "86311657-33d1-41b5-a0d9-0aee7b5c2c50"
+local TRANS = "66fb280f-080d-4623-8d54-0dffd5cd5aad"
+local STORAGE = "237a9cac-118a-4b74-8755-0d0b0ad216c0"
+local NODE = "b04787f9-5423-4b03-8549-c786d4ef38d0"
+local RS, GEN, armed, record
+local stopping=false
+local mapping = {
+  entangled_infinity = "molten.infinity",
+  entangled_chromaticglass = "molten.chromaticglass",
+  entangled_transcendentmetal = "molten.transcendentmetal",
+  entangled_dimshiftedsuperfluid = "dimensionallyshiftedsuperfluid",
+  entangled_neutronium="molten.neutronium",entangled_cosmicneutronium="molten.cosmicneutronium",
+  entangled_bedrockium="molten.bedrockium",entangled_celestialtungsten="molten.celestialtungsten",
+  entangled_hypogen="molten.hypogen",entangled_phononmedium="phononmedium",
+  entangled_quarkgluonplasma="quarkgluonplasma",entangled_spacetime="molten.spacetime",
+  entangled_time="molten.temporalfluid",entangled_space="molten.spatialfluid",
+  entangled_cosmicsolder="boundlesscosmicsolder",
+  entangled_mhdcsm="molten.magnetohydrodynamicallyconstrainedstarmatter",
+  entangled_magmatter="molten.magmatter",entangled_universium="molten.universium",
+  entangled_eternity="molten.eternity"
+}
+local units={entangled_dimshiftedsuperfluid=1000,entangled_phononmedium=1000,
+ entangled_quarkgluonplasma=1000,entangled_cosmicsolder=1000}
+local function call(a, m, ...) return c.invoke(a, m, ...) end
+local function method(a, m)
+  assert(c.methods(a)[m] ~= nil, "组件缺少方法: " .. m)
+end
+local function resolve(prefix, kind)
+  local address, count = nil, 0
+  for a, t in c.list() do
+    if a:sub(1, #prefix) == prefix and t == kind then
+      address, count = a, count + 1
+    end
+  end
+  assert(count == 1, "目标组件缺失或不唯一: " .. prefix)
+  return address
+end
+local function integer(v)
+  assert(type(v) == "number" and v >= 0 and v == math.floor(v), "库存/需求数量无效")
+  return v
+end
+local function same(a, b)
+  for k, v in pairs(a) do if b[k] ~= v then return false end end
+  for k, v in pairs(b) do if a[k] ~= v then return false end end
+  return true
+end
+local function network(a)
+  local rows, result = call(a, "getFluidsInNetwork"), {}
+  assert(type(rows) == "table", "网络库存不可读")
+  for _, f in pairs(rows) do
+    assert(type(f) == "table", "流体条目无效")
+    local n = integer(f.amount or f.size or 0)
+    if n > 0 then
+      assert(type(f.name) == "string", "流体名称缺失")
+      result[f.name] = (result[f.name] or 0) + n
+    end
+  end
+  return result
+end
+local matchedOutputs, perRecipe
+local function checkRecipe(required,parallel)
+  parallel=parallel or integer(call(NODE,"getParallelRecipesInProgress"))
+  assert(parallel>0 and type(required)=="table","当前配方并行/需求不可读")
+  local normalized={}
+  for name,n in pairs(required) do
+    assert(mapping[name] and integer(n)>0 and n%parallel==0,"配方需求无法按并行拆分: "..tostring(name))
+    normalized[name]=n/parallel
+  end
+  local matches={}
+  if fs.exists("/home/bec/recipes") then
+    for file in fs.list("/home/bec/recipes") do
+      if file:match("%.dat$") then
+        local f=assert(io.open("/home/bec/recipes/"..file,"r"));local r=ser.unserialize(f:read("*a"));f:close()
+        assert(type(r)=="table","登记配方损坏: "..file)
+        if r.state=="converted" then
+          local needs={}
+          for _,fluid in ipairs(r.condensates or {}) do needs[fluid.name]=(needs[fluid.name] or 0)+integer(fluid.amount or fluid.size) end
+          if same(needs,normalized) then
+            assert(type(r.outputs)=="table" and #r.outputs==1,"登记产物无效: "..file)
+            matches[#matches+1]=r.outputs[1]
+          end
+        end
+      end
+    end
+  end
+  if #matches>0 then
+    local provided=call(NODE,"getProvidedTier")
+    if c.methods(NODE).getRequiredTier~=nil then
+      local needed=call(NODE,"getRequiredTier")
+      local tier=type(needed)=="table" and needed.tier or needed
+      assert(type(tier)=="number" and type(provided)=="table" and provided.tier>=tier,"当前蜂群等级不足")
+    end
+    assert(integer(call(NODE,"getAvailableNanites"))>0,"当前蜂群为空")
+    matchedOutputs,perRecipe=matches,normalized
+    return parallel
+  end
+  local amount=type(required)=="table" and required.entangled_chromaticglass
+  assert(type(amount)=="number" and amount>0 and amount%288==0
+    and required.entangled_transcendentmetal==amount, "未验证的配方需求，保持暂停")
+  local recipes=amount/288
+  assert(parallel==nil or parallel==recipes,"实际并行与凝聚物需求不符")
+  local count=0; for _ in pairs(required) do count=count+1 end
+  assert(count==2,"未验证的凝聚物需求，保持暂停")
+  local tier=call(NODE,"getProvidedTier")
+  assert(type(tier)=="table" and tier.tier==4 and integer(call(NODE,"getAvailableNanites"))>=64,
+    "须使用 tier 4 蜂群且数量至少64，可以增加同级蜂群")
+  matchedOutputs={{name="gregtech:gt.metaitem.03",damage=32307,size=1}};perRecipe=normalized
+  return recipes
+end
+local function tick(seconds)
+  local _,_,character=event.pull(seconds,"key_down")
+  if character==113 or character==81 then stopping=true end
+end
+local function archiveJournal(contents,suffix)
+  suffix=suffix or ".stopped-"
+  local index=1
+  while fs.exists(JOURNAL..suffix..index) do index=index+1 end
+  local backup=JOURNAL..suffix..index
+  assert(fs.rename(JOURNAL,backup),"旧常驻日志归档失败")
+  local f=assert(io.open(backup,"r"));local actual=f:read("*a");f:close()
+  assert(actual==contents and not fs.exists(JOURNAL),"旧常驻日志归档验证失败")
+end
+local function field()
+  assert(call(STORAGE, "isWorkAllowed") == true, "约束场必须保持开启")
+  local v = call(STORAGE, "getStoredCondensate")
+  assert(type(v) == "table", "凝聚物库存不可读")
+  for _, n in pairs(v) do integer(n) end
+  return v
+end
+local function checkContaminants(stock,required)
+  local extras={}
+  for name,n in pairs(stock) do
+    if n>0 and (required[name] or 0)==0 then extras[#extras+1]=name end
+  end
+  table.sort(extras)
+  assert(#extras<=3,"BEC网络有 "..#extras.." 种多余凝聚物，须先设置凝聚物过滤，保持暂停: "..table.concat(extras,", "))
+  if #extras>0 then print("BEC网络多余凝聚物 "..#extras.." 种，可能减速；需过滤当前配方以外类型。") end
+end
+local function writeVerified(path, contents)
+  local f = assert(io.open(path, "w"))
+  local ok, err = f:write(contents)
+  local flushed, flushErr = f:flush()
+  f:close()
+  assert(ok and flushed, tostring(err or flushErr or "日志写入失败"))
+  local r = assert(io.open(path, "r"))
+  local actual = r:read("*a"); r:close()
+  assert(actual == contents and type(ser.unserialize(actual)) == "table", "日志回读失败")
+end
+local function save(stage)
+  record.stage = stage
+  if fs.exists(JOURNAL) then
+    local f = assert(io.open(JOURNAL, "r"))
+    local old = f:read("*a"); f:close()
+    writeVerified(JOURNAL .. ".previous", old)
+  end
+  writeVerified(JOURNAL, ser.serialize(record, false))
+end
+local function pause(value)
+  call(RS, "setOutput", sides.top, value)
+  assert(call(RS, "getOutput", sides.top) == value, "红石输出回读不符")
+end
+local function generator(enabled)
+  call(GEN, "setWorkAllowed", enabled)
+  assert(call(GEN, "isWorkAllowed") == enabled, "纠缠装置启停回读不符")
+end
+local function tanks(side, name)
+  local count, amount = integer(call(TRANS, "getTankCount", side)), 0
+  assert(count > 0, "接口没有流体槽")
+  for i = 1, count do
+    local f = call(TRANS, "getFluidInTank", side, i)
+    assert(type(f) == "table", "接口缓存不可读")
+    if type(f[1]) == "table" then f = f[i] or f[1] end
+    local n = integer(f.amount or 0)
+    if n > 0 then
+      assert(name and f.name == name, "接口有未处理流体缓存")
+      amount = amount + n
+    end
+  end
+  return amount
+end
+local function emptyConfig()
+  for slot = 0, 5 do
+    assert(call(MAIN, "getFluidInterfaceConfiguration", slot) == nil, "供液接口已有配置")
+  end
+end
+local function current(recovering)
+  local state=call(NODE,"getState")
+  local unavailable=state=="assembler-offline" or state=="unpowered" or state=="nanite-tier-too-low"
+  assert(state=="paused-immediate" or (recovering and unavailable
+    and call(RS,"getOutput",sides.top)==15),"订单未处于立即暂停状态")
+  local parallel=integer(call(NODE, "getParallelRecipesInProgress"))
+  assert(parallel>=1,"暂停节点没有正在处理的配方")
+  local required, consumed = call(NODE, "getRequiredCondensate"), call(NODE, "getConsumedCondensate")
+  assert(type(required) == "table" and type(consumed) == "table", "订单需求不可读")
+  local remaining, total = {}, 0
+  for name, amount in pairs(required) do
+    assert(mapping[name], "不支持的凝聚物: " .. tostring(name))
+    amount = integer(amount)
+    local used = integer(consumed[name] or 0)
+    assert(used <= amount, "已消耗数量超过需求")
+    remaining[name] = amount - used; total = total + amount
+  end
+  assert(total > 0, "订单没有有效需求")
+  for name, amount in pairs(consumed) do
+    assert(integer(amount) == 0 or required[name], "消耗记录与当前订单不符")
+  end
+  checkRecipe(required,parallel)
+  return required, remaining
+end
+local function queuedRecipes()
+  local cpus=call(MAIN,"getCpus")
+  assert(type(cpus)=="table","主网 CPU 清单不可读")
+  local total=0
+  for _,row in pairs(cpus) do
+    if row.busy==true then
+      assert(row.cpu~=nil,"主网 CPU 不提供任务对象，无法读取整批数量")
+      -- ACTIVE = outputs already dispatched but not returned; PENDING =
+      -- pattern outputs not yet dispatched. Add both, never storage items.
+      for _,getter in ipairs({"activeItems","pendingItems"}) do
+        local items=row.cpu[getter]()
+        assert(type(items)=="table","主网剩余任务不可读: "..getter)
+        for _,item in pairs(items) do
+          for _,out in ipairs(matchedOutputs or {{name="gregtech:gt.metaitem.03",damage=32307,size=1}}) do
+          if item.name==out.name and tonumber(item.damage or 0)==tonumber(out.damage or 0) then
+            assert(not out.hasTag and not item.hasTag,"带NBT产物不能用于整批计数")
+            total=total+integer(item.size or item.amount or 0)/math.max(1,integer(out.size or out.amount or 1))
+            break
+          end
+          end
+        end
+      end
+    end
+  end
+  return math.ceil(total)
+end
+local function batchTarget(required,remaining)
+  local parallel=checkRecipe(required)
+  local count=math.max(parallel,queuedRecipes())
+  local target={}

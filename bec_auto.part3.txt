@@ -1,0 +1,201 @@
+      round=round+1;record.round=round;record.transfers={};record.target=target;record.plan=nil;record.topups={}
+      waitUntil(10,function() return call(GEN,"isMachineActive")==false end)
+      emptyConfig();tanks(4,nil);tanks(5,nil)
+      local expected=prepareStreaming(target)
+      if stopping then break end
+      for i=1,20 do unchanged();assert(same(network(SUB),expected),"原液不稳定");os.sleep(0.25) end
+      save("converting");generator(true)
+      local conversionLimit=180
+      for name,need in pairs(target) do conversionLimit=conversionLimit+math.ceil(need/(units[name] or 144))*180 end
+      waitUntil(conversionLimit,function()
+        local stock=field()
+        for name,need in pairs(target) do if (stock[name] or 0)<need then return false end end
+        return true
+      end,unchanged)
+      unchanged();generator(false)
+      record.plan=nil;record.lastState=nil;save("watching")
+      if not stopping then
+        checkContaminants(field(),record.required)
+        pause(0)
+        print("整批流体齐备，已连续放行；追加订单自动补整批差额。按 Q 停止。")
+        local releasedAt=computer.uptime()
+        local deadline=releasedAt+600
+        local lastStock=field()
+        local nextQueueCheck=0
+        while not stopping do
+          local v=call(NODE,"getState")
+          local stock=field()
+          local req=call(NODE,"getRequiredCondensate")
+          if req~=nil then checkRecipe(req) end
+          if v=="idle" or waiting[v] then break end
+          assert(v=="crafting" or (v=="paused-immediate" and computer.uptime()-releasedAt<3),
+            "节点运行异常: "..tostring(v))
+          local refill=false
+          if computer.uptime()>=nextQueueCheck and req~=nil then
+            local consumed=call(NODE,"getConsumedCondensate")
+            assert(type(consumed)=="table","当前消耗记录不可读")
+            local count=math.max(1,queuedRecipes())
+            for name,amount in pairs(req) do
+              local parallel=checkRecipe(req)
+              local need=perRecipe[name]*math.max(parallel,count)-integer(consumed[name] or 0)
+              if (stock[name] or 0)<need then refill=true end
+            end
+            nextQueueCheck=computer.uptime()+1
+          end
+          if refill then break end
+          if not same(stock,lastStock) then deadline=computer.uptime()+600;lastStock=stock end
+          assert(computer.uptime()<deadline,"当前配方运行超时")
+          tick(0.1)
+        end
+      end
+    end
+  end
+  pause(15);generator(false);record.configOwned=false
+  for _,job in ipairs(record.requests) do
+    if job.state~="done" then
+      save("craft-paused")
+      print("服务已暂停；主网原液申请仍需核对，保留日志，不重复下单。")
+      return
+    end
+  end
+  save("stopped")
+  print("已停止常驻服务：暂停输出 15，纠缠装置关闭；约束场与已有凝聚物保持开启。")
+end
+local function main()
+  assert(mode=="preview" or mode=="run" or mode=="resume" or mode=="restock", "用法: preview / run / resume / restock，无需填写数量")
+  RS = resolve("266f65b5", "redstone")
+  GEN = resolve("c1ae3f7c", "gt_machine")
+  assert(call(GEN, "getName") == "multi.bec.generator", "纠缠装置名称不符")
+  for _, item in ipairs({{RS,"setOutput"},{RS,"getOutput"},{GEN,"setWorkAllowed"},
+    {GEN,"isWorkAllowed"},{GEN,"isMachineActive"},{MAIN,"getFluidsInNetwork"},
+    {MAIN,"setFluidInterfaceConfiguration"},{MAIN,"getFluidInterfaceConfiguration"},
+    {SUB,"getFluidsInNetwork"},{TRANS,"transferFluid"},
+    {MAIN,"getCraftables"},{MAIN,"getCpus"}}) do method(item[1],item[2]) end
+  local minimum,maximum=integer(call(NODE,"getMinParallel")),integer(call(NODE,"getMaxParallel"))
+  assert(minimum>=1 and maximum>=minimum,"节点并行设置无效")
+  print("远端红石: " .. RS .. "；纠缠装置: " .. GEN)
+  print("节点: " .. call(NODE,"getState") .. "；向上输出: " .. call(RS,"getOutput",sides.top))
+  print("纠缠装置允许工作: " .. tostring(call(GEN,"isWorkAllowed")))
+  print("凝聚物库存: " .. ser.serialize(field(),false))
+  if mode == "preview" then
+    print("子网原液: " .. ser.serialize(network(SUB),false))
+    if call(NODE,"getState") == "paused-immediate" then
+      local required,remaining=current();local target,count=batchTarget(required,remaining)
+      print("主网剩余配方 "..count.." 份")
+      plan(target)
+    end
+    print("预览结束：没有开关、搬液、配置或写日志。")
+    return
+  end
+  local waitingStates = {idle=true, ["paused-immediate"]=true, ["assembler-offline"]=true,
+    unpowered=true, ["nanite-tier-too-low"]=true}
+  local initialState = call(NODE,"getState")
+  assert(waitingStates[initialState], "节点状态不适合启动: " .. tostring(initialState))
+  emptyConfig(); tanks(4,nil); tanks(5,nil)
+  if fs.exists(JOURNAL) then
+    local f=assert(io.open(JOURNAL,"r"));local contents=f:read("*a");f:close()
+    local old=ser.unserialize(contents)
+    assert(type(old)=="table" and old.version==1 and old.kind=="continuous"
+      and old.pending==nil and old.configOwned==false,"日志无效或有未确认操作，禁止重跑")
+    if mode=="resume" or mode=="restock" then
+      local preTransfer=(old.stage=="starting" or old.stage=="waiting" or old.stage=="waiting-stock")
+        and old.plan==nil and type(old.transfers)=="table" and next(old.transfers)==nil
+        and (old.requests==nil or next(old.requests)==nil)
+      local watching=(old.stage=="watching" or old.stage=="waiting") and old.plan==nil
+        and type(old.transfers)=="table" and type(old.target)=="table"
+      local crafted=old.stage=="craft-done" and old.plan==nil
+        and type(old.transfers)=="table" and next(old.transfers)==nil
+        and type(old.requests)=="table" and next(old.requests)~=nil
+      local prepared=old.stage=="stream-prepared" and old.plan==nil
+        and type(old.expected)=="table" and type(old.transfers)=="table"
+        and type(old.target)=="table"
+      local converting=old.stage=="converting" and old.plan==nil
+        and type(old.expected)=="table" and type(old.transfers)=="table"
+        and type(old.target)=="table" and type(old.required)=="table" and type(old.remaining)=="table"
+      if watching or crafted or prepared or converting then
+        for _,move in ipairs(old.transfers) do
+          assert(move.ok==true and type(move.amount)=="number" and move.amount>0,
+            "旧搬运未确认，禁止恢复")
+        end
+        for _,job in ipairs(old.requests or {}) do
+          assert(job.state=="done","原液申请未完成，禁止重复申请")
+        end
+        assert(call(RS,"getOutput",sides.top)==15 and call(GEN,"isWorkAllowed")==false
+          and call(GEN,"isMachineActive")==false,"恢复前节点须暂停且纠缠装置已停机")
+        if crafted then
+          -- Offline/low-power states can mask the immediate-pause status.
+          -- Read the retained order under verified pause output; serve() waits
+          -- for the observation array before configuring or moving any fluid.
+          local req,remaining=current(true)
+          assert(same(req,old.required) and same(remaining,old.remaining),"旧申请订单已变化，暂停核对")
+          print("已完成原液申请已归档；按当前真实库存重新计算缺口。")
+        end
+        if prepared then
+          current(true)
+          assert(same(network(SUB),old.expected),"已备齐原液与日志不符，暂停核对")
+          print("整批原液已在子网，恢复时抵扣，不重复搬料或申请。")
+        end
+        if converting then
+          local req,remaining=current(true)
+          local target=old.target
+          if not (same(req,old.required) and same(remaining,old.remaining)) then
+            local count;target,count=batchTarget(req,remaining)
+            assert(type(old.batchCount)=="number" and count<=old.batchCount,
+              "恢复时订单增加或旧批量缺失，暂停核对")
+            for name,need in pairs(target) do assert(need<=integer(old.target[name]),"恢复需求超过旧整批目标") end
+            print("实际并行/消耗已变化，按 AE 剩余订单扣除节点已消耗量核对库存。")
+          end
+          local sub,stock=network(SUB),field()
+          for name,value in pairs(target) do
+            local raw=mapping[name]
+            local need=integer(value)
+            local liquid,condensate=integer(sub[raw] or 0),integer(stock[name] or 0)
+            local unit=units[name] or 144
+            assert(liquid%unit==0 and condensate%unit==0 and (liquid+condensate==need
+              or (mode=="restock" and liquid+condensate<need)),
+              "转换恢复库存不符: "..raw.."；子网 "..liquid.." + 凝聚物 "..condensate.."，目标 "..need)
+            if liquid+condensate<need then print(raw.." 当前缺口 "..(need-liquid-condensate).." mB；归档旧操作后重新备料。") end
+          end
+          for raw in pairs(sub) do
+            local allowed=false;for _,known in pairs(mapping) do if known==raw then allowed=true end end
+            assert(allowed,"转换恢复子网有无关原液")
+          end
+          for name,n in pairs(stock) do assert(n==0 or mapping[name],"转换恢复有无关凝聚物") end
+          print("转换恢复核对通过，抵扣当前库存；已完成的旧申请和搬运记录保留归档。")
+        end
+      end
+      assert(preTransfer or watching or crafted or prepared or converting,"该阶段存在未确认操作，不能自动恢复")
+      archiveJournal(contents,".before-resume-")
+    else
+      assert(old.stage=="stopped","已有非正常停止日志，请核对后使用 resume，禁止盲目重跑")
+      for _,job in ipairs(old.requests or {}) do
+        assert(job.state=="done","旧日志有未确认的主网申请，禁止重新下单")
+      end
+      archiveJournal(contents)
+    end
+  else
+    assert(mode~="resume" and mode~="restock","没有可恢复的日志")
+  end
+  record={version=1,kind="continuous",stage="starting",transfers={},requests={},configOwned=false}
+  save("starting");armed=true
+  print("常驻模式：无需填写数量。先只提交原始屏蔽层任务，可先 5 再 10。")
+  print("按主网 CPU 剩余任务量，一次准备整批原液；追加订单自动补差额。")
+  serve()
+
+end
+local ok, err = xpcall(main, debug.traceback)
+if not ok then
+  if armed then
+    local paused = pcall(pause,15)
+    local stopped = pcall(generator,false)
+    local cleaned = true
+    if record and record.configOwned then
+      local success, result = pcall(call,MAIN,"setFluidInterfaceConfiguration",0)
+      cleaned = success and result == true
+    end
+    print("恢复暂停: " .. tostring(paused) .. "；关闭纠缠装置: " .. tostring(stopped) .. "；清供液配置: " .. tostring(cleaned))
+    if not paused then print("请手动提供控制仓暂停信号。") end
+  end
+  print("程序停止: " .. tostring(err))
+  print("保留现场与日志；不要删除日志盲目重跑。约束场保持开启。")
+end
