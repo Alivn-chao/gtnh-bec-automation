@@ -1,4 +1,6 @@
-# 现有单节点服务：高速口专用缓存修正
+# V1独立Lua：高速口专用缓存修正
+
+[直接下载 bec_cache.lua](https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/main/fixes/cache_bulk/bec_cache.lua)。这是单独的V1缓存脚本，与交付的 `v1_cache_only/bec_cache.lua` 内容一致；不需要下载V2或替换生产UI。
 
 本文件用于作者已接好高速口的现有 `/home/bec_cache.lua`，来源为2026-10-09实际服务器程序快照。含该存档原有组件地址；不是V2安装器的通用缓存功能。其他存档不要直接照抄这些地址。
 

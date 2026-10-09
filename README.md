@@ -4,6 +4,8 @@
 
 **第一次使用：[从零安装、下载文件、接线、查地址与扩容](docs/GETTING_STARTED.md)。**
 
+**正在使用V1：[独立缓存脚本修正与替换说明](fixes/cache_bulk/README.md)** · [下载V1 bec_cache.lua](https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/main/fixes/cache_bulk/bec_cache.lua)。只更新缓存脚本，沿用现有界面和配置，无需安装V2。
+
 ## 下载与安装
 
 对外安装版本为 **V2独立测试版**，目标环境是 GTNH 2.9.0 Beta 3 + OpenComputers/OpenOS。程序安装在 `/home/bec_v2/`，与旧单节点版本分开。
