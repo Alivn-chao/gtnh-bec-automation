@@ -4,7 +4,8 @@
 return {
  version=2,
  mainInterface='这里填主网供液ME接口地址',
- recipeDirectory='/home/bec/recipes', -- 已处理样板的需求记录，仅只读使用
+ recipeDirectory='/home/bec_v2/recipes', -- 新用户在此登记；旧用户可用/home/bec/recipes
+ workshopInterface='这里填专用样板工坊ME接口地址', -- 不选择生产接口
  cacheTarget=144000, -- 仪表盘库存参考线；本测试版按正在运行的批次补液
  groups={
   {

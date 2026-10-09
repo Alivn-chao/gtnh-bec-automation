@@ -1,6 +1,6 @@
 local c=require('component')
 local term=require('term')
-return function(C)
+return function(C,addOnly)
  local function ask(label,default)
   io.write(label..(default~=nil and ' ['..tostring(default)..']' or '')..': ')
   local answer=assert(io.read(),'配置输入已取消')
@@ -36,11 +36,36 @@ return function(C)
   end
   print('已有配置。重新配置会备份旧配置，不修改稳定版。')
  end
+ if addOnly then
+  assert(previous,'首次安装请先运行setup')
+  assert(#previous.nodes<16,'已经达到16台节点上限')
+  for _,g in ipairs(previous.groups)do for _,a in ipairs(g.generators)do
+   assert(c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false,'先停止生产服务和纠缠器再扩容')
+  end end
+  for _,n in ipairs(previous.nodes)do
+   local state=c.invoke(n.address,'getState')
+   assert((state=='idle'or state=='paused-immediate'or state=='nanite-tier-too-low')and c.invoke(n.redstone,'getOutput',n.pauseSide)==15,'先暂停原有节点再扩容')
+  end
+  local count=number('扩容后的总节点数量',#previous.nodes+1,#previous.nodes+1,16)
+  for group,g in ipairs(previous.groups)do print('设备组 '..group..'：'..g.name)end
+  for i=#previous.nodes+1,count do
+   print('\n=== 新增传送节点 '..i..' ===')
+   local group=number('归属现有设备组',1,1,#previous.groups)
+   previous.nodes[i]={name=ask('节点名称','节点'..i),group=group,
+    address=pick('新传送节点','bec_io_node','getState'),redstone=pick('新节点暂停红石I/O','redstone','setOutput'),
+    pauseSide=number('红石输出方向',1,0,5),gate=previous.groups[group].gate}
+  end
+  C.validate(previous,true);C.write(C.path('config.dat'),previous)
+  print('扩容已保存；原有设备地址保留。先运行monitor检查，再run启动。');return
+ end
  local count=number('传送节点数量',previous and #previous.nodes or 1,1,16)
  local groupCount=number('观测阵列/设备组数量',1,1,count)
  local cfg={version=2,nodes={},groups={},cacheTarget=144000}
  cfg.mainInterface=pick('主网供液接口','me_interface','getFluidsInNetwork')
- cfg.recipeDirectory=ask('已转换配方记录目录','/home/bec/recipes')
+ cfg.recipeDirectory=ask('配方需求记录目录（新用户直接回车）','/home/bec_v2/recipes')
+ if ask('绑定样板处理工坊接口？新用户建议y，已有记录可选n','y')=='y'then
+  cfg.workshopInterface=pick('专用工坊ME接口（不要选择生产接口）','me_interface','getInterfacePattern')
+ end
  for i=1,groupCount do
   print('\n=== 设备组 '..i..' ===')
   local g={name=ask('设备组名称','观测阵列'..i),generators={},bulkTransposers={}}

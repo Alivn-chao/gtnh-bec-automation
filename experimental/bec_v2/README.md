@@ -12,13 +12,15 @@
 
 ## 安装与测试
 
-把本目录的 `main.lua`、`lib/` 和 `runtime/` 原样放到游戏电脑 `/home/bec_v2/`。无需覆盖 `/home/bec_auto.lua` 或稳定版UI。`paste/` 是逐个文件的紧凑粘贴版，每个文件不超过257行；创建相应子目录后用 `edit` 粘贴，Ctrl+S保存、Ctrl+W退出。仓库若为私有仓库，游戏内匿名wget无法直接下载，使用登录GitHub后的下载包或粘贴版。
+新用户请先看 [完整入门指南](https://github.com/Alivn-chao/gtnh-bec-automation/blob/main/docs/GETTING_STARTED.md)，包括公开下载、原液/物品/蜂群接线、地址对应表和样板登记；安装包也包含 `GETTING_STARTED.md`。互联网卡可用 `install.lua` 一次下载全部程序；手动安装时把 `main.lua`、`lib/` 和 `runtime/` 放到游戏电脑 `/home/bec_v2/`。`paste/` 的每个文件不超过257行，Ctrl+S保存、Ctrl+W退出。
 
 ```sh
 mkdir /home/bec_v2
 mkdir /home/bec_v2/lib
 mkdir /home/bec_v2/runtime
 lua /home/bec_v2/main.lua setup
+lua /home/bec_v2/main.lua patterns preview
+lua /home/bec_v2/main.lua patterns run
 lua /home/bec_v2/main.lua monitor
 ```
 
@@ -34,7 +36,9 @@ lua /home/bec_v2/main.lua run
 
 ## 范围与验证
 
-这是多节点独立试验版，黑色仪表盘显示各节点状态、并行、共享蜂群、纠缠器运行台数和凝聚物库存条。GPU有VRAM时使用缓冲区整帧提交。当前库存目标为参考线；后台固定目标预缓存、样板处理和可编辑缓存页仍由稳定版提供，V2暂不调用这些稳定版服务，避免两套控制器争抢机器。
+这是多节点独立试验版，黑色仪表盘显示各节点状态、并行、共享蜂群、纠缠器运行台数和凝聚物库存条。GPU有VRAM时使用缓冲区整帧提交。新增样板入口独立绑定工坊接口；当前库存目标为参考线，后台固定目标预缓存和可编辑缓存页尚未迁入V2。
+
+增加节点：先完成当前批次并Q退出，再运行 `lua /home/bec_v2/main.lua add-nodes`，填新的总节点数，只绑定新增节点。原有配置保留；有未完成旧批次时禁止改绑定。
 
 `tests/test_v2.py` 用Lua 5.2模拟验证配置边界、同配方组队、并发放行、流体需求汇总、组内暂停、多纠缠器、异常和恢复约束。模拟通过不代表游戏硬件验收。建议先在1台节点测试，再扩2台同配方节点，确认同时运行与耗料后扩到16台。
 

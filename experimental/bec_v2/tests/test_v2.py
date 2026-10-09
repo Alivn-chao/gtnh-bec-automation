@@ -102,7 +102,7 @@ def fixture():
     lua = LuaRuntime(unpack_returned_tuples=True)
     lua.execute(BASE)
     lua.execute(MOCK)
-    for path in [V2 / 'main.lua', *sorted((V2 / 'lib').glob('*.lua')), *sorted((V2 / 'runtime').glob('*.lua'))]:
+    for path in [V2 / 'main.lua', V2 / 'install.lua', *sorted((V2 / 'lib').glob('*.lua')), *sorted((V2 / 'runtime').glob('*.lua'))]:
         source = path.read_text(encoding='utf-8')
         lua.eval('function(s) assert(load(s)) end')(source)
         lua.globals().s.files['/home/bec_v2/' + path.relative_to(V2).as_posix()] = source
@@ -217,3 +217,38 @@ E=factory(cfg,C,Bridge,true);local UI=loadfile('/home/bec_v2/lib/ui.lua')()(cfg,
 UI.draw();assert(frames==1);UI.close();assert(freed and active==0)
 ''')
 print('V2 behavioral simulation passed; no hardware claim.')
+check('add-nodes preserves all old bindings', '''
+C.write(C.path('config.dat'),cfg);configure(3)
+local native=require;require=function(name)if name=='term'then return {clear=function()end}end;return native(name)end
+local answers={'3','','','node3','rs3-',''};local index=0
+io.write=function()end;io.read=function()index=index+1;return answers[index]end
+loadfile('/home/bec_v2/lib/setup.lua')()(C,true)
+local saved=C.load();assert(#saved.nodes==3 and saved.nodes[3].address=='node3')
+assert(saved.nodes[1].address=='node1'and saved.nodes[2].address=='node2')
+assert(saved.groups[1].generators[2]=='gen2'and saved.mainInterface=='main')
+''')
+check('add-nodes rejects unfinished production before changing configuration', '''
+C.write(C.path('config.dat'),cfg);C.write(C.path('state/group-1/cohort.dat'),{stage='interrupted'})
+local native=require;require=function(name)if name=='term'then return {clear=function()end}end;return native(name)end
+io.write=function()end;io.read=function()error('must not prompt')end
+assert(not pcall(loadfile('/home/bec_v2/lib/setup.lua')(),C,true));assert(#C.load().nodes==2)
+''')
+check('installer downloads all files before replacing existing programs', '''
+local fs=require('filesystem');local native=require;local downloads=0
+require=function(name)if name=='shell'then return {execute=function(command)
+ downloads=downloads+1;if downloads==3 then return false end
+ local dest=command:match(' ([^ ]+)$');s.files[dest]='return true';return true
+end}end;return native(name)end
+local previous=s.files['/home/bec_v2/main.lua']
+assert(not pcall(loadfile('/home/bec_v2/install.lua')))
+assert(s.files['/home/bec_v2/main.lua']==previous)
+''')
+check('pattern preview uses configured workshop and never mutates patterns', '''
+cfg.workshopInterface='my-workshop';C.write(C.path('config.dat'),cfg)
+local c=require('component');local invoke=c.invoke;local reads=0
+c.invoke=function(a,m,...)
+ if m=='getInterfacePattern'then assert(a=='my-workshop');reads=reads+1;return nil end
+ assert(m~='clearInterfacePatternInput'and m~='setInterfacePatternInput','preview mutation');return invoke(a,m,...)
+end
+loadfile('/home/bec_v2/lib/patterns.lua')()(C,'preview');assert(reads==9)
+''')

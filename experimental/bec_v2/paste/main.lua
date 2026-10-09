@@ -1,8 +1,12 @@
 local ROOT='/home/bec_v2'
 local function module(name)return assert(loadfile(ROOT..'/lib/'..name..'.lua'))()end
 local C=module('config')
-local mode=(...)or 'monitor'
+local mode,option=...
+mode=mode or 'monitor'
+if mode=='scan'then module('scan')();return end
 if mode=='setup'then module('setup')(C);return end
+if mode=='add-nodes'then module('setup')(C,true);return end
+if mode=='patterns'then module('patterns')(C,option or 'preview');return end
 assert(mode=='monitor'or mode=='run','用法：setup / monitor / run')
 local cfg=C.load();C.validate(cfg,true)
 local E=module('engine')(cfg,C,module('bridge'),mode=='monitor')
