@@ -1,7 +1,7 @@
 local fs=require('filesystem')
 local shell=require('shell')
 local ROOT='/home/bec_v2'
-local BASE='https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/bec-v2-preview-2026-10-09/experimental/bec_v2/'
+local BASE='https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/bec-v2-preview-2026-10-09.1/experimental/bec_v2/'
 local files={'main.lua','lib/config.lua','lib/bridge.lua','lib/engine.lua','lib/setup.lua','lib/ui.lua','lib/scan.lua','lib/patterns.lua',
  'runtime/controller.lua','runtime/nanites.lua','runtime/patterns.lua'}
 for _,dir in ipairs({ROOT,ROOT..'/lib',ROOT..'/runtime',ROOT..'/download'})do

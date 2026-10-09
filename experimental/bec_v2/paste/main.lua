@@ -7,10 +7,15 @@ if mode=='scan'then module('scan')();return end
 if mode=='setup'then module('setup')(C);return end
 if mode=='add-nodes'then module('setup')(C,true);return end
 if mode=='patterns'then module('patterns')(C,option or 'preview');return end
-assert(mode=='monitor'or mode=='run','用法：setup / monitor / run')
+assert(mode=='monitor'or mode=='run'or mode=='pause','用法：scan / setup / add-nodes / patterns / monitor / pause / run')
 local cfg=C.load();C.validate(cfg,true)
 local E=module('engine')(cfg,C,module('bridge'),mode=='monitor')
 local c=require('component');local event=require('event')
+if mode=='pause'then
+ local errors=E.shutdown();for _,reason in ipairs(errors)do print('需人工检查：'..reason)end
+ assert(#errors==0,'有暂停/停机回读失败，请核对设备')
+ print('已绑定节点输出15、纠缠器关闭；待纠缠器停止活动后再run，约束场保持开启。');return
+end
 if mode=='run'then
  for _,g in ipairs(cfg.groups)do for _,a in ipairs(g.generators)do
   assert(c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false,'先停止稳定版和所有纠缠器，再启动V2')

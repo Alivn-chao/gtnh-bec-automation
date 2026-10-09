@@ -252,3 +252,9 @@ c.invoke=function(a,m,...)
 end
 loadfile('/home/bec_v2/lib/patterns.lua')()(C,'preview');assert(reads==9)
 ''')
+check('pause command initializes bound redstone outputs without feeding', '''
+C.write(C.path('config.dat'),cfg);outputs['rs1-']=0;outputs['rs2-']=0;generators.gen1=true;generators.gen2=true
+loadfile('/home/bec_v2/main.lua')('pause')
+assert(outputs['rs1-']==15 and outputs['rs2-']==15);assert(not generators.gen1 and not generators.gen2)
+assert(releaseCount==0 and s.moves==0)
+''')
