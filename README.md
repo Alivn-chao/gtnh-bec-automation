@@ -8,17 +8,18 @@
 
 对外安装版本为 **V2独立测试版**，目标环境是 GTNH 2.9.0 Beta 3 + OpenComputers/OpenOS。程序安装在 `/home/bec_v2/`，与旧单节点版本分开。
 
-- [下载V2安装包](https://github.com/Alivn-chao/gtnh-bec-automation/releases/download/bec-v2-preview-2026-10-09/bec_v2_multinode.zip)
-- [浏览V2源码与配置示例](https://github.com/Alivn-chao/gtnh-bec-automation/tree/bec-v2-preview-2026-10-09/experimental/bec_v2)
+- [下载V2安装包](https://github.com/Alivn-chao/gtnh-bec-automation/releases/download/bec-v2-preview-2026-10-09.1/bec_v2_multinode.zip)
+- [浏览V2源码与配置示例](https://github.com/Alivn-chao/gtnh-bec-automation/tree/bec-v2-preview-2026-10-09.1/experimental/bec_v2)
 - [查看V2后续开发分支](https://github.com/Alivn-chao/gtnh-bec-automation/tree/codex/bec-v2-multinode/experimental/bec_v2)
 
 游戏里的OC电脑有互联网卡与wget时，可直接安装：
 
 ```sh
-wget -f https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/bec-v2-preview-2026-10-09/experimental/bec_v2/install.lua /home/bec_v2_install.lua
+wget -f https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/bec-v2-preview-2026-10-09.1/experimental/bec_v2/install.lua /home/bec_v2_install.lua
 lua /home/bec_v2_install.lua
 lua /home/bec_v2/main.lua scan
 lua /home/bec_v2/main.lua setup
+lua /home/bec_v2/main.lua pause
 ```
 
 新用户还需登记原加工样板副本、配置自己的AE/BEC网络，再启动生产。完整步骤见 [入门指南](docs/GETTING_STARTED.md#5-配置登记配方和启动)。不必逐个修改源码中的地址。
@@ -46,11 +47,12 @@ lua /home/bec_v2/main.lua setup
 lua /home/bec_v2/main.lua patterns preview
 lua /home/bec_v2/main.lua patterns run
 lua /home/bec_v2/main.lua monitor
+lua /home/bec_v2/main.lua pause
 lua /home/bec_v2/main.lua run
 lua /home/bec_v2/main.lua add-nodes
 ```
 
-`scan`与`monitor`只读；`setup`与`add-nodes`写配置；`patterns run`修改工坊样板并登记需求；`run`会控制机器、申请原液和搬料。生产界面Q暂停全部并退出。约束场保持开启，异常时保留日志与现场。
+`scan`与`monitor`只读；`setup`与`add-nodes`写配置；`patterns run`修改工坊样板并登记需求；`pause`初始化所有已绑定节点的暂停输出并关闭纠缠器；`run`控制机器、申请原液和搬料。生产界面Q暂停全部并退出。约束场保持开启，异常时保留日志与现场。
 
 ## 仓库目录
 

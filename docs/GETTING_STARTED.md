@@ -7,13 +7,13 @@
 推荐直接使用安装器。电脑需要能访问GitHub的互联网卡、OpenOS的wget和足够磁盘空间。在**游戏里的OC电脑终端**执行：
 
 ```sh
-wget -f https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/bec-v2-preview-2026-10-09/experimental/bec_v2/install.lua /home/bec_v2_install.lua
+wget -f https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/bec-v2-preview-2026-10-09.1/experimental/bec_v2/install.lua /home/bec_v2_install.lua
 lua /home/bec_v2_install.lua
 ```
 
 安装器只写 `/home/bec_v2/` 下的程序文件，不操作机器、转换样板或下单，不覆盖已有配置、配方和日志。升级前先退出V2服务。
 
-没有互联网卡时，下载 [V2安装包](https://github.com/Alivn-chao/gtnh-bec-automation/releases/download/bec-v2-preview-2026-10-09/bec_v2_multinode.zip)。将包内 `bec_v2` 目录按下表放入游戏电脑；也可以使用包内 `paste` 的同名紧凑文件，每个文件不超过257行，逐个 `edit` 粘贴，Ctrl+S保存、Ctrl+W退出。
+没有互联网卡时，下载 [V2安装包](https://github.com/Alivn-chao/gtnh-bec-automation/releases/download/bec-v2-preview-2026-10-09.1/bec_v2_multinode.zip)。将包内 `bec_v2` 目录按下表放入游戏电脑；也可以使用包内 `paste` 的同名紧凑文件，每个文件不超过257行，逐个 `edit` 粘贴，Ctrl+S保存、Ctrl+W退出。
 
 | 游戏电脑路径 | 必须下载的文件 | 用途 |
 | --- | --- | --- |
@@ -131,6 +131,14 @@ lua /home/bec_v2/main.lua setup
 
 新用户的配方目录直接回车采用 `/home/bec_v2/recipes`；已有用户可填现有 `/home/bec/recipes`。配置保存到 `/home/bec_v2/config.dat`，不改程序源码。
 
+登记样板前，退出旧生产服务，初始化暂停并等所有纠缠器停止活动：
+
+```sh
+lua /home/bec_v2/main.lua pause
+```
+
+这个命令将已绑定节点输出设为15并关闭纠缠器，保持约束场开启；不搬料或下单。
+
 首次生产前，将**原加工样板副本**放进工坊接口的9个样板槽。先预览，再转换登记：
 
 ```sh
@@ -146,9 +154,10 @@ lua /home/bec_v2/main.lua patterns run
 lua /home/bec_v2/main.lua monitor
 ```
 
-确认设备显示在线，退出任何旧控制服务，把节点暂停信号置15、纠缠器关闭并等它停止活动，保持约束场开启，然后：
+确认设备显示在线，退出任何旧控制服务，用下面的命令把已绑定节点的红石输出置15并关闭纠缠器。它会操作机器，只在打算暂停生产时运行。等纠缠器停止活动，保持约束场开启，再启动：
 
 ```sh
+lua /home/bec_v2/main.lua pause
 lua /home/bec_v2/main.lua run
 ```
 
@@ -173,9 +182,9 @@ lua /home/bec_v2/main.lua run
 lua /home/bec_v2/main.lua add-nodes
 ```
 
-填扩容后的**总数量**，例如原来2台、再加2台就填4。只为新增节点选名称、现有设备组、节点地址、红石I/O和方向，原有地址、纠缠器列表、原液与蜂群配置保留。保存后先 `monitor` 再 `run`。新节点须手动处于暂停信号15。上限16台。
+填扩容后的**总数量**，例如原来2台、再加2台就填4。只为新增节点选名称、现有设备组、节点地址、红石I/O和方向，原有地址、纠缠器列表、原液与蜂群配置保留。保存后先 `pause` 初始化包含新节点的暂停输出，再 `monitor` 检查，最后 `run`。上限16台。
 
-新增节点仍共享原BEC网络/蜂群时选原设备组；重新搭了一套独立BEC网络时使用 `setup` 全量配置新组。增加纠缠器也使用 `setup` 重配该组的纠缠器数量和列表；配置向导目前全量重绑，按 [配置示例](https://github.com/Alivn-chao/gtnh-bec-automation/blob/bec-v2-preview-2026-10-09/experimental/bec_v2/config.example.lua) 事先记好角色。
+新增节点仍共享原BEC网络/蜂群时选原设备组；重新搭了一套独立BEC网络时使用 `setup` 全量配置新组。增加纠缠器也使用 `setup` 重配该组的纠缠器数量和列表；配置向导目前全量重绑，按 [配置示例](https://github.com/Alivn-chao/gtnh-bec-automation/blob/bec-v2-preview-2026-10-09.1/experimental/bec_v2/config.example.lua) 事先记好角色。
 
 有未完成或异常中断批次时，配置向导会拒绝改绑定。先用原配置核对恢复，不能删除日志绕过检查，也不要给旧进度换到另一台机器。
 
