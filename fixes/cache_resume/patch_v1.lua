@@ -11,12 +11,21 @@ local function write(p, text)
   assert(read(p) == text, "文件回读不符: " .. p)
 end
 local patch = [=[
--- BEC_V1_CACHE_RESUME_V2
+-- BEC_V1_CACHE_RESUME_V3
 if old.stage == "cache-working" then
   assert(old.plan == nil, "缓存恢复：旧生产仍有备料计划，保留日志核对")
-  assert(type(old.expected) == "table" and next(old.expected) == nil
-    and type(old.secured) == "table" and next(old.secured) == nil,
-    "缓存恢复：旧生产还有原液记录，保留日志核对")
+  assert(old.pending == nil and old.configOwned == false
+    and type(old.requests) == "table" and type(old.transfers) == "table",
+    "缓存恢复：旧生产仍有未确认操作，保留日志核对")
+  for _, job in pairs(old.requests) do
+    assert(type(job) == "table" and job.state == "done", "缓存恢复：旧生产申请未确认完成")
+  end
+  for _, move in pairs(old.transfers) do
+    assert(type(move) == "table" and move.ok == true and type(move.amount) == "number"
+      and move.amount > 0 and move.amount == math.floor(move.amount)
+      and move.requested == move.amount, "缓存恢复：旧生产搬液未完整确认")
+  end
+  -- expected/secured describe the prior production round, not live inventory.
   local cf = assert(io.open("/home/bec_cache.journal", "r"), "缓存恢复：缺少缓存日志")
   local cache = ser.unserialize(cf:read("*a")); cf:close()
   assert(type(cache) == "table" and cache.version == 1 and cache.kind == "cache"
@@ -52,7 +61,7 @@ if old.stage == "cache-working" then
 end
 ]=]
 local original = read(path)
-if original:find("BEC_V1_CACHE_RESUME_V2", 1, true) then
+if original:find("BEC_V1_CACHE_RESUME_V3", 1, true) then
   print("补丁已安装，无需重复替换。"); return
 end
 assert(original:find('"cache-working"', 1, true)
@@ -60,13 +69,13 @@ assert(original:find('"cache-working"', 1, true)
   "不是支持的 V1 控制器，未修改文件")
 local pattern = 'local%s+stopped%s*=%s*old%.stage%s*==%s*"stopped"'
 local base = original
-local previous = original:find("-- BEC_V1_CACHE_RESUME_V1", 1, true)
+local previous = original:find("%-%- BEC_V1_CACHE_RESUME_V[12]")
 if previous then
-  assert(not original:find("-- BEC_V1_CACHE_RESUME_V1", previous + 1, true),
+  assert(not original:find("%-%- BEC_V1_CACHE_RESUME_V[12]", previous + 1),
     "旧补丁出现多次，未修改文件")
   local entry = assert(original:find(pattern, previous), "旧补丁恢复入口缺失")
   local existing = original:sub(previous, entry - 1)
-  assert(existing:find("旧生产状态不是空闲", 1, true)
+  assert(existing:find("旧生产还有原液记录", 1, true)
     and existing:find("后台缓存完成核对通过", 1, true)
     and existing:match("\nend%s*$"), "旧补丁内容不匹配，未修改文件")
   base = original:sub(1, previous - 1) .. original:sub(entry)
