@@ -105,8 +105,10 @@ class ReceiverTests(unittest.TestCase):
                 read=function() if first then first=false; return data else return nil end end,
                 close=function() closed=closed+1 end}
             end},
-            list=function() return iterator({{'node','bec_io_node'},{'rs','redstone'},{'tp','transposer'}}) end,
-            methods=function(a) return a=='node' and {getState=false} or (a=='rs' and {getOutput=false} or {getFluidInTank=false}) end,
+            list=function() return iterator({{'node','bec_io_node'},{'rs','redstone'},{'tp','transposer'},
+              {'3afdc4cf-04e3-4ae9-8be6-e753c23a249d','fluid_interface'}}) end,
+            methods=function(a) return a=='node' and {getState=false} or (a=='rs' and {getOutput=false}
+              or (a=='tp' and {getFluidInTank=false} or {getFluidsInNetwork=false,getCpus=false})) end,
             invoke=function(a,m,...) invokes[#invokes+1]=m; return m=='getState' and 'paused-immediate' or {} end
           } end
           package.preload.computer=function() return {address=function() return 'computer-1' end,
@@ -116,7 +118,7 @@ class ReceiverTests(unittest.TestCase):
             exists=function() return true end, isDirectory=function() return false end, size=function() return 4 end,
             concat=function(a,b) return a..'/'..b end,
             list=function(path) local names=path=='/home' and {{'bec_auto.lua'},{'bec_auto.journal.before-resume-30'},
-              {'bec_upload.lua'},{'personal.lua'}} or {{'recipe.dat'}}; return iterator(names) end
+              {'bec_cache.config'},{'bec_upload.lua'},{'personal.lua'}} or {{'recipe.dat'}}; return iterator(names) end
           } end
           io.open=function(path) return {read=function() return 'test' end, close=function() end} end
           os.sleep=function() end
@@ -126,12 +128,22 @@ class ReceiverTests(unittest.TestCase):
         lua.execute(setup)
         lua.execute(source)
         urls = [entry["url"] for entry in lua.globals().requests.values()]
-        self.assertEqual(len(urls), 7)  # start, runtime, 3 files, report, finish
+        self.assertEqual(len(urls), 8)  # start, runtime, 4 files, report, finish
         self.assertTrue(any("before-resume-30" in url for url in urls))
         self.assertFalse(any("personal.lua" in url or "bec_upload.lua" in url for url in urls))
         self.assertIn("getState", list(lua.globals().invokes.values()))  # false method flag still callable
+        self.assertIn("getFluidsInNetwork", list(lua.globals().invokes.values()))
+        self.assertIn("getCpus", list(lua.globals().invokes.values()))
+        self.assertTrue(any("bec_cache.config" in url for url in urls))
         self.assertTrue(all(method.startswith("get") for method in lua.globals().invokes.values()))
         self.assertEqual(lua.globals().closed, len(urls))
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.execute(setup)
+        lua.execute('assert(load(...))("status")', source)
+        urls = [entry["url"] for entry in lua.globals().requests.values()]
+        self.assertEqual(len(urls), 5)  # start, runtime, config, report, finish
+        self.assertTrue(any("bec_cache.config" in url for url in urls))
+        self.assertFalse(any("before-resume-30" in url or "recipe.dat" in url for url in urls))
         lua = LuaRuntime(unpack_returned_tuples=True)
         lua.execute(setup + "\nfail=true")
         with self.assertRaisesRegex(Exception, "HTTP 403"):

@@ -5,6 +5,8 @@ local computer = require("computer")
 local fs = require("filesystem")
 local serialization = require("serialization")
 local MAX_FILE, MAX_FILES = 512 * 1024, 298
+local mode = (...) or "full"
+assert(mode == "full" or mode == "status", "用法：lua /home/bec_upload.lua [full/status]")
 assert(ENDPOINT ~= "__BEC_ENDPOINT__", "请下载接收端提供的 bootstrap.lua")
 assert(component.isAvailable("internet"), "需要互联网卡")
 local card = component.internet
@@ -76,6 +78,7 @@ local function query(address, method, ...)
 end
 
 note("BEC 只读上传：" .. session)
+note("模式：" .. mode)
 line("Snapshot uptime=" .. tostring(computer.uptime()) .. " computer=" .. computer.address())
 line("Reads are sequential; running machines can change between readings.")
 local addresses = {}
@@ -88,7 +91,8 @@ for _, entry in ipairs(addresses) do
     for _, method in ipairs({"getName", "getState", "isWorkAllowed", "isMachineActive",
       "getParallelRecipesInProgress", "getRequiredCondensate", "getConsumedCondensate",
       "getSlowdowns", "getRequiredTier", "getProvidedTier", "getAvailableNanites",
-      "getStoredCondensate", "getFieldStrength", "getCondensateFilters", "getMinParallel", "getMaxParallel"}) do
+      "getStoredCondensate", "getFieldStrength", "getCondensateFilters", "getMinParallel", "getMaxParallel",
+      "getCoordinates", "getSensorInformation", "getWorkProgress", "getWorkMaxProgress", "getRecipeSteps"}) do
       query(a, method)
     end
   elseif kind == "transposer" then
@@ -101,10 +105,10 @@ for _, entry in ipairs(addresses) do
     end
   elseif kind == "redstone" then
     for side=0,5 do query(a, "getOutput", side) end
-  elseif kind == "me_interface" then
+  elseif kind == "me_interface" or kind == "fluid_interface" then
     query(a, "getFluidsInNetwork")
     local methods = component.methods(a)
-    if methods.getCpus ~= nil then
+    if a == "3afdc4cf-04e3-4ae9-8be6-e753c23a249d" and methods.getCpus ~= nil then
       local ok, cpus = pcall(component.invoke, a, "getCpus")
       if ok and type(cpus) == "table" then
         for i, cpu in ipairs(cpus) do
@@ -143,10 +147,12 @@ local function scan(directory, predicate)
 end
 scan("/home", function(name)
   if name:match("^bec_upload") then return false end
+  if mode == "status" then return name:match("^bec_[A-Za-z0-9_.%-]+%.config$") or name:match("^bec_[A-Za-z0-9_.%-]+%.cfg$") end
   return name:match("^bec_[A-Za-z0-9_.%-]+$") and
-    (name:find(".lua",1,true) or name:find(".journal",1,true) or name:match("%.cfg$") or name:match("%.dat$"))
+    (name:find(".lua",1,true) or name:find(".journal",1,true) or name:match("%.cfg$")
+      or name:match("%.config$") or name:match("%.dat$"))
 end)
-scan("/home/bec/recipes", function(name) return name:match("^[A-Za-z0-9_.%-]+%.dat$") end)
+if mode == "full" then scan("/home/bec/recipes", function(name) return name:match("^[A-Za-z0-9_.%-]+%.dat$") end) end
 table.sort(files)
 for _, path in ipairs(files) do
   if sent >= MAX_FILES then note("SKIP 文件数量上限：" .. path) else

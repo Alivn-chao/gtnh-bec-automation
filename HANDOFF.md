@@ -1,5 +1,7 @@
 # 在家里的 Codex 接着做
 
+2026-10-10 23:20 实际诊断接收成功：会话901265679f0a4dda8c4c48beaf2f0808在 D:/workmain/bec_diagnostics/snapshots/，259文件/22配方/1047452字节，所有SHA256正确，未遗漏超大读数。真实当前node idle,isWorkAllowed=false,parallel0,consumed cosmic=0/hypogen=1728,T4/10432；field12种各144000、门过滤celestialtungsten/hypogen/phononmedium。before-resume-26保留旧required cosmic13824/hypogen1728，remaining cosmic13824/hypogen0，gateIntent cosmic/hypogen，stage cache-working。实际控制器watcher有“蜂群需求变化→暂停换蜂→验证旧filters→pause(0)→才校验新req”顺序风险，且连续放行靠0.1秒轮询不能保证在下一短配方开始前换门；两次吞料根因仍未证实，现库存/门过滤不是故障时的读数。暂未修改生产控制器。发现诊断第一版遗漏fluid_interface的网络/CPU及.config，已修正上传器、补sensor/coords/progress只读采样，并增加status模式快速补读；新下载后status即可，无需重传全部备份。数据留本地，不提交实际游戏文件。
+
 2026-10-10 互联网卡诊断准备：新增 diagnostics/receiver.py、upload.lua、Windows 启停脚本及说明，6项本地测试（含Lua5.2只读模拟）通过，Cloudflare临时公网下载及POST上传/保存/完成确认通过。接收端和隧道后台运行，私有配置、最新下载地址及PID记录位于 D:/workmain/bec_diagnostics/runtime/；诊断快照在同级 snapshots/。此路径在仓库外，不提交令牌、实际游戏文件或上传数据。只收集V1真实Lua/日志所有备份/登记配方与组件读数，不远程启停或搬料。尚未收到游戏OC上传；现有self-test会话明确标记无游戏数据，不能当实机验收。下一步用户运行提供的wget和lua后，读取最新真实会话，优先检查实际bec_auto.lua及before-resume/stopped日志，再定位吞料原因。约束场保持开启，保留订单和日志。
 
 用户提醒网络超过3种未请求凝聚物会立即失败。已加放行前同场field库存多余种类检查，>3保持暂停并显示类型，1..3日志提示减速。这只是保守防护，尚未实现实际BEC网络过滤/自动切过滤；需用户提供实际过滤部件界面/OC接入，不能把原液接口过滤当BEC过滤，也不能声称凝聚物多类型预缓存可无损全配方生产。参考节点getSlowdowns和BECFactoryNetwork路由判断，但已取快照的pipe/hatch未见过滤OC方法；不要猜API。当前单field检查不能覆盖别的约束场，更不能验证已配置路由过滤。下一步确认物理过滤机制。
