@@ -1,5 +1,7 @@
 # 在家里的 Codex 接着做
 
+2026-10-11 用户执行安装器wget时raw.githubusercontent.com连接超时，尚未执行安装。已在现有诊断接收端加入两个固定公开脚本入口/sidefix/install.lua与/sidefix/bec_nanites.lua，模块固定SHA256为a2c8c9a内容，安装器内部下载URL替换为同一临时公网地址，保持原暂停/校验/备份流程。7接收端测试通过，实际临时HTTPS下载安装器3583字节、模块11148字节均200且校验通过。仅重启自己启动的receiver，原cloudflared通道保留，runtime/state.json更新PID；没有触碰游戏或执行安装。用户已接管游戏操作，下一步用临时地址下载并运行安装器后看输出。
+
 2026-10-10 用户授权离开期间操作游戏。已根据真实上传的转运器读数修正V1蜂群模块：北2备用ME接口、南3收容ME接口、西4是gt.blockmachines/3槽蜂群仓；检查、计数、搬运和预览统一2/3，30720上限不变。模块及16模拟场景已提交a2c8c9a到main。新增install_sidefix.lua固定该版本、校验下载、只读预览接口/库存、核对暂停状态后备份替换；9安装模拟场景通过，含错误下载/接口、备份失败、改名失败回退、重复安装。未调用蜂群ensure或生产恢复，未改journal。通过computer-use的sky能操作游戏菜单，但场景右键/移动输入未生效，退出原OC界面后无法重新打开屏幕，因此游戏里的模块尚未安装，不能声称硬件验收。临时F8交互绑定已恢复鼠标按键2，F11已恢复窗口模式，停留原地面对OC屏幕；需要重新打开OC命令行才能安装。当前实时错误仍是西面应为收容接口，节点暂停3/64且需求T1，UI缓存目标显示111000，与23:31上传144000不同，不能用旧配置覆盖。吞料根因、实际接口配置写入API及放行前新过滤校验仍待核对。
 
 2026-10-10 23:31 快速状态上传完成：会话fc98f0999a6542468dc41345b2575def，3文件/175142字节，含bec_cache.config version1/target144000，runtime无截断。子网流体为空，主网molten.cosmicneutronium146464096，field cosmic144000。节点isWorkAllowed=false、idle、progress0/max0，仍保留hypogen1728/cosmic0消耗。field/generator/diode传感器都显示BEC Network20；同网络号不证明装配侧能穿过单向闸门取得所有流体，装配机尚无OC可见地址。门现过滤celestialtungsten/hypogen/phononmedium为事后状态，不能当故障时证据。主网22CPU中2个busy，上传器原先用type(getter)==function判断跳过了Java可调用对象的任务详情；已改直接pcall包装调用，只对busyCPU读取，增加可调用table模拟测试，后续重新下载版本会补详情。没有启停/搬料，也没有修改生产控制器。当前任务只读通道已实机验证，吞料根因仍未确认。

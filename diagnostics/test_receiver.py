@@ -1,4 +1,5 @@
 import json
+import hashlib
 import sys
 import tempfile
 import threading
@@ -52,6 +53,19 @@ class ReceiverTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn('local ENDPOINT = "https://example.test/' + self.token + '"', script)
         self.assertIn('assert(ENDPOINT ~= "__BEC_ENDPOINT__"', script)
+
+    def test_fixed_public_sidefix_mirror(self):
+        status, script = self.request('/sidefix/install.lua')
+        self.assertEqual(status, 200)
+        self.assertIn("local url='https://example.test/sidefix/bec_nanites.lua'", script)
+        self.assertNotIn(self.token, script)
+        status, module = self.request('/sidefix/bec_nanites.lua')
+        self.assertEqual(status, 200)
+        self.assertEqual(len(module.encode()), 11148)
+        self.assertEqual(hashlib.sha256(module.encode()).hexdigest(),
+                         '55686269c941015d2c39f394d20ff57fb5a78dca265ff5f015f381ffb389abec')
+        for path in ('/sidefix/runtime.txt', '/sidefix/../receiver.py', '/sidefix/install.lua?file=runtime.txt'):
+            self.assertEqual(self.request(path)[0], 404)
 
     def test_snapshot_receipt_hash_and_idempotent_upload(self):
         session = self.start()
