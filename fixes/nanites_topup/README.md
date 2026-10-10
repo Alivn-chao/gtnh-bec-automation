@@ -11,7 +11,18 @@
 - 新加蜂群在下次暂停准备配方时补入；不在合成中搬运。满仓不搬，多余的保留在备用子网。
 - 持久化搬运意图、暂停校验、需求等级校验、节点数量回读及两网总量核对保留。未确认的搬运不重试。
 
-退出生产UI后执行（备份名已存在时更换名称）：
+推荐在退出生产UI、保持节点暂停后运行带校验的安装器：
+
+```sh
+wget -f https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/main/fixes/nanites_topup/install_sidefix.lua /home/bec_install_sidefix.lua
+lua /home/bec_install_sidefix.lua
+```
+
+安装器固定下载 `a2c8c9a` 的模块，校验长度、内容校验值及 Lua 语法，只读预览实际北2/南3接口与库存。全部通过才自动生成不覆盖旧文件的 `bec_nanites.lua.before_sidefix-N` 备份，写入并回读新文件，最后替换模块；替换失败尝试恢复旧文件。不会调用 `ensure`、搬蜂群、改配置、启动生产或写 journal。重复运行已安装的同版模块不新增备份。若 OC 在两次改名之间断电，先用打印的备份恢复 `/home/bec_nanites.lua`。9 个安装模拟场景通过，尚待游戏验收。
+
+确认安装成功后，另行运行 `lua /home/bec_ui.lua resume`。凝聚物不足故障与门过滤放行时序仍需独立核对，方向修正不代表吞料问题已解决。
+
+手动安装方式（备份名已存在时更换名称）：
 
 ```sh
 cp /home/bec_nanites.lua /home/bec_nanites.before_topup.lua
