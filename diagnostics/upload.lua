@@ -6,7 +6,9 @@ local fs = require("filesystem")
 local serialization = require("serialization")
 local MAX_FILE, MAX_FILES = 512 * 1024, 298
 local mode = (...) or "full"
-assert(mode == "full" or mode == "status", "用法：lua /home/bec_upload.lua [full/status]")
+assert(mode == "full" or mode == "status" or mode == "ioport", "用法：lua /home/bec_upload.lua [full/status/ioport]")
+-- User's new cell shuttle: down=cell chest, north=recovery, south=loading.
+local CELL_TRANSPOSER = "13070035-3a3f-4468-b896-1c084288fdc9"
 assert(ENDPOINT ~= "__BEC_ENDPOINT__", "请下载接收端提供的 bootstrap.lua")
 assert(component.isAvailable("internet"), "需要互联网卡")
 local card = component.internet
@@ -75,6 +77,7 @@ local function query(address, method, ...)
   local values = {pcall(component.invoke, address, method, ...)}
   local ok = table.remove(values, 1)
   line(address .. " " .. method .. " " .. (ok and safe(values) or ("ERROR " .. tostring(values[1]))))
+  return ok, values
 end
 
 note("BEC 只读上传：" .. session)
@@ -96,19 +99,37 @@ for _, entry in ipairs(addresses) do
       query(a, method)
     end
   elseif kind == "transposer" then
-    for side=0,5 do
-      line("SIDE " .. tostring(side))
-      query(a, "getFluidInTank", side)
-      query(a, "getTankCount", side)
-      query(a, "getInventoryName", side)
-      query(a, "getInventorySize", side)
+    if mode == "ioport" then
+      if a == CELL_TRANSPOSER then
+        for _, side in ipairs({0,2,3}) do
+          line("CELL SIDE " .. tostring(side))
+          query(a, "getInventoryName", side)
+          local ok, values = query(a, "getInventorySize", side)
+          local count = ok and tonumber(values[1])
+          if count and count > 0 and count % 1 == 0 then
+            if count > 128 then line("Inventory slot read limited to 128 of " .. tostring(count)) end
+            for slot=1,math.min(count,128) do
+              line("CELL SIDE " .. tostring(side) .. " SLOT " .. tostring(slot))
+              query(a, "getStackInSlot", side, slot)
+            end
+          end
+        end
+      end
+    else
+      for side=0,5 do
+        line("SIDE " .. tostring(side))
+        query(a, "getFluidInTank", side)
+        query(a, "getTankCount", side)
+        query(a, "getInventoryName", side)
+        query(a, "getInventorySize", side)
+      end
     end
   elseif kind == "redstone" then
     for side=0,5 do query(a, "getOutput", side) end
   elseif kind == "me_interface" or kind == "fluid_interface" then
-    query(a, "getFluidsInNetwork")
+    if mode ~= "ioport" then query(a, "getFluidsInNetwork") end
     local methods = component.methods(a)
-    if a == "3afdc4cf-04e3-4ae9-8be6-e753c23a249d" and methods.getCpus ~= nil then
+    if mode ~= "ioport" and a == "3afdc4cf-04e3-4ae9-8be6-e753c23a249d" and methods.getCpus ~= nil then
       local ok, cpus = pcall(component.invoke, a, "getCpus")
       if ok and type(cpus) == "table" then
         for i, cpu in ipairs(cpus) do
@@ -129,6 +150,12 @@ for _, entry in ipairs(addresses) do
       query(a, "getItemsInNetwork")
     end
   end
+  if mode == "ioport" then
+    -- Optional cell-workbench readers; availability depends on the game build.
+    for _, method in ipairs({"hasCell", "getCell", "getCellType", "getPartition", "getRestriction"}) do
+      query(a, method)
+    end
+  end
   os.sleep(0)
 end
 line("Snapshot end uptime=" .. tostring(computer.uptime()))
@@ -146,6 +173,11 @@ local function scan(directory, predicate)
 end
 scan("/home", function(name)
   if name:match("^bec_upload") then return false end
+  if mode == "ioport" then
+    return name == "bec_nanites.lua" or name:match("^bec_nanites%.journal[%w_.%-]*$")
+      or name:match("^bec_nanites[A-Za-z0-9_.%-]*%.config$")
+      or name:match("^bec_nanites[A-Za-z0-9_.%-]*%.cfg$")
+  end
   if mode == "status" then return name:match("^bec_[A-Za-z0-9_.%-]+%.config$") or name:match("^bec_[A-Za-z0-9_.%-]+%.cfg$") end
   return name:match("^bec_[A-Za-z0-9_.%-]+$") and
     (name:find(".lua",1,true) or name:find(".journal",1,true) or name:match("%.cfg$")

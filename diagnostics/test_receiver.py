@@ -168,6 +168,58 @@ class ReceiverTests(unittest.TestCase):
         self.assertTrue(any("bec_cache.config" in url for url in urls))
         self.assertFalse(any("before-resume-30" in url or "recipe.dat" in url for url in urls))
         lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.execute(setup)
+        lua.execute(r'''
+          local c = require('component')
+          local cellTp = '13070035-3a3f-4468-b896-1c084288fdc9'
+          c.list=function()
+            local entries={{cellTp,'transposer'},{'old-tp','transposer'},
+              {'south-rs','redstone'},{'north-rs','redstone'},{'cw','me_cellworkbench'},
+              {'3afdc4cf-04e3-4ae9-8be6-e753c23a249d','fluid_interface'}}
+            local i=0;return function() i=i+1;if entries[i] then return table.unpack(entries[i]) end end
+          end
+          c.methods=function(a)
+            if a==cellTp or a=='old-tp' then
+              return {getInventoryName=false,getInventorySize=false,getStackInSlot=false,
+                getFluidInTank=false,transferItem=false}
+            elseif a=='cw' then return {hasCell=false,getRestriction=false,setRestriction=false}
+            elseif a:match('rs$') then return {getOutput=false,setOutput=false}
+            else return {getFluidsInNetwork=false,getCpus=false,getItemsInNetwork=false} end
+          end
+          slotReads, rsReads = 0, 0
+          c.invoke=function(a,m,side,slot)
+            invokes[#invokes+1]=m
+            if m=='getInventoryName' then assert(a==cellTp);return 'test' end
+            if m=='getInventorySize' then assert(a==cellTp);return side==0 and 3 or 12 end
+            if m=='getStackInSlot' then
+              assert(a==cellTp and (side==0 or side==2 or side==3))
+              assert(slot>=1 and slot<=(side==0 and 3 or 12))
+              slotReads=slotReads+1;return slot==1 and {name='digital_cell',size=1,hasTag=true} or nil
+            end
+            if m=='getOutput' then rsReads=rsReads+1;return 0 end
+            if m=='hasCell' then return true end
+            if m=='getRestriction' then return 1,30720 end
+            error('Unexpected call: '..m)
+          end
+          require('filesystem').list=function(path)
+            assert(path=='/home')
+            local names={'bec_nanites.lua','bec_nanites.journal','bec_nanites.journal.previous',
+              'bec_nanites_io.cfg','bec_auto.lua','bec_auto.journal','bec_upload.lua'}
+            local i=0;return function() i=i+1;return names[i] end
+          end
+        ''')
+        lua.execute('assert(load(...))("ioport")', source)
+        urls = [entry["url"] for entry in lua.globals().requests.values()]
+        self.assertEqual(lua.globals().slotReads, 27)
+        self.assertEqual(lua.globals().rsReads, 12)
+        self.assertEqual(len(urls), 8)  # start, runtime, 4 bee files, report, finish
+        self.assertTrue(any("bec_nanites.journal.previous" in url for url in urls))
+        self.assertFalse(any("bec_auto" in url or "recipe.dat" in url for url in urls))
+        self.assertNotIn("getCpus", list(lua.globals().invokes.values()))
+        self.assertNotIn("getFluidsInNetwork", list(lua.globals().invokes.values()))
+        self.assertTrue(all(method.startswith("get") or method == "hasCell"
+                            for method in lua.globals().invokes.values()))
+        lua = LuaRuntime(unpack_returned_tuples=True)
         lua.execute(setup + "\nfail=true")
         with self.assertRaisesRegex(Exception, "HTTP 403"):
             lua.execute(source)
