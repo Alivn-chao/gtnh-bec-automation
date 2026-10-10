@@ -37,7 +37,11 @@ cases = [
     ('actual cache shortage blocked', 'stock.entangled_hypogen=143000', False),
     ('generator running blocked', 'active=true', False),
     ('unpaused node blocked', 'output=0', False),
-    ('new order blocked for manual review', "state='paused-immediate'", False),
+    ('new paused order recovers', "state='paused-immediate';old.lastState='paused-immediate'", True),
+    ('historical state absent but real node paused recovers', "state='paused-immediate';old.lastState=nil", True),
+    ('bee mismatch paused order recovers for normal switching', "state='nanite-tier-too-low'", True),
+    ('actively crafting node blocked', "state='crafting'", False),
+    ('unconfirmed old plan blocked', 'old.plan={}', False),
     ('old production raw records blocked', "old.secured={raw=144}", False),
     ('missing cache record blocked', 'cache=nil', False),
 ]
@@ -84,7 +88,7 @@ lua.globals().files['/home/bec_auto.lua.cache-resume-new'] = None
 lua.globals().failInstall = False
 install()
 patched = lua.globals().files[path]
-assert patched.count('BEC_V1_CACHE_RESUME_V1') == 1
+assert patched.count('BEC_V1_CACHE_RESUME_V2') == 1
 assert lua.globals().files[path + '.before-cache-resume-1'] == controller
 lua.execute('assert(load(...))', patched)
 writes = lua.globals().writes
@@ -93,3 +97,21 @@ assert lua.globals().writes == writes
 assert lua.globals().files['/home/bec_auto.journal'] == 'preserve production journal'
 assert lua.globals().files['/home/bec_cache.journal'] == 'preserve cache journal'
 print('Installer syntax, backup, rollback, repeat installation and unchanged journals: PASS')
+
+# Upgrade the previously installed V1 recovery block, without touching other code.
+legacy = block.replace('BEC_V1_CACHE_RESUME_V2', 'BEC_V1_CACHE_RESUME_V1')
+legacy = legacy.replace('assert(old.plan == nil, "缓存恢复：旧生产仍有备料计划，保留日志核对")',
+    'assert(old.lastState == "idle" and old.plan == nil, "缓存恢复：旧生产状态不是空闲，保留日志核对")')
+anchor = 'local stopped=old.stage=="stopped"'
+legacy_controller = controller.replace(anchor, legacy + '\n' + anchor)
+lua.globals().files[path] = legacy_controller
+install()
+upgraded = lua.globals().files[path]
+assert 'BEC_V1_CACHE_RESUME_V1' not in upgraded
+assert upgraded.count('BEC_V1_CACHE_RESUME_V2') == 1
+assert '旧生产状态不是空闲' not in upgraded
+assert lua.globals().files[path + '.before-cache-resume-2'] == legacy_controller
+assert lua.globals().files['/home/bec_auto.journal'] == 'preserve production journal'
+assert lua.globals().files['/home/bec_cache.journal'] == 'preserve cache journal'
+lua.execute('assert(load(...))', upgraded)
+print('Installed V1 recovery block upgrades in place and preserves journals: PASS')

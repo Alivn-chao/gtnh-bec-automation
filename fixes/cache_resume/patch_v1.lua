@@ -11,10 +11,9 @@ local function write(p, text)
   assert(read(p) == text, "文件回读不符: " .. p)
 end
 local patch = [=[
--- BEC_V1_CACHE_RESUME_V1
+-- BEC_V1_CACHE_RESUME_V2
 if old.stage == "cache-working" then
-  assert(old.lastState == "idle" and old.plan == nil,
-    "缓存恢复：旧生产状态不是空闲，保留日志核对")
+  assert(old.plan == nil, "缓存恢复：旧生产仍有备料计划，保留日志核对")
   assert(type(old.expected) == "table" and next(old.expected) == nil
     and type(old.secured) == "table" and next(old.secured) == nil,
     "缓存恢复：旧生产还有原液记录，保留日志核对")
@@ -34,9 +33,11 @@ if old.stage == "cache-working" then
       and move.amount > 0 and move.amount == math.floor(move.amount)
       and move.requested == move.amount, "缓存恢复：搬液未完整确认")
   end
-  assert(call(NODE, "getState") == "idle" and call(RS, "getOutput", sides.top) == 15
+  local safeStates = {idle=true, ["paused-immediate"]=true,
+    ["nanite-tier-too-low"]=true, ["assembler-offline"]=true, unpowered=true}
+  assert(safeStates[call(NODE, "getState")] and call(RS, "getOutput", sides.top) == 15
     and call(GEN, "isWorkAllowed") == false and call(GEN, "isMachineActive") == false,
-    "缓存恢复：节点须空闲暂停且纠缠装置已停机")
+    "缓存恢复：节点须暂停且纠缠装置已停机")
   assert(next(network(SUB)) == nil, "缓存恢复：子网仍有原液，保留日志核对")
   assert(type(cache.target) == "table" and next(cache.target) ~= nil,
     "缓存恢复：缺少本轮目标")
@@ -51,15 +52,27 @@ if old.stage == "cache-working" then
 end
 ]=]
 local original = read(path)
-if original:find("BEC_V1_CACHE_RESUME_V1", 1, true) then
+if original:find("BEC_V1_CACHE_RESUME_V2", 1, true) then
   print("补丁已安装，无需重复替换。"); return
 end
 assert(original:find('"cache-working"', 1, true)
   and original:find("该阶段存在未确认操作，不能自动恢复", 1, true),
   "不是支持的 V1 控制器，未修改文件")
 local pattern = 'local%s+stopped%s*=%s*old%.stage%s*==%s*"stopped"'
+local base = original
+local previous = original:find("-- BEC_V1_CACHE_RESUME_V1", 1, true)
+if previous then
+  assert(not original:find("-- BEC_V1_CACHE_RESUME_V1", previous + 1, true),
+    "旧补丁出现多次，未修改文件")
+  local entry = assert(original:find(pattern, previous), "旧补丁恢复入口缺失")
+  local existing = original:sub(previous, entry - 1)
+  assert(existing:find("旧生产状态不是空闲", 1, true)
+    and existing:find("后台缓存完成核对通过", 1, true)
+    and existing:match("\nend%s*$"), "旧补丁内容不匹配，未修改文件")
+  base = original:sub(1, previous - 1) .. original:sub(entry)
+end
 local count = 0
-local modified = original:gsub(pattern, function(anchor)
+local modified = base:gsub(pattern, function(anchor)
   count = count + 1; return patch .. "\n" .. anchor
 end)
 assert(count == 1, "恢复入口不唯一，未修改文件")
