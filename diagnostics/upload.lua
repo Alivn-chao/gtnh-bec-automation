@@ -174,7 +174,8 @@ end
 scan("/home", function(name)
   if name:match("^bec_upload") then return false end
   if mode == "ioport" then
-    return name == "bec_nanites.lua" or name:match("^bec_nanites%.journal[%w_.%-]*$")
+    return name == "bec_nanites.lua" or name == "bec_nanites_io_test.lua"
+      or name:match("^bec_nanites[A-Za-z0-9_%-]*%.journal[%w_.%-]*$")
       or name:match("^bec_nanites[A-Za-z0-9_.%-]*%.config$")
       or name:match("^bec_nanites[A-Za-z0-9_.%-]*%.cfg$")
   end

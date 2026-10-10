@@ -71,6 +71,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             return self.reply(200, "BEC diagnostic receiver ready\n")
+        if self.path == "/nanites-io/test.lua":
+            # One fixed public test script, never a caller-selected file.
+            try:
+                path = Path(__file__).resolve().parent.parent / "fixes" / "nanites_io" / "bec_nanites_io_test.lua"
+                return self.reply(200, path.read_text(encoding="utf-8"))
+            except OSError:
+                return self.reply(503, "Nanite IO test is unavailable\n")
         # Only these two public repository scripts are mirrored. No uploaded
         # snapshot, arbitrary local file, or remote command is exposed here.
         if self.path in ("/sidefix/install.lua", "/sidefix/bec_nanites.lua"):

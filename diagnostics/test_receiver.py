@@ -67,6 +67,16 @@ class ReceiverTests(unittest.TestCase):
         for path in ('/sidefix/runtime.txt', '/sidefix/../receiver.py', '/sidefix/install.lua?file=runtime.txt'):
             self.assertEqual(self.request(path)[0], 404)
 
+    def test_fixed_public_io_test_mirror(self):
+        status, script = self.request('/nanites-io/test.lua')
+        self.assertEqual(status, 200)
+        self.assertEqual(script, (Path(__file__).parent.parent / 'fixes' / 'nanites_io' /
+                                 'bec_nanites_io_test.lua').read_text(encoding='utf-8'))
+        self.assertNotIn(self.token, script)
+        for path in ('/nanites-io/runtime.txt', '/nanites-io/test.lua?file=runtime.txt',
+                     '/nanites-io/../receiver.py'):
+            self.assertEqual(self.request(path)[0], 404)
+
     def test_snapshot_receipt_hash_and_idempotent_upload(self):
         session = self.start()
         path = "/" + self.token + "/upload/" + session + "?name=" + quote("home/bec_auto.journal.before-resume-30")
@@ -204,7 +214,8 @@ class ReceiverTests(unittest.TestCase):
           require('filesystem').list=function(path)
             assert(path=='/home')
             local names={'bec_nanites.lua','bec_nanites.journal','bec_nanites.journal.previous',
-              'bec_nanites_io.cfg','bec_auto.lua','bec_auto.journal','bec_upload.lua'}
+              'bec_nanites_io.cfg','bec_nanites_io_test.lua','bec_nanites_io_test.journal',
+              'bec_auto.lua','bec_auto.journal','bec_upload.lua'}
             local i=0;return function() i=i+1;return names[i] end
           end
         ''')
@@ -212,8 +223,9 @@ class ReceiverTests(unittest.TestCase):
         urls = [entry["url"] for entry in lua.globals().requests.values()]
         self.assertEqual(lua.globals().slotReads, 27)
         self.assertEqual(lua.globals().rsReads, 12)
-        self.assertEqual(len(urls), 8)  # start, runtime, 4 bee files, report, finish
+        self.assertEqual(len(urls), 10)  # start, runtime, 6 bee files, report, finish
         self.assertTrue(any("bec_nanites.journal.previous" in url for url in urls))
+        self.assertTrue(any("bec_nanites_io_test.journal" in url for url in urls))
         self.assertFalse(any("bec_auto" in url or "recipe.dat" in url for url in urls))
         self.assertNotIn("getCpus", list(lua.globals().invokes.values()))
         self.assertNotIn("getFluidsInNetwork", list(lua.globals().invokes.values()))
