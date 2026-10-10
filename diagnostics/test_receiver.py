@@ -77,6 +77,17 @@ class ReceiverTests(unittest.TestCase):
                      '/nanites-io/../receiver.py'):
             self.assertEqual(self.request(path)[0], 404)
 
+    def test_fixed_public_io_module_and_installer(self):
+        status, module = self.request('/nanites-io/bec_nanites.lua')
+        self.assertEqual(status, 200)
+        self.assertEqual(hashlib.sha256(module.encode()).hexdigest(),
+                         'ad53c28bb3a4bd6b6eff7a784c9a7d0950d67e6b11d56ddf4168ef9c200eb942')
+        status, installer = self.request('/nanites-io/install.lua')
+        self.assertEqual(status, 200)
+        self.assertIn("local url='https://example.test/nanites-io/bec_nanites.lua'", installer)
+        self.assertNotIn(self.token, installer)
+        self.assertEqual(self.request('/nanites-io/install.lua?file=runtime.txt')[0], 404)
+
     def test_snapshot_receipt_hash_and_idempotent_upload(self):
         session = self.start()
         path = "/" + self.token + "/upload/" + session + "?name=" + quote("home/bec_auto.journal.before-resume-30")

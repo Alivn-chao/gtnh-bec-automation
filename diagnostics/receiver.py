@@ -78,6 +78,24 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, path.read_text(encoding="utf-8"))
             except OSError:
                 return self.reply(503, "Nanite IO test is unavailable\n")
+        if self.path in ("/nanites-io/install.lua", "/nanites-io/bec_nanites.lua"):
+            try:
+                folder = Path(__file__).resolve().parent.parent / "fixes" / "nanites_io"
+                module = (folder / "bec_nanites.lua").read_text(encoding="utf-8")
+                if hashlib.sha256(module.encode()).hexdigest() != "ad53c28bb3a4bd6b6eff7a784c9a7d0950d67e6b11d56ddf4168ef9c200eb942":
+                    raise ValueError("Module checksum changed")
+                if self.path == "/nanites-io/bec_nanites.lua":
+                    return self.reply(200, module)
+                public_url = self.server.public_url_file.read_text(encoding="utf-8").strip()
+                if not re.fullmatch(r"https?://[A-Za-z0-9.:-]+", public_url):
+                    raise ValueError("Invalid endpoint")
+                script = (folder / "install.lua").read_text(encoding="utf-8")
+                github_url = "https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/main/fixes/nanites_io/bec_nanites.lua"
+                if script.count(github_url) != 1:
+                    raise ValueError("Installer changed")
+                return self.reply(200, script.replace(github_url, public_url + "/nanites-io/bec_nanites.lua", 1))
+            except (OSError, ValueError):
+                return self.reply(503, "Nanite IO module is unavailable\n")
         # Only these two public repository scripts are mirrored. No uploaded
         # snapshot, arbitrary local file, or remote command is exposed here.
         if self.path in ("/sidefix/install.lua", "/sidefix/bec_nanites.lua"):
