@@ -5,8 +5,8 @@ local computer = require("computer")
 local fs = require("filesystem")
 local serialization = require("serialization")
 local MAX_FILE, MAX_FILES = 512 * 1024, 298
-local mode = (...) or "full"
-assert(mode == "full" or mode == "status" or mode == "ioport", "用法：lua /home/bec_upload.lua [full/status/ioport]")
+local mode = (...) or "recent"
+assert(mode == "recent" or mode == "full" or mode == "status" or mode == "ioport", "用法：lua /home/bec_upload.lua [recent/full/status/ioport]")
 -- User's new cell shuttle: down=cell chest, north=recovery, south=loading.
 local CELL_TRANSPOSER = "13070035-3a3f-4468-b896-1c084288fdc9"
 assert(ENDPOINT ~= "__BEC_ENDPOINT__", "请下载接收端提供的 bootstrap.lua")
@@ -164,6 +164,28 @@ upload("runtime.txt", table.concat(lines, "\n") .. "\n")
 note("已上传组件和状态读数")
 
 local files = {}
+-- Current journals + previous + the two newest numeric backups per journal.
+local recentBackups = {}
+if mode == "recent" and fs.exists("/home") then
+ local groups={}
+ for name in fs.list("/home") do
+  local journal,suffix,index=name:match("^(bec_[A-Za-z0-9_%-]+%.journal)%.([A-Za-z0-9_%-]+)%-(%d+)$")
+  if journal then
+   groups[journal]=groups[journal] or {}
+   local ok,time=pcall(fs.lastModified,fs.concat("/home",name))
+   groups[journal][#groups[journal]+1]={name=name,index=tonumber(index),
+    time=ok and tonumber(time) or 0,suffix=suffix}
+  end
+ end
+ for _,group in pairs(groups) do
+  table.sort(group,function(a,b)
+   if a.time~=b.time then return a.time>b.time end
+   if a.index~=b.index then return a.index>b.index end
+   return a.name>b.name
+  end)
+  for i=1,math.min(2,#group) do recentBackups[group[i].name]=true end
+ end
+end
 local function scan(directory, predicate)
   if not fs.exists(directory) then return end
   for name in fs.list(directory) do
@@ -173,6 +195,13 @@ local function scan(directory, predicate)
 end
 scan("/home", function(name)
   if name:match("^bec_upload") then return false end
+  if mode == "recent" then
+   return name:match("^bec_[A-Za-z0-9_%-]+%.lua$")
+    or name:match("^bec_[A-Za-z0-9_%-]+%.journal$")
+    or name:match("^bec_[A-Za-z0-9_%-]+%.journal%.previous$")
+    or recentBackups[name] or name:match("^bec_[A-Za-z0-9_%-]+%.config$")
+    or name:match("^bec_[A-Za-z0-9_%-]+%.cfg$")
+  end
   if mode == "ioport" then
     return name == "bec_nanites.lua" or name == "bec_nanites_io_test.lua"
       or name:match("^bec_nanites[A-Za-z0-9_%-]*%.journal[%w_.%-]*$")

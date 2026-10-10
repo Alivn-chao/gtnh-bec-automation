@@ -13,6 +13,12 @@ from receiver import Receiver, allowed_name
 
 
 class ReceiverTests(unittest.TestCase):
+    def test_v1_reset_patch_public_fixed_route(self):
+        code, body = self.request('/process-reset/patch.lua')
+        self.assertEqual(code, 200)
+        self.assertIn('BEC_V1_NEXT_RECIPE_V1', body)
+        self.assertEqual(self.request('/process-reset/patch.lua?path=runtime.txt')[0], 404)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -169,7 +175,7 @@ class ReceiverTests(unittest.TestCase):
         '''
         lua = LuaRuntime(unpack_returned_tuples=True)
         lua.execute(setup)
-        lua.execute(source)
+        lua.execute('assert(load(...))("full")', source)
         urls = [entry["url"] for entry in lua.globals().requests.values()]
         self.assertEqual(len(urls), 8)  # start, runtime, 4 files, report, finish
         self.assertTrue(any("before-resume-30" in url for url in urls))
@@ -180,6 +186,31 @@ class ReceiverTests(unittest.TestCase):
         self.assertEqual(lua.globals().cpuReads, 3)
         self.assertTrue(any("bec_cache.config" in url for url in urls))
         self.assertTrue(all(method.startswith("get") for method in lua.globals().invokes.values()))
+
+        # Default recent mode keeps two newest backups across reset/resume families,
+        # current programs and journals; it never opens old programs or recipes.
+        recent = LuaRuntime(unpack_returned_tuples=True)
+        recent.execute(setup + r'''
+          require('filesystem').list=function(path)
+            assert(path=='/home','recent mode must not scan recipes')
+            local names={'bec_auto.lua','bec_ui.lua','bec_auto.lua.before-next-1',
+              'bec_auto.journal','bec_auto.journal.previous','bec_cache.config',
+              'bec_auto.journal.reset-1','bec_upload.lua','personal.lua'}
+            for i=1,90 do names[#names+1]='bec_auto.journal.before-resume-'..i end
+            local i=0;return function()i=i+1;return names[i]end
+          end
+          require('filesystem').lastModified=function(path)
+            if path:match('reset%-1$')then return 1000 end
+            return tonumber(path:match('(%d+)$')) or 0
+          end
+        ''')
+        recent.execute(source)
+        recent_urls = [entry['url'] for entry in recent.globals().requests.values()]
+        self.assertEqual(len(recent_urls), 11)  # start, runtime, seven files, report, finish
+        self.assertTrue(any('reset-1' in url for url in recent_urls))
+        self.assertTrue(any('before-resume-90' in url for url in recent_urls))
+        self.assertFalse(any('before-resume-89' in url or 'before-next-1' in url for url in recent_urls))
+        self.assertFalse(any('recipe.dat' in url or 'personal.lua' in url for url in recent_urls))
         self.assertEqual(lua.globals().closed, len(urls))
         lua = LuaRuntime(unpack_returned_tuples=True)
         lua.execute(setup)

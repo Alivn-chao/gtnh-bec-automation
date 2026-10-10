@@ -71,6 +71,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             return self.reply(200, "BEC diagnostic receiver ready\n")
+        if self.path == "/process-reset/patch.lua":
+            try:
+                path = Path(__file__).resolve().parent.parent / "fixes" / "process_reset" / "patch_v1.lua"
+                return self.reply(200, path.read_text(encoding="utf-8"))
+            except OSError:
+                return self.reply(503, "V1 reset patch is unavailable\n")
         if self.path == "/nanites-io/test.lua":
             # One fixed public test script, never a caller-selected file.
             try:
