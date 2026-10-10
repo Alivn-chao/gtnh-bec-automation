@@ -11,6 +11,9 @@ local NODE='b04787f9-5423-4b03-8549-c786d4ef38d0'
 local RS='266f65b5-20be-4543-8f2f-bfd2d0816611'
 local PATH='/home/bec_nanites.journal'
 local MAX_NANITES=30720
+-- Verified sides: north 2 = supply ME interface, south 3 = holding ME
+-- interface. West 4 is the nanite hatch; do not transfer via its display slots.
+local SUPPLY_SIDE,HOLD_SIDE=2,3
 local ports,record={},nil
 local function call(a,m,...) return c.invoke(a,m,...) end
 local function loadRecord()
@@ -58,9 +61,12 @@ local function requiredTier()
  local value=call(NODE,'getRequiredTier');return type(value)=='table' and value.tier or value
 end
 local function discover()
- assert(call(T,'getInventoryName',2)=='tile.appliedenergistics2.BlockInterface','北面应为备用网物品接口')
- assert(call(T,'getInventoryName',4)=='tile.appliedenergistics2.BlockInterface','西面应为收容网物品接口')
- ports[SUPPLY]=2;ports[HOLD]=4
+ assert(call(T,'getInventoryName',SUPPLY_SIDE)=='tile.appliedenergistics2.BlockInterface','北面2应为备用网物品接口')
+ assert(call(T,'getInventoryName',HOLD_SIDE)=='tile.appliedenergistics2.BlockInterface','南面3应为收容网物品接口；西面4是蜂群仓')
+ for _,side in ipairs({SUPPLY_SIDE,HOLD_SIDE}) do
+  assert(call(T,'getInventorySize',side)==9,'蜂群接口应有9个物品槽，保持暂停')
+ end
+ ports[SUPPLY]=SUPPLY_SIDE;ports[HOLD]=HOLD_SIDE
  for _,a in ipairs({SUPPLY,HOLD}) do
   assert(c.type(a)=='me_interface','蜂群接口组件缺失')
   for _,m in ipairs({'getItemsInNetwork','getInterfaceConfiguration','setInterfaceConfiguration'}) do assert(c.methods(a)[m]~=nil,'蜂群接口缺少 '..m) end
@@ -107,9 +113,9 @@ end
 local M={}
 function M.preview()
  discover()
- print('蜂群转运器: '..T..'；备用北2，收容西4')
- print('收容网: '..ser.serialize(stock(HOLD,4),false))
- print('备用网: '..ser.serialize(stock(SUPPLY,2),false))
+ print('蜂群转运器: '..T..'；备用北2，收容南3；西4为蜂群仓')
+ print('收容网: '..ser.serialize(stock(HOLD,HOLD_SIDE),false))
+ print('备用网: '..ser.serialize(stock(SUPPLY,SUPPLY_SIDE),false))
  print('所需等级: '..tostring(requiredTier())..'；节点蜂群 '..tostring(call(NODE,'getAvailableNanites')))
 end
 function M.ensure(ctx)
@@ -128,8 +134,8 @@ function M.ensure(ctx)
   if record.owned then clear(record.owned);tick(ctx) end
  else
   emptyConfigs()
-  local reserve=stock(SUPPLY,2)
-  local hold=stock(HOLD,4)
+  local reserve=stock(SUPPLY,SUPPLY_SIDE)
+  local hold=stock(HOLD,HOLD_SIDE)
   assert(count(hold)==available,'收容子网与节点蜂群数量不符；输出槽请锁定，控制网仅连接这一蜂群仓')
   local choice
   for _,item in pairs(reserve) do
@@ -160,7 +166,7 @@ function M.ensure(ctx)
  if record.stage=='draining' then
   while true do
    guard(ctx);assert(clock.uptime()<deadline,'退回蜂群超时，检查存储总线允许提取及备用网空间')
-   local rows=stock(HOLD,4)
+   local rows=stock(HOLD,HOLD_SIDE)
    if count(rows)==0 then if record.owned then clear(record.owned) end;save('filling');break end
    local old;for _,item in pairs(rows) do old=item;break end
    if record.owned then clear(record.owned);tick(ctx) end
@@ -169,7 +175,7 @@ function M.ensure(ctx)
     guard(ctx);assert(clock.uptime()<deadline,'退回蜂群超时')
     for slot=1,9 do move(HOLD,SUPPLY,slot,64) end
     tick(ctx)
-    local fresh=stock(HOLD,4);if not fresh[id(old)] then break end
+    local fresh=stock(HOLD,HOLD_SIDE);if not fresh[id(old)] then break end
    end
    clear(HOLD);tick(ctx)
   end
@@ -178,12 +184,12 @@ function M.ensure(ctx)
   configure(SUPPLY,record.choice)
   while true do
    guard(ctx);assert(clock.uptime()<deadline,'装入蜂群超时，检查存储总线允许插入')
-   local rows=stock(HOLD,4);local held=rows[id(record.choice)]
+   local rows=stock(HOLD,HOLD_SIDE);local held=rows[id(record.choice)]
    local n=held and held.size or 0
    assert(count(rows)==n and n<=record.goal,'收容子网混入其他蜂群或超额，保持暂停')
    if n==record.goal then break end
    for slot=1,9 do
-    local item=call(T,'getStackInSlot',2,slot)
+    local item=call(T,'getStackInSlot',SUPPLY_SIDE,slot)
     if item and (item.size or 0)>0 then assert(id(item)==id(record.choice),'供货口蜂群类型变化');n=n+move(SUPPLY,HOLD,slot,record.goal-n) end
     if n==record.goal then break end
    end
@@ -199,8 +205,8 @@ function M.ensure(ctx)
  end
  assert(verified,'蜂群仓回读未达到目标，检查控制网是否仅存储在蜂群仓')
  local actual={}
- for key,item in pairs(stock(SUPPLY,2)) do actual[key]=item.size end
- for key,item in pairs(stock(HOLD,4)) do actual[key]=(actual[key] or 0)+item.size end
+ for key,item in pairs(stock(SUPPLY,SUPPLY_SIDE)) do actual[key]=item.size end
+ for key,item in pairs(stock(HOLD,HOLD_SIDE)) do actual[key]=(actual[key] or 0)+item.size end
  for key,n in pairs(record.baseline) do assert(actual[key]==n,'蜂群总量核对不符，保留日志: '..key) end
  for key,n in pairs(actual) do assert(record.baseline[key]==n,'蜂群库存类型变化，保留日志: '..key) end
  save('done');print('蜂群切换完成: T'..record.choice.tier..' / '..record.goal..' 个')

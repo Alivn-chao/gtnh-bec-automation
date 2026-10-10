@@ -8,6 +8,27 @@ from lupa.lua52 import LuaRuntime
 tree=ast.parse((ROOT/'work/test_nanites_switch.py').read_text(encoding='utf-8'))
 mock=next(n.value.value for n in tree.body if isinstance(n,ast.Assign)
     and any(isinstance(t,ast.Name) and t.id=='MOCK' for t in n.targets))
+# Match the uploaded hardware layout; the old generic mock incorrectly made
+# every transposer face look like an ME interface, including the west hatch.
+mock += r'''
+local c=require('component');local old=c.invoke
+function c.invoke(a,m,...)
+ local args={...}
+ if a=='4bebfefd-f3c6-40ac-81d6-35b331415b0f' then
+  if m=='getInventoryName' then
+   if args[1]==4 then return 'gt.blockmachines' end
+   if args[1]==2 or args[1]==3 then return s.inventoryName end
+   return nil,'no inventory'
+  end
+  if m=='getInventorySize' then return args[1]==4 and 3 or (s.interfaceSlots or 9) end
+  if m=='getStackInSlot' or m=='transferItem' then
+   assert(args[1]==2 or args[1]==3,'attempted to read or move through hatch display slots')
+   if m=='transferItem' then assert(args[2]==2 or args[2]==3,'wrong transfer destination') end
+  end
+ end
+ return old(a,m,...)
+end
+'''
 source=(Path(__file__).parent/'bec_nanites.lua').read_text(encoding='utf-8')
 def run(label,setup='',success=True):
     lua=LuaRuntime(unpack_returned_tuples=True);lua.execute(mock+setup)
@@ -36,6 +57,10 @@ lua=run('fewer than 64 existing bees may top up to usable count','s.required=4;s
 assert lua.eval('s.hatch==64')
 run('running node cannot top up','s.required=4;s.state="crafting"',False)
 run('no pause signal cannot top up','s.required=4;s.output=0',False)
+lua=run('wrong physical interface is rejected before any writes or moves','s.inventoryName="tile.fluid_interface"',False)
+assert lua.eval('s.moves==0 and next(s.files)==nil')
+lua=run('wrong interface size is rejected before any writes or moves','s.interfaceSlots=3',False)
+assert lua.eval('s.moves==0 and next(s.files)==nil')
 lua=run('uncertain transfer preserves pending intent','s.required=4;s.throwMove=true',False)
 lua.execute('s.throwMove=false');before=lua.eval('s.moves');result=lua.eval('pcall(worker.ensure,ctx)')
 assert result[0] is False and lua.eval('s.moves')==before
