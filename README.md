@@ -8,6 +8,8 @@
 
 V1 若在缓存完成后恢复时报“该阶段存在未确认操作”，参见 [cache-working 恢复补丁](fixes/cache_resume/README.md)。
 
+V1 [同类型蜂群自动补充与30720上限](fixes/nanites_topup/README.md)，只替换蜂群模块，含凝聚物不足只读检查脚本。
+
 ## 下载与安装
 
 对外安装版本为 **V2独立测试版**，目标环境是 GTNH 2.9.0 Beta 3 + OpenComputers/OpenOS。程序安装在 `/home/bec_v2/`，与旧单节点版本分开。
