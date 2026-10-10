@@ -114,12 +114,11 @@ for _, entry in ipairs(addresses) do
         for i, cpu in ipairs(cpus) do
           line("CPU " .. a .. " " .. tostring(i) .. " name=" .. tostring(cpu.name) .. " busy=" .. tostring(cpu.busy))
           local control = cpu.cpu
-          if control then
+          if control and cpu.busy == true then
             for _, method in ipairs({"activeItems", "pendingItems", "finalOutput"}) do
-              if type(control[method]) == "function" then
-                local success, value = pcall(control[method])
-                line("CPU " .. tostring(i) .. " " .. method .. " " .. (success and safe(value) or tostring(value)))
-              end
+              -- OC Java callbacks may be callable tables/userdata, not Lua functions.
+              local success, value = pcall(function() return control[method]() end)
+              line("CPU " .. tostring(i) .. " " .. method .. " " .. (success and safe(value) or ("ERROR " .. tostring(value))))
             end
           end
         end

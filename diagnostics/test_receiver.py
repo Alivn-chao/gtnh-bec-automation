@@ -109,7 +109,14 @@ class ReceiverTests(unittest.TestCase):
               {'3afdc4cf-04e3-4ae9-8be6-e753c23a249d','fluid_interface'}}) end,
             methods=function(a) return a=='node' and {getState=false} or (a=='rs' and {getOutput=false}
               or (a=='tp' and {getFluidInTank=false} or {getFluidsInNetwork=false,getCpus=false})) end,
-            invoke=function(a,m,...) invokes[#invokes+1]=m; return m=='getState' and 'paused-immediate' or {} end
+            invoke=function(a,m,...)
+              invokes[#invokes+1]=m
+              if m=='getCpus' then
+                local callback=setmetatable({}, {__call=function() cpuReads=cpuReads+1;return {item='test'} end})
+                return {{name='busy',busy=true,cpu={activeItems=callback,pendingItems=callback,finalOutput=callback}}}
+              end
+              return m=='getState' and 'paused-immediate' or {}
+            end
           } end
           package.preload.computer=function() return {address=function() return 'computer-1' end,
             uptime=function() tick=tick+.01; return tick end} end
@@ -121,6 +128,7 @@ class ReceiverTests(unittest.TestCase):
               {'bec_cache.config'},{'bec_upload.lua'},{'personal.lua'}} or {{'recipe.dat'}}; return iterator(names) end
           } end
           io.open=function(path) return {read=function() return 'test' end, close=function() end} end
+          cpuReads=0
           os.sleep=function() end
           print=function(text) outputs[#outputs+1]=text end
         '''
@@ -134,6 +142,7 @@ class ReceiverTests(unittest.TestCase):
         self.assertIn("getState", list(lua.globals().invokes.values()))  # false method flag still callable
         self.assertIn("getFluidsInNetwork", list(lua.globals().invokes.values()))
         self.assertIn("getCpus", list(lua.globals().invokes.values()))
+        self.assertEqual(lua.globals().cpuReads, 3)
         self.assertTrue(any("bec_cache.config" in url for url in urls))
         self.assertTrue(all(method.startswith("get") for method in lua.globals().invokes.values()))
         self.assertEqual(lua.globals().closed, len(urls))
