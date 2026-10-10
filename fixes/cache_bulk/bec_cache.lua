@@ -138,22 +138,27 @@ assert(old.stage=="stopped" and old.pending==nil and old.configOwned==false,"后
 if call(NODE,"getState")~="idle" then return {} end local stock=field();local selected,lowest for name,need in pairs(totals) do local available=stock[name] or 0
 if available<need and (not lowest or available<lowest) then selected=name;lowest=available end end if not selected then return {} end
 selectedBackground=selected;totals={[selected]=fixedStock} end end
-local live,stock=network(MAIN),field();local visibleRoutes=bulkPorts() for kind in pairs(totals) do local raw=mapping[kind]
+local live,stock=network(MAIN),field();local visibleRoutes=bulkPorts();local waiting for kind in pairs(totals) do local raw=mapping[kind]
 local candidates={[raw]=true} candidates["fluid."..raw]=true if kind=="entangled_space" or kind=="entangled_time" then
 local stem=kind=="entangled_space" and "spatialfluid" or "temporalfluid" candidates[stem]=true;candidates["fluid."..stem]=true end
 local found={} for name in pairs(candidates) do if (live[name] or 0)>0 or visibleRoutes[name] then found[name]=true end end for name in pairs(candidates) do
 local rows=call(MAIN,"getCraftables",{name=name}) assert(type(rows)=="table","原液配方读取失败") for _,craft in pairs(rows) do local stack=craft.getStack()
 if type(stack)=="table" and stack.name==name and type(stack.amount)=="number" then found[name]=true end end end
-local name,n=nil,0;for candidate in pairs(found) do name=candidate;n=n+1 end assert(n<=1,"原液名称不唯一: "..kind) assert(n==1 or (stock[kind] or 0)>=totals[kind],"主网没有原液库存或合成样板: "..kind.." / "..raw)
+local name,n=nil,0;for candidate in pairs(found) do name=candidate;n=n+1 end assert(n<=1,"原液名称不唯一: "..kind)
+if n==0 and (stock[kind] or 0)<totals[kind] then waiting="等待原液库存/样板可见: "..kind.." / "..raw end
 if n==1 then mapping[kind]=name end end
 local routes=bulkPorts();local stored=field()
 for kind,need in pairs(totals) do
- assert((stored[kind] or 0)>=need or routes[mapping[kind]],"缺少高速供液口："..kind.." / "..mapping[kind].."；禁止普通接口回退")
+ if (stored[kind] or 0)<need and not routes[mapping[kind]] then waiting="等待高速口流体可见: "..kind.." / "..mapping[kind].."；空口暂不能识别绑定，稍后重扫" end
 end
 if selectedBackground then print("高速后台缓存：本种按剩余缺口补到 "..fixedStock.." mB，不受16桶轮次限制。") end if fixedStock then
-print("登记配方 "..count.."；每种凝聚物统一目标 "..fixedStock.." mB，只补差额。") else print("登记配方 "..count.."；每配方 "..copies.." 份，共用流体按最大用量缓存。") end return totals
+print("登记配方 "..count.."；每种凝聚物统一目标 "..fixedStock.." mB，只补差额。") else print("登记配方 "..count.."；每配方 "..copies.." 份，共用流体按最大用量缓存。") end return totals,waiting
 end local function cacheMain() assert(mode=="preview" or mode=="run","用法: preview / run [每配方份数，默认1]")
-RS=resolve("266f65b5","redstone");GEN=resolve("c1ae3f7c","gt_machine") assert(call(GEN,"getName")=="multi.bec.generator","纠缠装置名称不符") local target=cacheTarget(cacheCopies)
+RS=resolve("266f65b5","redstone");GEN=resolve("c1ae3f7c","gt_machine") assert(call(GEN,"getName")=="multi.bec.generator","纠缠装置名称不符") local target,waiting=cacheTarget(cacheCopies)
+while waiting do print(waiting)
+if background or mode=="preview" then return end
+tick(2);if stopping then print("已取消等待；日志和库存未修改。");return end
+target,waiting=cacheTarget(cacheCopies) end
 if background and next(target)==nil then return end local stock=field() for name,need in pairs(target) do
 local batch=units[name] or 144 print(name.." 缓存目标 "..need.."；凝聚物已有 "..(stock[name] or 0) .."；待补原液 "..math.ceil(math.max(0,need-(stock[name] or 0))/batch)*batch.." mB")
 end if mode=="preview" then print("只读规划完成，未申请、搬料、转换或写记录。");return end local producer=io.open("/home/bec_auto.journal","r")

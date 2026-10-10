@@ -23,7 +23,7 @@ function c.invoke(a,m,...)
  if a==B then
   if m=='getTankCount'then return args[1]==1 and 1 or args[1]==5 and 6 or 0 end
   if m=='getTankCapacity'then return args[1]==1 and 2147483647 or 16000 end
-  if m=='getFluidInTank'then return args[1]==1 and {name='molten.chromaticglass',amount=s.mainStock['molten.chromaticglass']or 0}or {amount=0}end
+  if m=='getFluidInTank'then return args[1]==1 and not s.hideSource and {name='molten.chromaticglass',amount=s.mainStock['molten.chromaticglass']or 0}or {amount=0}end
   if m=='transferFluid'then
    assert(args[1]==1 and args[2]==5 and not s.cacheEnabled and s.output==15)
    local journal=require('serialization').unserialize(s.files['/home/bec_cache.journal'])
@@ -55,7 +55,32 @@ lua,_=run('route remains discoverable when source is empty and no AE recipe exis
 logs=list(lua.globals().s.logs.values());assert any('AE补货配方' in x for x in logs),logs
 lua,_=run('existing stock is moved without requesting a craft',"s.availableCrafts={}")
 assert lua.globals().s.requests==0
-lua,_=run('missing high-speed route never falls back',"s.noPort=true",success=False)
+lua,_=run('unreadable high-speed route waits without ordinary fallback',"s.noPort=true")
+assert lua.globals().s.moves==0 and lua.globals().s.writes==0
+lua,worker=run('empty unnamed high-speed source leaves service running',"s.hideSource=true")
+s=lua.globals().s
+assert s.moves==0 and s.requests==0 and s.writes==0
+assert any('等待高速口流体可见' in x for x in s.logs.values())
+s.hideSource=False
+ok,error=worker('background-stock',144000)
+assert ok,(error,list(s.logs.values()))
+assert s.moves==1 and s.stock.entangled_chromaticglass==144000
+print('later scan sees arriving fluid and completes cache: PASS')
+lua,_=run('unnamed source without stock or AE pattern waits without writes',"s.hideSource=true;s.mainStock={};s.availableCrafts={}")
+assert lua.globals().s.moves==0 and lua.globals().s.requests==0 and lua.globals().s.writes==0
+lua,_=run('manual cache waits for fluid name then completes',r'''
+s.hideSource=true
+local req=require
+function require(n)
+ local v=req(n)
+ if n=='event'then local pull=v.pull;v.pull=function(...)
+  local a,b,c=pull(...);if s.now>=4 then s.hideSource=false end;return a,b,c
+ end end
+ return v
+end
+''',mode='run-stock')
+assert lua.globals().s.now>=4 and lua.globals().s.moves==1
+lua,_=run('Q cancels manual discovery wait without touching journals',"s.hideSource=true;s.stopEarly=true",mode='run-stock')
 assert lua.globals().s.moves==0 and lua.globals().s.writes==0
 lua,_=run('already dispatched production skips a new cache batch',"s.newOrderAt=0")
 assert lua.globals().s.moves==0 and lua.globals().s.writes==0
@@ -68,4 +93,4 @@ for failure in ['partial','uncertain']:
  before=lua.globals().s.moves;worker('background-stock',144000);assert lua.globals().s.moves==before
 lua,_=run('preview stays read only',mode='preview-stock')
 assert lua.globals().s.moves==0 and lua.globals().s.writes==0
-print('10 bulk-only cache scenarios passed (mock only).')
+print('Bulk-only cache and delayed discovery scenarios passed (mock only).')
