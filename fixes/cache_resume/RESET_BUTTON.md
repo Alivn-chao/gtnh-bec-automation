@@ -1,5 +1,13 @@
 # 通用后台缓存重置键
 
+V2支持 `transfer-pending` 的实物核对：GEN已停、AE全idle/节点pause15、MAIN无供液配置时，
+仅对有已确认同raw/地址/from/to历史记录的独立高速口（源0或1→接收5）操作，读取old.secured
+完整子网快照；对应raw实际只能等于快照（未搬）或快照+pending.amount（整笔已搬），
+其他raw不变，再读取一次子网验证稳定。不重新执行transfer；部分/超额/无历史路线仍拒绝，
+显示未搬、整搬、实测数量。核对结果单独保存于reset进度reconciliation，原pending日志完整备份。
+这依赖原接法的独立子网，不用于有其他流体自动化并行写入子网的系统。
+安装器兼容已装重置V1，原位替换内嵌worker；编译/备份后升级，不重置机器或日志。
+
 `patch_reset_button.lua` 为已安装 UI_SPEED_V2/UI_PAUSE_V1 的真实上传面板增加 Z 放弃缓存/重置。
 安装器仅修改 UI（内嵌 `reset_cache.lua`），定位全部修改后编译，临时文件 flush 回读、唯一备份、失败还原。
 生产控制器/配置/journal/硬件在安装时不变，保留单项目标与暂停提示补丁。

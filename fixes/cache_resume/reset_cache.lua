@@ -50,23 +50,41 @@ local function main()
   end
  end
  if not p then
-  assert(old.kind=='cache' and old.version==1 and old.background==true and old.pending==nil and old.configOwned==false,'缓存存在未确认搬料/接口操作：保留记录，不能强制删除')
+  assert(old.kind=='cache' and old.version==1 and old.background==true,'不是后台缓存记录，未重置')
+  assert(old.configOwned==false,'接口供液配置仍归本轮持有，未重置')
   assert(type(old.target)=='table' and next(old.target)~=nil and type(old.requests)=='table' and type(old.transfers)=='table','缓存记录缺失')
   for _,job in pairs(old.requests)do assert(job.state=='submitted' or job.state=='done','AE申请处于不明提交阶段，未重置')end
   for _,move in pairs(old.transfers)do assert(move.ok==true and integer(move.amount)==move.requested,'缓存搬料结果未确认，未重置')end
   local worker=assert(read('/home/bec_cache.lua'));assert(worker:find('BEC_V1_CACHE_CUSTOM_V1',1,true),'缺少单项缓存模块，不能暂停本轮类型')
   cfg();local before=stock();local raw=rawStock();local routes={};local targets={}
+  local secured={};for name,n in pairs(old.secured or {})do secured[name]=integer(n)end
+  local reconciliation
+  if old.pending~=nil then
+   local pending=old.pending
+   assert(old.stage=='transfer-pending' and type(pending)=='table' and type(pending.raw)=='string' and type(pending.address)=='string' and (pending.from==0 or pending.from==1) and pending.to==5 and integer(pending.amount)>0,'待确认操作不是支持的独立高速口搬液；未重置')
+   assert(type(old.secured)=='table','缺少搬液前子网快照')
+   local known=false;for _,move in pairs(old.transfers)do if move.raw==pending.raw and move.address==pending.address and move.from==pending.from and move.to==pending.to then known=true end end
+   assert(known,'待确认搬液接口没有已确认的同路记录，不能推断结果')
+   local base=secured[pending.raw] or 0;local actual=raw[pending.raw] or 0
+   assert(actual==base or actual==base+pending.amount,'搬液核对不符：'..pending.raw..'；未搬 '..base..'/整搬 '..(base+pending.amount)..'/实测 '..actual)
+   for name,n in pairs(secured)do if name~=pending.raw then assert((raw[name] or 0)==n,'其他子网原液变化：'..name)end end
+   for name,n in pairs(raw)do if name~=pending.raw then assert(n==(secured[name] or 0),'出现其他子网原液：'..name)end end
+   guard();assert(same(rawStock(),raw),'核对期间子网数量变化，未重置')
+   secured[pending.raw]=actual
+   reconciliation={raw=pending.raw,before=base,actual=actual,requested=pending.amount,outcome=actual==base and 'not-transferred' or 'transferred'}
+   print('待确认搬液已核对：'..pending.raw..'，之前 '..base..'，现在 '..actual..'；不重搬这一笔。')
+  end
   for kind,n in pairs(old.target)do assert(mapping[kind],'未知缓存类型：'..tostring(kind));integer(n);targets[kind]=true end
   for name,n in pairs(raw)do
    local kind;for candidate in pairs(targets)do if isRaw(name,candidate)then assert(not kind,'原液对应多种目标');kind=candidate end end
    assert(kind,'子网原液不属于本轮缓存：'..name)
    assert(n%(units[kind] or 144)==0,'子网原液不是完整转换批次：'..name)
-   assert(type(old.secured)=='table' and integer(old.secured[name] or 0)>=n,'子网有日志未确认搬入的原液：'..name)
+   assert(type(old.secured)=='table' and integer(secured[name] or 0)>=n,'子网有日志未确认搬入的原液：'..name)
    routes[name]=kind
   end
   local expected={};for kind,n in pairs(before)do expected[kind]=n end
   for name,n in pairs(raw)do local kind=routes[name];expected[kind]=(expected[kind] or 0)+n end
-  p={version=1,kind='cache-reset',stage='prepared',oldCache=cacheText,oldProduction=productionText,before=before,raw=raw,routes=routes,expected=expected,targets=targets,cacheBackup=backup(CACHE),configBackup=backup(CONFIG)}
+  p={version=1,kind='cache-reset',stage='prepared',oldCache=cacheText,oldProduction=productionText,before=before,raw=raw,routes=routes,expected=expected,targets=targets,reconciliation=reconciliation,cacheBackup=backup(CACHE),configBackup=backup(CONFIG)}
   write(PROGRESS,p)
  end
  assert(productionText==p.oldProduction,'生产记录已改变，停止重置')

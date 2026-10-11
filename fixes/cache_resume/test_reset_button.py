@@ -55,6 +55,24 @@ r,ok,err,old=run(multi);assert ok,err
 assert r.globals().s.stocks.entangled_chromaticglass==12288 and r.globals().s.stocks.entangled_phononmedium==3000
 assert r.globals().s.stocks.entangled_space==144000
 print('Different fluids and 144/1000 batch sizes reset together; unrelated condensate unchanged: PASS')
+pendingSetup=g['setup'].replace('spatialfluid','temporalfluid').replace('entangled_space','entangled_time')
+pending=r'''
+local ser=require('serialization');local old=ser.unserialize(s.files['/home/bec_cache.journal'])
+old.stage='transfer-pending';old.secured={temporalfluid=2956320}
+old.transfers={{ok=true,raw='temporalfluid',address='known-port',from=0,to=5,amount=15840,requested=15840}}
+old.pending={raw='temporalfluid',address='known-port',from=0,to=5,amount=15840}
+s.files['/home/bec_cache.journal']=ser.serialize(old,false)
+'''
+for left,outcome in ((2956320,'not-transferred'),(2972160,'transferred')):
+ r,ok,err,old=run(pending+f's.left={left}',pendingSetup);assert ok,err
+ assert r.globals().s.space==144000+left and r.globals().s.left==0
+ progress=r.eval("require('serialization').unserialize(s.files['/home/bec_cache.reset'])")
+ assert progress.reconciliation.outcome==outcome and progress.reconciliation.actual==left
+ assert r.globals().s.files['/home/bec_cache.journal.before-reset-1']==old
+r,ok,err,old=run(pending+'s.left=2956464',pendingSetup);assert not ok and r.globals().s.starts==0
+assert '2956320' in err and '2972160' in err and '2956464' in err
+assert r.globals().s.files['/home/bec_cache.journal']==old
+print('Real temporal transfer-pending amounts reconcile untouched/full receipt; partial mismatch reports numbers without action: PASS')
 # Actual patched pause UI: install the embedded worker, mouse Z, then automatic resume.
 u=runpy.run_path(str(Path(__file__).parents[1]/'ui_speed/test_targets.py'))
 uiBase=u['base'];installRuntime=uiBase['LuaRuntime'](unpack_returned_tuples=True)
@@ -69,6 +87,13 @@ assert installRuntime.globals().files['/home/bec_ui.lua']==u['patched']
 installRuntime.globals().failSwap=False;install();patched=installRuntime.globals().files['/home/bec_ui.lua']
 w=installRuntime.globals().writes;install();assert w==installRuntime.globals().writes
 assert 'BEC_V1_UI_TARGETS_V1' in patched and 'BEC_V1_UI_PAUSE_V1' in patched
+import subprocess
+upgrade=uiBase['LuaRuntime'](unpack_returned_tuples=True);upgrade.execute(uiBase['literal']('fixes/process_reset/test_reset.py','installer'))
+upgrade.globals().files['/home/bec_ui.lua']=u['patched']
+oldPatch=subprocess.check_output(['git','show','f439a94:fixes/cache_resume/patch_reset_button.lua'],cwd=g['ROOT']).decode('utf-8')
+upgrade.eval('function()'+oldPatch+'\nend')();upgrade.eval('function()'+patch+'\nend')()
+assert upgrade.globals().files['/home/bec_ui.lua']==patched
+print('Existing reset V1 upgrades to identical V2 worker without changing other UI patches: PASS')
 r=uiBase['LuaRuntime'](unpack_returned_tuples=True);r.globals().pyWidth=uiBase['width'];r.globals().pySub=uiBase['sub']
 r.execute(uiBase['base']+uiBase['gpu']+uiBase['extra']+g['setup']+prepare+r'''
 s.attempts=0
