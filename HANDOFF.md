@@ -1,5 +1,7 @@
 # 在家里的 Codex 接着做
 
+2026-10-11 UI速度V2：用户确认主要面板点击翻页慢，又见运行计时1秒跳33秒。不能仅据截图归因代码体积。真实上传UI的控制器协程只在event.pull/os.sleep交回调度，同步长段阻塞UI。fixes/ui_speed/patch_v1.lua升级BEC_V1_UI_SPEED_V2，兼容原版和V1缓存补丁；控制器c.invoke完成后累计50ms交回UI，不加机器暂停或固定睡眠，保持返回false/nil/多值，退出恢复invoke；Q由stopRequested持续注入控制器event.pull防止调度yield吞掉。退出写最近一次/home/bec_ui.perf，测display查询/文件/绘图、controller组件/每次resume总量和最大秒数。单次调用、代理调用、文件或纯计算仍可能阻塞，未声称实机问题已解决。真实UI Lua5.2原版安装/旧版升级一致/重复备份/连续翻页缓存/Q早退/忙控制器让出响应Q/还原invoke/性能文件模拟全部通过。未改生产auto、订单、生产日志或硬件。用户应正常Q停机安装新版，再UI run约30秒后Q，cat /home/bec_ui.perf提供实机最大耗时；旧公网上传通道仍离线，不再次启动被审批拦截服务。
+
 2026-10-11 当前：用户日志上传两次bec_upload.lua:23连接超时，尚未/start成功。实际检查原receiver PID36856/tunnel32908均不存在，127.0.0.1:8765拒绝连接；没有收到本轮新日志。此前重启/新开公网服务均遭工具审批blocked by policy，不绕过，现下载用GitHub/CDN。用户另说屏幕交互慢，实际旧UI每帧先读取十多项组件/多份journal/定时扫登记、先draw再pull，旧bee journal一直filling造成误显示。新增fixes/ui_speed/patch_v1.lua仅补UI，2秒显示缓存/自动重画，maxParallel30秒/config10秒/registry60秒，R清缓存；删未使用consumed查询，先处理输入后画，采样间pollUI非阻塞优先Q、其余事件入队；新IO journal done显示待命。真实上传UI的Lua5.2安装/备份/重复/连续翻页一次状态读取/false正确/Q采样中止不启controller模拟通过，未改生产或日志，尚待游戏安装。已异步问慢在面板还是终端也慢；若终端也慢不能归因已退出的UI，需查OC/服务器负载，不能声称本补丁解决所有输入延迟。
 
 2026-10-11 最新速度反馈：截图反复“蜂群需求变化，保持暂停重新核对”后主网320/实际64重新备料。根因旧watcher把needed~=lastNaniteTier当必须换蜂，即使T4仓足够覆盖低级需求。已在process_reset/patch_v1.lua新增BEC_V1_BEE_GUARD_V2原位升级，只在实际supplied低于needed、等级读数无效或available<64暂停；高等级够用时不因需求等级变化暂停/换蜂/重新备料。上一版reset补丁安装后也能升级，不改日志、IO模块、缓存数量或上限。模拟T4/T2反复变化时整批仅一次放行，原始与已安装V1补丁升级/等级不足/数量不足检查通过；真实用户尚待新补丁安装。用户应Q正常停止后安装新版patch_v1.lua，再UI run保留进程日志继续，无需reset。

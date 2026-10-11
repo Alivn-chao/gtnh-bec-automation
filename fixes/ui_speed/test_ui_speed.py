@@ -1,6 +1,7 @@
 """UI-only cache and event responsiveness, using the real uploaded V1 UI."""
 import ast
 import sys
+import subprocess
 import unicodedata
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
@@ -29,6 +30,18 @@ writes=runtime.globals().writes
 install()
 assert runtime.globals().writes==writes
 print('Actual UI patch syntax, unique backup, repeat install, unchanged controller/journals: PASS')
+
+# Exercise upgrading the already delivered V1 cache patch as well as a clean UI.
+old_source=subprocess.check_output(['git','show','3a87439:fixes/ui_speed/patch_v1.lua'],cwd=ROOT).decode('utf-8')
+upgrade=LuaRuntime(unpack_returned_tuples=True)
+upgrade.execute(literal('fixes/process_reset/test_reset.py','installer'))
+upgrade.globals().files['/home/bec_ui.lua']=ui
+upgrade.eval('function()'+old_source+'\nend')()
+old_ui=upgrade.globals().files['/home/bec_ui.lua']
+upgrade.eval('function()'+source+'\nend')()
+assert upgrade.globals().files['/home/bec_ui.lua']==patched
+assert upgrade.globals().files['/home/bec_ui.lua.before-ui-speed-2']==old_ui
+print('Existing V1 cache patch upgrades to identical V2 with a separate backup: PASS')
 
 base=literal('test_auto_once.py','MOCK').replace('/home/bec_auto_once.journal','/home/bec_auto.journal')
 base+=literal('test_stream.py','EXTRA')+literal('test_stream.py','STREAM')
@@ -73,7 +86,9 @@ def run(inject):
     s=lua.globals().s
     assert s.width==80 and s.height==25 and s.cleared and s.freed
     assert not any('装入蜂群' in row for row in s.draws.values()), list(s.logs.values())
-    assert s.mutations==0 and s.writes==0  # UI did not change production
+    assert s.mutations==0 and s.writes==1  # Only the exit performance report is written.
+    assert lua.eval("require('serialization').unserialize(s.files['/home/bec_auto.journal']).stage")=='watching'
+    assert 'display.frame count=' in s.files['/home/bec_ui.perf']
     assert s.uiQueries.getConsumedCondensate is None
     return lua
 
@@ -110,3 +125,35 @@ lua=run(early)
 assert not lua.globals().s.controllerStarted
 assert lua.globals().s.uiQueries.getStoredCondensate is None
 print('Q during snapshot sampling skips remaining queries and never starts controller: PASS')
+
+busy=r'''
+local c=require('component');local invoke=c.invoke;s.originalInvoke=nil
+c.invoke=function(a,m,...)
+ if m=='busyProbe' then s.now=s.now+.1;return false,nil,7 end
+ return invoke(a,m,...)
+end
+s.originalInvoke=c.invoke
+s.controller=function()
+ s.controllerStarted=true;s.workerCalls=0
+ for i=1,100 do
+  local a,b,d=c.invoke('probe','busyProbe');assert(a==false and b==nil and d==7)
+  s.workerCalls=s.workerCalls+1
+  if s.workerCalls>1 then
+   local name,_,char=require('event').pull(0,'key_down')
+   if name=='key_down' and char==113 then s.gotQuit=true;return end
+  end
+ end
+end
+local e=require('event');local oldPull=e.pull
+e.pull=function(n,...)
+ if s.workerCalls and s.workerCalls>=1 then return 'key_down','keyboard',113 end
+ return oldPull(n,...)
+end
+'''
+lua=run(busy)
+s=lua.globals().s
+assert s.gotQuit and s.workerCalls<100,s.workerCalls
+assert lua.eval("require('component').invoke==s.originalInvoke")
+assert 'controller.component count=' in s.files['/home/bec_ui.perf']
+assert 'controller.resume count=' in s.files['/home/bec_ui.perf']
+print('Busy controller yields to Q, preserves false/nil/multiple returns, restores invoke and records timing: PASS')

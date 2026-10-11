@@ -10,8 +10,9 @@ local function replace(text,from,to)
  return text:sub(1,a-1)..to..text:sub(b+1)
 end
 local original=read(path)
-if original:find('BEC_V1_UI_SPEED_V1',1,true) then print('UI响应补丁已安装');return end
+if original:find('BEC_V1_UI_SPEED_V2',1,true) then print('UI调度补丁已安装');return end
 local modified=original:gsub('\r\n','\n')
+if not modified:find('BEC_V1_UI_SPEED_V1',1,true) then
 local cache=[=[
 -- BEC_V1_UI_SPEED_V1
 local displayCache,displayFiles,pendingUI={},{},{}
@@ -80,6 +81,61 @@ modified=replace(modified,'if fault then repeat handle({oldPull(0.25)});draw(fal
  'if fault then repeat handle({pullUI(0.1)});if not stopRequested then draw(false) end until stopRequested end')
 modified=replace(modified,'end draw(true)\nif initialView=="cache"',
  'end draw(true)\nif stopRequested then return end\nif initialView=="cache"')
+end
+local pacing=[=[
+-- BEC_V1_UI_SPEED_V2
+local perf,activeService,lastServiceYield={},nil,-math.huge
+local nativeInvoke=c.invoke
+local function measure(name,elapsed)
+ local row=perf[name] or {count=0,total=0,max=0}
+ row.count=row.count+1;row.total=row.total+elapsed;row.max=math.max(row.max,elapsed);perf[name]=row
+end
+c.invoke=function(...)
+ local worker=activeService and coroutine.running()==activeService
+ local before=computer.uptime();local values=table.pack(nativeInvoke(...))
+ if worker then
+  measure("controller.component",computer.uptime()-before)
+  if computer.uptime()-lastServiceYield>=0.05 then
+   lastServiceYield=computer.uptime()
+   -- This is a scheduling yield, not an added delay or a machine pause.
+   local e={coroutine.yield(0,"key_down")}
+   if e[1]=="key_down" and (e[3]==113 or e[3]==81) then stopRequested=true end
+  end
+ end
+ return table.unpack(values,1,values.n)
+end
+local function writePerf()
+ local names={};for name in pairs(perf) do names[#names+1]=name end;table.sort(names)
+ local rows={"UI performance seconds; controller.resume excludes time yielded to UI."}
+ for _,name in ipairs(names) do local v=perf[name]
+  rows[#rows+1]=string.format("%s count=%d total=%.3f max=%.3f",name,v.count,v.total,v.max)
+ end
+ local text=table.concat(rows,"\n").."\n"
+ local f=assert(io.open("/home/bec_ui.perf","w"));assert(f:write(text));assert(f:flush());f:close()
+ f=assert(io.open("/home/bec_ui.perf","r"));local actual=f:read("*a");f:close();assert(actual==text,"性能记录回读失败")
+end
+]=]
+modified=replace(modified,'local displayCache,displayFiles,pendingUI={},{},{}',
+ pacing..'\nlocal displayCache,displayFiles,pendingUI={},{},{}')
+modified=replace(modified,'local ok,value=pcall(c.invoke,address,method,...)',
+ 'local before=computer.uptime();local ok,value=pcall(c.invoke,address,method,...)\nmeasure("display."..method,computer.uptime()-before)')
+modified=replace(modified,'local f=io.open(path,"r") if not f then',
+ 'local fileStart=computer.uptime();local f=io.open(path,"r") if not f then')
+modified=replace(modified,'local text=f:read("*a");f:close() local ok,value=pcall(ser.unserialize,text)',
+ 'local text=f:read("*a");f:close();measure("display.file",computer.uptime()-fileStart) local ok,value=pcall(ser.unserialize,text)')
+modified=replace(modified,'rendering=true local ok,err=pcall(function()',
+ 'rendering=true local frameStart=computer.uptime();local ok,err=pcall(function()')
+modified=replace(modified,'if frameBuffer then pcall(gpu.setActiveBuffer,oldBuffer or 0) end rendering=false;',
+ 'measure("display.frame",computer.uptime()-frameStart)\nif frameBuffer then pcall(gpu.setActiveBuffer,oldBuffer or 0) end rendering=false;')
+modified=replace(modified,'event.pull=function(n,filter) return coroutine.yield(n,filter) end',
+ 'event.pull=function(n,filter) if stopRequested then return "key_down","ui",113,16 end return coroutine.yield(n,filter) end')
+modified=replace(modified,'local service=coroutine.create(function() controller(mode) end) local deadline,filter',
+ 'local service=coroutine.create(function() controller(mode) end);activeService=service local deadline,filter')
+modified=replace(modified,'local function advance(e) local ok,n,f=coroutine.resume(service,table.unpack(e or {}))',
+ 'local function advance(e) local resumeStart=computer.uptime();local ok,n,f=coroutine.resume(service,table.unpack(e or {}))\nmeasure("controller.resume",computer.uptime()-resumeStart)')
+modified=replace(modified,'local ok,err=xpcall(mainUI,debug.traceback) print,event.pull,os.sleep=oldPrint,oldPull,oldSleep',
+ 'local ok,err=xpcall(mainUI,debug.traceback) c.invoke=nativeInvoke;activeService=nil print,event.pull,os.sleep=oldPrint,oldPull,oldSleep')
+modified=modified..'\nlocal perfOk,perfError=pcall(writePerf);if not perfOk then oldPrint("性能记录失败："..tostring(perfError)) else oldPrint("性能记录: /home/bec_ui.perf") end\n'
 assert(load(modified,'@'..path,'t',_ENV),'补丁后语法检查失败')
 local n=1;while fs.exists(path..'.before-ui-speed-'..n) or fs.exists(path..'.ui-speed-new-'..n) do n=n+1 end
 local backup,temp=path..'.before-ui-speed-'..n,path..'.ui-speed-new-'..n
@@ -88,5 +144,5 @@ assert(read(temp)==modified,'临时文件回读失败')
 assert(fs.rename(path,backup),'备份失败，原文件保留')
 if not fs.rename(temp,path) then assert(fs.rename(backup,path),'还原失败，原文件在 '..backup);error('替换失败，已还原') end
 assert(read(path)==modified and read(backup)==original,'替换或备份回读失败')
-print('UI响应补丁已安装；备份: '..backup)
+print('UI调度与耗时记录补丁已安装；备份: '..backup)
 print('生产控制器、订单和日志均未修改。正常Q停止后继续: lua /home/bec_ui.lua run')
