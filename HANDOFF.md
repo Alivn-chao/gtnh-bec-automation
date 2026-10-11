@@ -1,5 +1,7 @@
 # 在家里的 Codex 接着做
 
+2026-10-11 最新速度反馈：截图反复“蜂群需求变化，保持暂停重新核对”后主网320/实际64重新备料。根因旧watcher把needed~=lastNaniteTier当必须换蜂，即使T4仓足够覆盖低级需求。已在process_reset/patch_v1.lua新增BEC_V1_BEE_GUARD_V2原位升级，只在实际supplied低于needed、等级读数无效或available<64暂停；高等级够用时不因需求等级变化暂停/换蜂/重新备料。上一版reset补丁安装后也能升级，不改日志、IO模块、缓存数量或上限。模拟T4/T2反复变化时整批仅一次放行，原始与已安装V1补丁升级/等级不足/数量不足检查通过；真实用户尚待新补丁安装。用户应Q正常停止后安装新版patch_v1.lua，再UI run保留进程日志继续，无需reset。
+
 2026-10-11 用户随后启动旧UI，截图程序在bec_auto.lua:88“节点进入空闲但凝聚物未消耗完”停止，T4/19612、并行2、cache10/12，cosmic显示130.2k；未收到此轮新诊断，不据此判成品成功或确认吞料根因。用户明确要求重置进程、配方跳转继续下一配方，并要求只上传最近几次日志。新增fixes/process_reset/patch_v1.lua定位补丁：安装备份现有auto/UI/uploader不改日志；UI reset运行时验证无pending/未完成申请/不完整搬液、主接口配置和缓存空、子网无原液、暂停15/GEN停机，归档auto/cache到.reset-N，忽略旧target按当前订单实际库存重新启动。idle消耗未确认仅记lastOutcome等待下单，不报完成、不重下失败成品任务；换蜂后取消沿旧过滤直接pause0，返外层重核当前过滤库存。蜂群IO日志不改。uploader默认recent当前代码/配置/journal/previous加每种journal最近两份编号归档，mtime排序，不默认传旧程序和recipes；full仍显式保留。Lua5.2实际上传auto/UI安装、重置/跳过消耗完整生产模拟及接收端9测试通过；尚待游戏安装验证，不声称修复所有高速路由竞态。固定镜像/process-reset/patch.lua用于交付，补丁同时原位升级已有游戏上传器，不需再下载bootstrap。
 
 2026-10-11 最新实机验收：用户截图确认新版 install.lua 安装成功，旧模块备份 /home/bec_nanites.lua.before_cellio-1；随后 lua /home/bec_nanites.lua test 自动选择并整盘装入第9槽19612个T4，输出“蜂群IO完成：T4 / 19612个；节点仍暂停”，preview显示仓内19612/T4、需求T1、新IO日志done、旧接口日志不重放。自动模块单盘选择/装入及空盘回9已真实验证，无需重复安装或重搬。多盘同类补充、跨等级换蜂、超30720实物数量及自动版回收仍仅模拟验证；独立测试版回收19612已实机通过。当前蜂群在仓内，9为空盘。生产仍暂停，吞料/凝聚物放行问题没有因蜂群验收而解决，不直接要求启动旧UI。

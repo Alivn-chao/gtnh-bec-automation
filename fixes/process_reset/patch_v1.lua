@@ -92,6 +92,16 @@ local function patchAuto(text)
 end
 local originalAuto,originalUI=read(AUTO),read(UI)
 local modifiedAuto=patchAuto(originalAuto)
+-- Requirements can fluctuate while the same adequate swarm remains installed.
+-- Do not repeat the pause/prepare pipeline merely because needed ~= last tier.
+if not modifiedAuto:find('BEC_V1_BEE_GUARD_V2',1,true) then
+ modifiedAuto=replace(modifiedAuto,'local supplied=call(NODE,"getProvidedTier")',
+  'local supplied=call(NODE,"getProvidedTier");local available=call(NODE,"getAvailableNanites")')
+ modifiedAuto=replace(modifiedAuto,
+  'if type(needed)=="number" and (needed~=lastNaniteTier or type(supplied)~="table" or supplied.tier<needed) then',
+  'if type(needed)=="number" and (type(supplied)~="table" or type(supplied.tier)~="number" or supplied.tier<needed or type(available)~="number" or available<64) then')
+ modifiedAuto=modifiedAuto..'\n-- BEC_V1_BEE_GUARD_V2\n'
+end
 local modifiedUI=originalUI
 if not modifiedUI:find('mode=="reset"',1,true) then
  modifiedUI=replace(modifiedUI,'mode=="restock","用法: run / resume / monitor / restock"',
@@ -163,4 +173,5 @@ if modifiedUpload then
  install(UPLOAD,originalUpload,modifiedUpload)
  print('上传默认只传当前文件、上一份日志及最近两次备份；不传全部历史。')
 end
-print('安装未修改日志或启动生产。重置并重新启动: lua /home/bec_ui.lua reset')
+print('安装未修改日志或启动生产。正常Q停止后继续: lua /home/bec_ui.lua run')
+print('需要归档旧进程重新开始时: lua /home/bec_ui.lua reset')

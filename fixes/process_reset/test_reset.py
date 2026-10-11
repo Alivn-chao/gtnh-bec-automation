@@ -51,6 +51,8 @@ lua.globals().failInstall = False
 run()
 patched = lua.globals().files['/home/bec_auto.lua']
 assert 'BEC_V1_NEXT_RECIPE_V1' in patched
+assert 'BEC_V1_BEE_GUARD_V2' in patched
+assert 'needed~=lastNaniteTier' not in patched
 assert '节点进入空闲但凝聚物未消耗完' not in patched
 assert 'verifyGate(filters);pause(0);deadline' not in patched
 lua.execute('assert(load(...))', patched)
@@ -146,4 +148,29 @@ end
     assert s.files['/home/bec_auto.journal.reset-1'] is not None
     if skipped:
         assert any('旧轮次消耗未确认' in x for x in s.logs.values()), list(s.logs.values())
+    else:
+        # Mock requirement alternates T4/T2 during each recipe; T4 suffices for both.
+        assert s.naniteSwitches == 2, (s.naniteSwitches, list(s.logs.values()))  # two existing startup calls
+        assert s.reserveChecks == 1, (s.reserveChecks, list(s.logs.values()))
+        assert not any('蜂群需求变化，保持暂停' in x for x in s.logs.values())
     print(('Incomplete idle consumption continues' if skipped else 'Reset starts current orders with existing stock') + ': PASS')
+
+# Upgrade the installed previous reset patch rather than requiring a full reset.
+old_condition = 'if type(needed)=="number" and (needed~=lastNaniteTier or type(supplied)~="table" or supplied.tier<needed) then'
+new_condition = 'if type(needed)=="number" and (type(supplied)~="table" or type(supplied.tier)~="number" or supplied.tier<needed or type(available)~="number" or available<64) then'
+legacy = patched.replace(new_condition, old_condition).replace(';local available=call(NODE,"getAvailableNanites")','').replace('\n-- BEC_V1_BEE_GUARD_V2\n','')
+lua.globals().files['/home/bec_auto.lua'] = legacy
+run()
+assert lua.globals().files['/home/bec_auto.lua'] == patched
+assert lua.globals().files['/home/bec_auto.journal'] == 'original journal'
+print('Previous installed reset patch upgrades without touching journals: PASS')
+
+guard = new_condition[len('if '):-len(' then')]
+for needed, supplied, available, expected in ((1,4,19612,False),(4,4,19612,False),
+        (2,4,64,False),(5,4,19612,True),(1,4,63,True),(1,None,19612,True)):
+    runtime = LuaRuntime(unpack_returned_tuples=True)
+    runtime.globals().needed = needed
+    runtime.globals().supplied = runtime.table_from({'tier':supplied}) if supplied is not None else None
+    runtime.globals().available = available
+    assert runtime.eval(guard) == expected
+print('Adequate higher-tier swarms continue; real grade/count shortage still pauses: PASS')
