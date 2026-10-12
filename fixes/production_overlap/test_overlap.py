@@ -1,6 +1,7 @@
 """Lua 5.2 simulation of installed V1 and durable streaming overlap."""
 import ast
 import sys
+import subprocess
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'work/lua_runtime'))
@@ -40,6 +41,19 @@ try:r.eval('function()'+patch+'\nend')();raise AssertionError('expected rollback
 except Exception as e:assert '已还原' in str(e)
 assert r.globals().files['/home/bec_auto.lua']==original
 print('Failed replacement restores original controller PASS')
+
+# Upgrade the exact previously published installer, without wrapping serve twice.
+old_patch=subprocess.check_output(['git','show','5e08f6b:fixes/production_overlap/patch_v1.lua'],cwd=ROOT).decode('utf-8')
+r=LuaRuntime(unpack_returned_tuples=True);r.execute(literal('fixes/process_reset/test_reset.py','installer'))
+r.globals().files['/home/bec_auto.lua']=original
+r.eval('function()'+old_patch+'\nend')()
+v1=r.globals().files['/home/bec_auto.lua']
+r.eval('function()'+patch+'\nend')()
+v2=r.globals().files['/home/bec_auto.lua']
+assert v2.count('if record.productionOverlapHandled then')==1
+assert r.globals().files['/home/bec_auto.lua.before-overlap-2']==v1
+r.execute('assert(load(...))',v2)
+print('Published V1 upgrade preserves wrapper and backup PASS')
 
 mock=literal('fixes/pipeline/test_pipeline.py','mock')
 mock=mock.replace("assert(not released,'assembler released too early')", "assert(not released,'unchanged used after release')")
@@ -104,6 +118,23 @@ r=run('switchAfter=2');g=r.globals()
 assert g.completed==2 and g.output==15 and not g.enabled and len(g.sub)==0
 assert g.stock.a==1152 and g.stock.b==1152
 print('Recipe change pauses production, drains old confirmed supply, leaves remaining inventory PASS')
+
+tier_mock=r'''
+c.methods=function()return {getRequiredTier=false}end
+local previous=call
+function call(a,m,...)
+ if m=='getRequiredTier'then return {tier=now>=4.3 and (futureTier or 2) or 1}end
+ if m=='getProvidedTier'then return {tier=4}end
+ if m=='getAvailableNanites'then return 19612 end
+ return previous(a,m,...)
+end
+'''
+r=run(tier_mock);g=r.globals()
+assert g.completed==10 and g.ranWhileConverting and g.record.pipeline is None
+print('Stage tier changes T1 to T2 with available T4: continuous production PASS')
+r=run(tier_mock+'futureTier=5');g=r.globals()
+assert g.completed<10 and g.output==15 and len(g.sub)==0
+print('Insufficient bee tier still pauses and drains confirmed old supply PASS')
 for setting in ['partial=true','uncertain=true','nilRequest=true','canceled=true']:
     r=run(setting,False);g=r.globals();assert g.completed==0
     if setting in ('partial=true','uncertain=true'):assert g.record.pending is not None

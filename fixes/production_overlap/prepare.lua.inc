@@ -1,4 +1,4 @@
--- BEC_V1_PRODUCTION_OVERLAP_V1: overlap independent AE jobs and conversion on bulk routes.
+-- BEC_V1_PRODUCTION_OVERLAP_V2: overlap independent AE jobs and conversion on bulk routes.
 local sequentialPrepare=prepareStreaming
 prepareStreaming=function(target)
  resolveRawNames(target)
@@ -41,9 +41,25 @@ prepareStreaming=function(target)
    for name,n in pairs(req) do normalized[name]=integer(n)/parallel end
   end
   local changed=not same(normalized,recipe)
-  if not changed and tierMethod then changed=tierValue()~=neededTier end
-  if state~="crafting" and state~="paused-immediate" then changed=true end
+  local reason=changed and "配方需求变化，等待旧窗口收尾" or nil
+  local tierCovered=false
+  if not changed and tierMethod then
+   local nextTier=tierValue()
+   if nextTier~=neededTier or state=="nanite-tier-too-low" then
+    local provided=call(NODE,"getProvidedTier")
+    local count=call(NODE,"getAvailableNanites")
+    tierCovered=type(nextTier)=="number" and type(provided)=="table" and type(provided.tier)=="number"
+     and provided.tier>=nextTier and type(count)=="number" and count>=64
+    if tierCovered then
+     neededTier=nextTier
+    else changed=true;reason="蜂群不足以运行当前阶段，等待旧窗口收尾" end
+   end
+  end
+  if state~="crafting" and state~="paused-immediate" and not(state=="nanite-tier-too-low" and tierCovered) then
+   changed=true;reason=reason or ("节点状态: "..tostring(state))
+  end
   if changed then
+   if not halted then print("生产暂停: "..reason.."；已提交的供液申请继续核对，不重复下单。") end
    pause(15);released=false;halted=true
    if state=="idle" and record.pipeline.overlap then
     local used=call(NODE,"getConsumedCondensate");assert(type(used)=="table","节点空闲后消耗记录不可读")
