@@ -31,6 +31,7 @@ return function(C,addOnly)
  local previous=C.read(C.path('config.dat'))
  if previous then
   for group in ipairs(previous.groups)do
+   for _,file in ipairs({'nanites.journal','nanites-cell.journal'})do local r=C.read(C.path('state/group-'..group..'/'..file));assert(not r or r.stage=='done','蜂群记录未完成，禁止改设备配置')end
    local old=C.read(C.path('state/group-'..group..'/cohort.dat'))
    assert(not old or old.stage=='stopped','本组旧进度尚未结束；先按原配置核对恢复，禁止更换设备绑定')
   end
@@ -82,10 +83,19 @@ return function(C,addOnly)
   g.nanites={enabled=enabled}
   if enabled then
    local n=g.nanites
+   n.mode=ask('蜂群模式：cell-io硬盘盒 / me-interface旧接口','cell-io')
+   assert(n.mode=='cell-io'or n.mode=='me-interface','蜂群模式无效')
    n.transposer=pick('蜂群转运器','transposer')
-   n.supplyInterface=pick('备用蜂群子网接口','me_interface','getItemsInNetwork')
-   n.hatchInterface=pick('收容总线子网接口','me_interface','getItemsInNetwork')
-   n.supplySide=number('备用网接口方向',2,0,5);n.hatchSide=number('收容网接口方向',4,0,5)
+   if n.mode=='cell-io'then
+    n.loadRedstone=pick('装入端ME IO控制红石','redstone','setOutput')
+    n.returnRedstone=pick('回收端ME IO控制红石','redstone','setOutput')
+    n.bankSide=number('硬盘盒方向',0,0,5);n.loadSide=number('装入ME IO方向',3,0,5);n.returnSide=number('回收ME IO方向',2,0,5)
+    n.loadOutputSide=number('装入端红石输出方向',0,0,5);n.returnOutputSide=number('回收端红石输出方向',0,0,5)
+   else
+    n.supplyInterface=pick('备用蜂群子网接口','me_interface','getItemsInNetwork')
+    n.hatchInterface=pick('收容总线子网接口','me_interface','getItemsInNetwork')
+    n.supplySide=number('备用网接口方向',2,0,5);n.hatchSide=number('收容网接口方向',4,0,5)
+   end
   end
   cfg.groups[i]=g
  end

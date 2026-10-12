@@ -1,9 +1,10 @@
 local fs=require('filesystem')
 local shell=require('shell')
 local ROOT='/home/bec_v2'
-local BASE='https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/bec-v2-preview-2026-10-09.1/experimental/bec_v2/'
+local BASE='https://fastly.jsdelivr.net/gh/Alivn-chao/gtnh-bec-automation@bec-v2-cell-io-preview-2026-10-12/experimental/bec_v2/'
+local FALLBACK='https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/bec-v2-cell-io-preview-2026-10-12/experimental/bec_v2/'
 local files={'main.lua','lib/config.lua','lib/bridge.lua','lib/engine.lua','lib/setup.lua','lib/ui.lua','lib/scan.lua','lib/patterns.lua',
- 'runtime/controller.lua','runtime/nanites.lua','runtime/patterns.lua'}
+ 'runtime/controller.lua','runtime/nanites.lua','runtime/nanites_cell.lua','runtime/patterns.lua'}
 for _,dir in ipairs({ROOT,ROOT..'/lib',ROOT..'/runtime',ROOT..'/download'})do
  assert(fs.exists(dir)or fs.makeDirectory(dir),'不能建立 '..dir)
 end
@@ -11,7 +12,7 @@ print('安装BEC V2测试版；升级前须先退出正在运行的V2服务。')
 print('下载完整并通过语法检查后替换程序；配置、配方和日志保留。')
 for i,path in ipairs(files)do
  local temp=ROOT..'/download/'..i..'.lua'
- assert(shell.execute('wget -f '..BASE..path..' '..temp),'下载失败：'..path..'；现有程序尚未替换')
+ assert(shell.execute('wget -f '..BASE..path..' '..temp)or shell.execute('wget -f '..FALLBACK..path..' '..temp),'下载失败：'..path..'；现有程序尚未替换')
  assert(loadfile(temp),'下载内容不是有效Lua程序：'..path)
 end
 for i,path in ipairs(files)do

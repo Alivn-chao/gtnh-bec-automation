@@ -45,10 +45,19 @@ function M.validate(cfg,live)
   for _,a in ipairs(g.bulkTransposers or {}) do address(a,'高速供液转运器');assert(not resources[a],'高速供液转运器重复绑定');resources[a]=true end
   if g.nanites and g.nanites.enabled then
    local n=g.nanites
-   for _,name in ipairs({'transposer','supplyInterface','hatchInterface'}) do address(n[name],'蜂群 '..name) end
-   assert(n.supplyInterface~=n.hatchInterface,'蜂群供货网和收容网接口不能相同')
-   assert(integer(n.supplySide,0,5) and integer(n.hatchSide,0,5) and n.supplySide~=n.hatchSide,'蜂群方向无效')
-   for _,name in ipairs({'transposer','supplyInterface','hatchInterface'}) do assert(not resources[n[name]],'蜂群控制设备跨组重复');resources[n[name]]=true end
+   local mode=n.mode or 'me-interface'
+   assert(mode=='cell-io'or mode=='me-interface','未知蜂群模式')
+   local names
+   if mode=='cell-io'then
+    names={'transposer','loadRedstone','returnRedstone'}
+    for _,key in ipairs({'bankSide','loadSide','returnSide','loadOutputSide','returnOutputSide'})do assert(integer(n[key],0,5),'蜂群IO方向无效: '..key)end
+    assert(n.bankSide~=n.loadSide and n.bankSide~=n.returnSide and n.loadSide~=n.returnSide,'硬盘盒和两端IO必须不同方向')
+   else
+    names={'transposer','supplyInterface','hatchInterface'}
+    assert(n.supplyInterface~=n.hatchInterface,'蜂群供货网和收容网接口不能相同')
+    assert(integer(n.supplySide,0,5) and integer(n.hatchSide,0,5) and n.supplySide~=n.hatchSide,'蜂群方向无效')
+   end
+   for _,name in ipairs(names)do address(n[name],'蜂群 '..name);assert(not resources[n[name]],'蜂群控制设备跨组重复');resources[n[name]]=true end
   end
   if live then
    methods(g.storage,{'getStoredCondensate','isWorkAllowed'},'约束场')
@@ -61,8 +70,18 @@ function M.validate(cfg,live)
     assert(c.invoke(a,'getName')=='multi.bec.generator','绑定的设备不是纠缠器')
    end
    if g.nanites and g.nanites.enabled then
-    methods(g.nanites.transposer,{'transferItem','getInventoryName'},'蜂群转运器')
-    for _,a in ipairs({g.nanites.supplyInterface,g.nanites.hatchInterface}) do methods(a,{'getItemsInNetwork','setInterfaceConfiguration','getInterfaceConfiguration'},'蜂群接口') end
+    local n=g.nanites
+    if n.mode=='cell-io'then
+     methods(n.transposer,{'transferItem','getInventoryName','getInventorySize','getStackInSlot'},'蜂群硬盘转运器')
+     for _,side in ipairs({n.loadSide,n.returnSide})do
+      assert(c.invoke(n.transposer,'getInventoryName',side)=='tile.appliedenergistics2.BlockIOPort'and c.invoke(n.transposer,'getInventorySize',side)==12,'蜂群两端必须是12槽ME IO端口')
+     end
+     local size=c.invoke(n.transposer,'getInventorySize',n.bankSide);assert(integer(size,1,1024),'蜂群硬盘盒不可读')
+     for _,a in ipairs({n.loadRedstone,n.returnRedstone})do methods(a,{'setOutput','getOutput'},'蜂群IO红石')end
+    else
+     methods(n.transposer,{'transferItem','getInventoryName'},'蜂群转运器')
+     for _,a in ipairs({n.supplyInterface,n.hatchInterface})do methods(a,{'getItemsInNetwork','setInterfaceConfiguration','getInterfaceConfiguration'},'蜂群接口')end
+    end
    end
   end
  end
@@ -73,12 +92,14 @@ function M.validate(cfg,live)
  for i,n in ipairs(cfg.nodes) do
   assert(integer(n.group,1,#cfg.groups),'节点'..i..'设备组无效')
   for _,name in ipairs({'address','redstone','gate'}) do address(n[name],'节点'..i..' '..name) end
+  assert(not resources[n.address]and not resources[n.redstone],'节点/暂停红石与公共设备重复')
   assert(not used[n.address],'节点重复绑定');used[n.address]=true
   assert(integer(n.pauseSide,0,5),'红石输出方向无效')
   local key=n.redstone..':'..n.pauseSide;assert(not redstones[key],'红石输出线路重复');redstones[key]=true
   assert(not gates[n.gate] or gates[n.gate]==n.group,'不同生产组不能共享韦门');gates[n.gate]=n.group
   if live then
    methods(n.address,{'getState','getRequiredTier','getRequiredCondensate','getParallelRecipesInProgress'},'传送节点')
+   if cfg.groups[n.group].nanites and cfg.groups[n.group].nanites.enabled and cfg.groups[n.group].nanites.mode=='cell-io'then methods(n.address,{'getAvailableNanites','getProvidedTier'},'蜂群读数节点')end
    methods(n.redstone,{'setOutput','getOutput'},'暂停红石')
    methods(n.gate,{'setCondensateFilters','getCondensateFilters','getCondensateFilterCount'},'韦门')
   end

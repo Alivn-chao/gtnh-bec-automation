@@ -63,6 +63,25 @@ function M.environment(cfg,index,engine)
  local native={};for k,v in pairs(c) do native[k]=v end
  local bulk={};for _,a in ipairs(g.bulkTransposers or {}) do bulk[a]=true end
  local function awaitLock() engine.acquire(index) end
+ local function sharedHiveReady()
+  local h,p=c.invoke(n.address,'getAvailableNanites'),c.invoke(n.address,'getProvidedTier')
+  for _,member in ipairs(cfg.nodes)do if member.group==n.group then
+   local count,tier=c.invoke(member.address,'getAvailableNanites'),c.invoke(member.address,'getProvidedTier')
+   if count~=h or h>0 and not(type(p)=='table'and type(tier)=='table'and p.tier==tier.tier and p.name==tier.name)then return false end
+  end end
+  return true
+ end
+ local function cellGuard(checkHive)
+  awaitLock()
+  for _,member in ipairs(cfg.nodes)do if member.group==n.group then
+   local state=c.invoke(member.address,'getState')
+   assert(c.invoke(member.redstone,'getOutput',member.pauseSide)==15 and (state=='idle'or state=='paused-immediate'or state=='nanite-tier-too-low'),'换蜂群必须暂停整组节点')
+  end end
+  for _,a in ipairs(g.generators)do assert(c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false,'换蜂群必须等待全部纠缠器停机')end
+  assert(not task.cancel,'用户暂停蜂群操作，保留记录')
+  if checkHive then assert(sharedHiveReady(),'组内蜂群仓读数不同，核对是否共用同一收容网')end
+ end
+
  function native.list(...)
   local iter=c.list(...)
   return function()
@@ -74,7 +93,9 @@ function M.environment(cfg,index,engine)
  end
  function native.invoke(a,m,...)
   local args={...}
-  if g.nanites and g.nanites.enabled and (a==g.nanites.transposer or a==g.nanites.supplyInterface or a==g.nanites.hatchInterface)then
+  if g.nanites and g.nanites.enabled and g.nanites.mode=='cell-io'and
+   (a==g.nanites.transposer and m=='transferItem'or (a==g.nanites.loadRedstone or a==g.nanites.returnRedstone)and m=='setOutput'and args[2]~=0)then cellGuard()end
+  if g.nanites and g.nanites.enabled and g.nanites.mode~='cell-io' and (a==g.nanites.transposer or a==g.nanites.supplyInterface or a==g.nanites.hatchInterface)then
    if m=='transferItem'or m=='setInterfaceConfiguration'then
     awaitLock()
     for _,member in ipairs(cfg.nodes)do if member.group==n.group then
@@ -124,7 +145,7 @@ function M.environment(cfg,index,engine)
    local function side(v) return v==4 and g.mainSide or v==5 and g.subSide or v end
    args[1]=side(args[1]);if m=='transferFluid' then args[2]=side(args[2]) end
   end
-  if g.nanites and g.nanites.enabled and a==g.nanites.transposer and type(args[1])=='number' then
+  if g.nanites and g.nanites.enabled and g.nanites.mode~='cell-io' and a==g.nanites.transposer and type(args[1])=='number' then
    local function side(v) return v==2 and g.nanites.supplySide or v==4 and g.nanites.hatchSide or v end
    args[1]=side(args[1]);if m=='transferItem' then args[2]=side(args[2]) end
   end
@@ -166,8 +187,16 @@ function M.environment(cfg,index,engine)
  end
  local mapping={[originals.main]=cfg.mainInterface,[originals.sub]=g.subInterface,[originals.trans]=g.transposer,
  [originals.storage]=g.storage,[originals.node]=n.address,[originals.gen]=g.generators[1],[originals.gate]=n.gate,[originals.rs]=n.redstone}
- if g.nanites and g.nanites.enabled then
+ if g.nanites and g.nanites.enabled and g.nanites.mode~='cell-io' then
   mapping[originals.bees]=g.nanites.transposer;mapping[originals.supply]=g.nanites.supplyInterface;mapping[originals.hold]=g.nanites.hatchInterface
+ end
+ if g.nanites and g.nanites.enabled and g.nanites.mode=='cell-io'then
+  env.BEC_CELL_IO={};for key,value in pairs(g.nanites)do env.BEC_CELL_IO[key]=value end
+  env.BEC_CELL_IO.node=n.address;env.BEC_CELL_IO.redstone=n.redstone;env.BEC_CELL_IO.pauseSide=n.pauseSide
+  env.BEC_CELL_IO.path=C.path('state/group-'..n.group..'/nanites-cell.journal')
+  env.BEC_CELL_IO.checkGroup=cellGuard
+  env.BEC_CELL_IO.checkSharedHive=function()cellGuard(true)end
+  env.BEC_CELL_IO.sharedHiveReady=sharedHiveReady
  end
  local function instantiate(path)
   local text=source(path)
@@ -182,7 +211,9 @@ function M.environment(cfg,index,engine)
  env.loadfile=function(path)
   if path=='/home/bec_nanites.lua' then
    if not g.nanites or not g.nanites.enabled then return function()return {ensure=function()return false end}end end
-   return instantiate(C.path('runtime/nanites.lua'))
+   local other=C.read(C.path('state/group-'..n.group..'/'..(g.nanites.mode=='cell-io'and 'nanites.journal'or 'nanites-cell.journal')))
+   assert(not other or other.stage=='done','另一蜂群模式存在未完成记录，不能切换或重放')
+   return instantiate(C.path(g.nanites.mode=='cell-io'and 'runtime/nanites_cell.lua'or 'runtime/nanites.lua'))
   end
   error('V2工作器禁止调用稳定版脚本: '..tostring(path))
  end

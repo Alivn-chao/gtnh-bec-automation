@@ -236,12 +236,25 @@ assert(not pcall(loadfile('/home/bec_v2/lib/setup.lua')(),C,true));assert(#C.loa
 check('installer downloads all files before replacing existing programs', '''
 local fs=require('filesystem');local native=require;local downloads=0
 require=function(name)if name=='shell'then return {execute=function(command)
- downloads=downloads+1;if downloads==3 then return false end
+ downloads=downloads+1;if downloads==3 or downloads==4 then return false end
  local dest=command:match(' ([^ ]+)$');s.files[dest]='return true';return true
 end}end;return native(name)end
 local previous=s.files['/home/bec_v2/main.lua']
 assert(not pcall(loadfile('/home/bec_v2/install.lua')))
 assert(s.files['/home/bec_v2/main.lua']==previous)
+''')
+check('installer retries alternate host and leaves programs unchanged on later failure', '''
+local native=require;local alternate=false
+require=function(name)if name=='shell'then return {execute=function(command)
+ if command:find('/lib/config.lua',1,true)and command:find('fastly',1,true)then return false end
+ if command:find('/lib/config.lua',1,true)then alternate=true end
+ if command:find('/lib/bridge.lua',1,true)then return false end
+ local dest=command:match(' ([^ ]+)$');s.files[dest]='return true';return true
+end}end;return native(name)end
+local previous=s.files['/home/bec_v2/main.lua']
+assert(not pcall(loadfile('/home/bec_v2/install.lua')))
+assert(alternate and s.files['/home/bec_v2/main.lua']==previous)
+assert(s.files['/home/bec_v2/download/2.lua']=='return true')
 ''')
 check('pattern preview uses configured workshop and never mutates patterns', '''
 cfg.workshopInterface='my-workshop';C.write(C.path('config.dat'),cfg)

@@ -56,6 +56,12 @@ return function(cfg,C,Bridge,monitor)
    local ok,e=pcall(function()c.invoke(a,'setWorkAllowed',false);assert(c.invoke(a,'isWorkAllowed')==false)end)
    if not ok then errors[#errors+1]=a..': '..tostring(e)end
   end end
+  for _,g in ipairs(cfg.groups)do if g.nanites and g.nanites.enabled and g.nanites.mode=='cell-io'then
+   for _,pair in ipairs({{g.nanites.loadRedstone,g.nanites.loadOutputSide},{g.nanites.returnRedstone,g.nanites.returnOutputSide}})do
+    local ok,e=pcall(function()c.invoke(pair[1],'setOutput',pair[2],0);assert(c.invoke(pair[1],'getOutput',pair[2])==0,'蜂群IO停止回读失败')end)
+    if not ok then errors[#errors+1]=pair[1]..': '..tostring(e)end
+   end
+  end end
   return errors
  end
  local function cohortPath(group)return C.path('state/group-'..group..'/cohort.dat')end

@@ -7,16 +7,26 @@ for path in [root / 'main.lua', root / 'install.lua', *sorted((root / 'lib').glo
     source = path.read_text(encoding='utf-8')
     # Preserve all executable lines. Remove only whole-line comments/blanks.
     source = '\n'.join(line for line in source.splitlines() if line.strip() and not line.lstrip().startswith('--')) + '\n'
+    if path.name == 'nanites_cell.lua':
+        # Whitespace-only packing; do not join a line containing a Lua comment.
+        lines = source.splitlines(); packed = []; i = 0
+        while i < len(lines):
+            if i + 1 < len(lines) and '--' not in lines[i] and '--' not in lines[i + 1] and len(lines[i]) + len(lines[i + 1]) < 180:
+                packed.append(lines[i] + ' ' + lines[i + 1].lstrip()); i += 2
+            else:
+                packed.append(lines[i]); i += 1
+        source = '\n'.join(packed) + '\n'
     assert len(source.splitlines()) <= 257, path
     output = root / 'paste' / path.relative_to(root)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(source, encoding='utf-8')
-archive = root.parents[1] / 'outputs' / 'bec_v2_multinode.zip'
+archive = root.parents[1] / 'outputs' / 'bec_v2_cell_io.zip'
 archive.parent.mkdir(exist_ok=True)
 with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as out:
+    out.write(root.parents[1] / 'tools' / 'bec-binding.html', 'bec_v2/bec-binding.html')
     guide = root.parents[1] / 'docs' / 'GETTING_STARTED.md'
     if guide.exists():
         out.write(guide, 'bec_v2/GETTING_STARTED.md')
-    for path in [root / 'README.md', root / 'config.example.lua', root / 'main.lua', root / 'install.lua', *sorted((root / 'lib').glob('*.lua')), *sorted((root / 'runtime').glob('*.lua')), *sorted((root / 'paste').rglob('*.lua'))]:
+    for path in [root / 'README.md', root / 'CELL_IO.md', root / 'config.example.lua', root / 'main.lua', root / 'install.lua', *sorted((root / 'lib').glob('*.lua')), *sorted((root / 'runtime').glob('*.lua')), *sorted((root / 'paste').rglob('*.lua'))]:
         out.write(path, 'bec_v2/' + path.relative_to(root).as_posix())
 print(archive)

@@ -22,10 +22,13 @@ return {
    bulkTransposers={}, -- 额外高速供液转运器，没有则留空
    nanites={
     enabled=true,
-    transposer='这里填蜂群转运器地址',
-    supplyInterface='这里填备用蜂群子网ME接口地址',
-    hatchInterface='这里填收容总线子网ME接口地址',
-    supplySide=2,hatchSide=4,
+    mode='cell-io',
+    transposer='这里填蜂群硬盘转运器地址',
+    loadRedstone='这里填装入端红石I/O地址',
+    returnRedstone='这里填回收端红石I/O地址',
+    bankSide=0,loadSide=3,returnSide=2,
+    loadOutputSide=0,returnOutputSide=0,
+    -- 两只ME IO端口设置工序完成后移动至输出口；数量由盒内蜂群盘决定。
    },
   },
  },
