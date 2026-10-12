@@ -14,6 +14,8 @@ V1 若在缓存完成后恢复时报“该阶段存在未确认操作”，参�
 
 V1 报“整批需求过大”，使用 [大订单自动分批补丁](fixes/order_window/README.md)：AE 整单保留，分段备料并自动接续。
 
+V1 已装流水供液但仍等整窗纠缠，使用 [生产与纠缠同时运行补丁](fixes/production_overlap/README.md)：当前实际配方够料即生产，其余下单、收液和纠缠继续。
+
 V1 [同类型蜂群自动补充与30720上限](fixes/nanites_topup/README.md)，只替换蜂群模块，含凝聚物不足只读检查脚本。
 
 [通过 OC 互联网卡上传真实程序、日志和组件读数](diagnostics/README.md)，供排查游戏实际状态；无需安装V2。
