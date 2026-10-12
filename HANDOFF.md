@@ -1,5 +1,7 @@
 # 在家里的 Codex 接着做
 
+2026-10-12 地址工具高速口扩容：用户指定需要5个高速工业转运器，网页增加bulk5，V2 bulkTransposers导出1–5，旧草稿缺bulk5时默认留空。浏览器测试覆盖五口顺序导出、第5口刷新保存和JSON下载导入。
+
 2026-10-12 离线地址绑定工具：用户要求4×4共16节点，每组节点+红石IO，空位跳过保留位置，另绑定主网/子网/纠缠器/约束场等；明确不必Lua，不便终端粘贴，改成 tools/bec-binding.html 单文件离线网页。公共组件单共享设备组、鼠标格位编辑/方向0–5/备注、可选蜂群三件套和多纠缠器/高速口，完整UUID/重复地址/方向/字段检查，localStorage自动存+JSON下载导入、批量16行空行保留、V2配置草稿bindings.generated.dat导出。适配器方块与暴露机器地址明确区分；不会联网读取类型/距离/接线，不激活或覆盖游戏配置，旧V1不因此支持16台。用户wiki结构链接403，索引教程只用于角色参考，未宣称核对实体机器结构。tools/test_bec_binding.cjs真实Chrome鼠标录入/holes/方向0/错误导入不覆盖/JSON往返/下载/自动存/移动布局/离线请求通过；Lua5.2解析导出及实际V2发布tag和开发分支config.validate(false)通过。预览work/bec-binding-preview.png，截图使用假地址不进入交付网页默认值。网页已请求Codex browser打开file URL（queued）；tools/BINDING.md含使用和集成边界。未修改游戏controller或日志，outputs保留。
 
 2026-10-12 重置V2实物核对：用户先AE忙后Z报缓存未确认，cat截图尾cache temporalfluid stage transfer-pending，pending amount15840/address1d37c95d-152f-4987-857b-78bee9344b6f/from0/to5，secured temporalfluid2956320，expected5000112，configOwnedfalse，大量同路oktrue15840历史。V1拒pending不足通用。reset_cache新增只对此GENoff/inactive、NODEpause15/AE全部idle/MAIN无配置，历史同rawaddr/from0or1/to5确认路线+oldsecured快照，实测对应raw必须base或base+amount（2956320/2972160），其余raw等快照且第二次读取稳定，视未搬/整搬，不重新调用transfer；进度独立reconciliation保存，原pending完整备份。部分/未知route不猜，具体数量红底错误。build_reset_button生成UI_CACHE_RESET_V2兼容V1原位内嵌worker升级，使用git f439a94旧worker作为精确定位基准。模拟现场两终态/部分2956464拒绝无动作/V1升级与新装V2完全一致/既有整套测试通过，实机待用户安装按Z核对。独立子网仅脚本写流体为前提，不能泛化有其他并行写液系统。

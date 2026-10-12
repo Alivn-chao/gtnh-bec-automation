@@ -18,7 +18,7 @@
 </section></div>
 <section class="panel roles"><div class="panel-head"><h2>公共机器与接口</h2><span class="muted tiny">当前导出为一个共享 BEC 设备组</span></div><div class="flow"><b>主网</b>→<b>转运器 / 子网</b>→<b>纠缠装置</b>→<b>约束场 / 韦门</b>→<b>16 个节点</b></div><p class="muted tiny">这是角色关系示意。实际接线、组件类型和机器结构仍以游戏中的配置为准。</p><div id="roles" class="roles-grid"></div>
 <div class="roles-grid" id="settings"></div>
-<details><summary>可选组件与导出范围</summary><p class="muted tiny" style="margin-top:10px">纠缠器可填 1–4 台，高速转运器可填 0–4 台。蜂群转运器、备用接口和收容接口需一起填写；不填写则关闭自动蜂群配置。导出的是本仓库 V2 的配置草稿，不会自动覆盖现有控制器，也不会让旧 V1 同时控制 16 台。若有多个独立 BEC 网络，需要分设备组配置，本工具这一版只导出一个共享组。</p></details></section>
+<details><summary>可选组件与导出范围</summary><p class="muted tiny" style="margin-top:10px">纠缠器可填 1–4 台，高速工业转运器可填 0–5 台。蜂群转运器、备用接口和收容接口需一起填写；不填写则关闭自动蜂群配置。导出的是本仓库 V2 的配置草稿，不会自动覆盖现有控制器，也不会让旧 V1 同时控制 16 台。若有多个独立 BEC 网络，需要分设备组配置，本工具这一版只导出一个共享组。</p></details></section>
 <div id="status" class="status" role="status">配置仅保存在本机浏览器；重要修改请下载草稿文件。网页不会启动、暂停或搬运游戏里的机器。</div>
 <details><summary>查看当前导出内容</summary><pre id="preview">填写后点击“检查配置”，这里会显示配置预览。</pre></details>
 <footer>设备名称参考 <a href="https://gtnh.huijiwiki.com/wiki/BEC%E8%87%AA%E5%8A%A8%E5%8C%96" target="_blank" rel="noopener">GTNH 中文维基 BEC 自动化教程</a>。本工具不依赖网络，地址不会上传。V2 导出文件：bindings.generated.dat；草稿文件：bec-bindings.json。</footer>
@@ -27,7 +27,7 @@
 <script>
 (()=>{'use strict';
 const KEY='bec-binding-web-v1';const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const ROLES=[['mainInterface','主网供液 ME 接口',true],['subInterface','原液子网 ME 接口',true],['storage','BEC 约束场',true],['gate','麦克斯韦门',true],['transposer','主网 → 子网转运器',true],['generator1','纠缠装置 1',true],['generator2','纠缠装置 2',false],['generator3','纠缠装置 3',false],['generator4','纠缠装置 4',false],['workshopInterface','样板转换工坊 ME 接口',false],['naniteTransposer','蜂群转运器',false],['naniteSupply','备用蜂群 ME 接口',false],['naniteHatch','蜂群收容 ME 接口',false],['bulk1','高速供液转运器 1',false],['bulk2','高速供液转运器 2',false],['bulk3','高速供液转运器 3',false],['bulk4','高速供液转运器 4',false]];
+const ROLES=[['mainInterface','主网供液 ME 接口',true],['subInterface','原液子网 ME 接口',true],['storage','BEC 约束场',true],['gate','麦克斯韦门',true],['transposer','主网 → 子网转运器',true],['generator1','纠缠装置 1',true],['generator2','纠缠装置 2',false],['generator3','纠缠装置 3',false],['generator4','纠缠装置 4',false],['workshopInterface','样板转换工坊 ME 接口',false],['naniteTransposer','蜂群转运器',false],['naniteSupply','备用蜂群 ME 接口',false],['naniteHatch','蜂群收容 ME 接口',false],['bulk1','高速工业转运器 1',false],['bulk2','高速工业转运器 2',false],['bulk3','高速工业转运器 3',false],['bulk4','高速工业转运器 4',false],['bulk5','高速工业转运器 5',false]];
 const SIDE=['0 · 下','1 · 上','2 · 北','3 · 南','4 · 西','5 · 东'];
 const $=id=>document.getElementById(id);const trim=s=>String(s??'').trim().toLowerCase();
 const defaults=()=>({version:1,layout:'4x4',roles:{},nodes:Array.from({length:16},(_,i)=>({slot:i+1,row:Math.floor(i/4)+1,column:i%4+1,address:'',redstone:'',pauseSide:1,note:''})),mainSide:4,subSide:5,naniteSupplySide:2,naniteHatchSide:4,recipeDirectory:'/home/bec/recipes',cacheTarget:144000});
@@ -73,7 +73,7 @@ function validate(s){const errors=[],used=new Map();let count=0;const address=(v
  return {errors,count};
 }
 function toV2(s){const result=validate(s);if(result.errors.length)throw Error(result.errors.join('\n'));const r=s.roles;
- const group={name:'公共设备组',storage:r.storage,gate:r.gate,subInterface:r.subInterface,transposer:r.transposer,mainSide:s.mainSide,subSide:s.subSide,generators:[1,2,3,4].map(i=>r['generator'+i]).filter(Boolean),bulkTransposers:[1,2,3,4].map(i=>r['bulk'+i]).filter(Boolean),nanites:{enabled:!!r.naniteTransposer,...(r.naniteTransposer?{transposer:r.naniteTransposer,supplyInterface:r.naniteSupply,hatchInterface:r.naniteHatch,supplySide:s.naniteSupplySide,hatchSide:s.naniteHatchSide}:{})}};
+ const group={name:'公共设备组',storage:r.storage,gate:r.gate,subInterface:r.subInterface,transposer:r.transposer,mainSide:s.mainSide,subSide:s.subSide,generators:[1,2,3,4].map(i=>r['generator'+i]).filter(Boolean),bulkTransposers:[1,2,3,4,5].map(i=>r['bulk'+i]).filter(Boolean),nanites:{enabled:!!r.naniteTransposer,...(r.naniteTransposer?{transposer:r.naniteTransposer,supplyInterface:r.naniteSupply,hatchInterface:r.naniteHatch,supplySide:s.naniteSupplySide,hatchSide:s.naniteHatchSide}:{})}};
  return {version:2,mainInterface:r.mainInterface,...(r.workshopInterface?{workshopInterface:r.workshopInterface}:{}),recipeDirectory:s.recipeDirectory,cacheTarget:s.cacheTarget,groups:[group],nodes:s.nodes.filter(n=>n.address||n.redstone).map(n=>({name:n.note?`节点${n.slot} · ${n.note}`:`节点${n.slot}`,slot:n.slot,row:n.row,column:n.column,group:1,address:n.address,redstone:n.redstone,pauseSide:n.pauseSide,gate:r.gate}))};
 }
 function luaQuote(s){return '"'+String(s).replace(/[\\"\x00-\x1f\x7f]/g,ch=>ch==='\\'?'\\\\':ch==='"'?'\\"':'\\'+ch.charCodeAt(0).toString().padStart(3,'0'))+'"';}
