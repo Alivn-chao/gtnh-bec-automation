@@ -65,6 +65,7 @@ function checkRecipe()perRecipe={a=144,b=144};return 1 end
 function pause(n)output=n;released=n==0 end
 local previous=call
 function call(a,m,...)
+ if m=='getOutput'then return output end
  if m=='getState'then return completed>=orders and 'idle' or output==15 and 'paused-immediate' or 'crafting' end
  if m=='getRequiredCondensate'then
   if completed>=orders then return nil end
@@ -135,6 +136,25 @@ print('Stage tier changes T1 to T2 with available T4: continuous production PASS
 r=run(tier_mock+'futureTier=5');g=r.globals()
 assert g.completed<10 and g.output==15 and len(g.sub)==0
 print('Insufficient bee tier still pauses and drains confirmed old supply PASS')
+
+external=r'''
+quitAt=10
+local previous=call
+function call(a,m,...)
+ if m=='getState'then return 'paused-immediate' end
+ if otherWriter and m=='getOutput' and now>=4.5 then return 15 end
+ return previous(a,m,...)
+end
+local advance=tick
+function tick(dt)local was=released;released=false;advance(dt);released=was end
+'''
+r=run(external);g=r.globals()
+assert g.completed==0 and g.record.pipeline.feedback.output==0
+assert '其他控制仓' in g.record.pipeline.feedback.reason
+r=run(external+'otherWriter=true');g=r.globals()
+assert g.completed==0 and g.record.pipeline.feedback.output==15
+assert '被改为 15' in g.record.pipeline.feedback.reason
+print('Readback differentiates external controller pause from overwritten redstone output PASS')
 for setting in ['partial=true','uncertain=true','nilRequest=true','canceled=true']:
     r=run(setting,False);g=r.globals();assert g.completed==0
     if setting in ('partial=true','uncertain=true'):assert g.record.pending is not None

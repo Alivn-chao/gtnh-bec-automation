@@ -3,14 +3,16 @@ local fs=require('filesystem');local c=require('component')
 local path='/home/bec_auto.lua'
 local function read(p)local f=assert(io.open(p,'r'));local s=f:read('*a');f:close();return assert(s)end
 local original=read(path)
-if original:find('BEC_V1_PRODUCTION_OVERLAP_V2',1,true)then print('生产/纠缠并行补丁V2已安装');return end
+if original:find('BEC_V1_PRODUCTION_OVERLAP_V3',1,true)then print('生产放行回读补丁已安装');return end
 local function section(s,first,last,new)
  local a,b=s:find(first,1,true);assert(a and not s:find(first,b+1,true),'入口缺失或不唯一: '..first)
  local z=assert(s:find(last,b+1,true),'结束入口缺失: '..last)
  return s:sub(1,a-1)..new..s:sub(z)
 end
-local upgrading=original:find('BEC_V1_PRODUCTION_OVERLAP_V1',1,true)~=nil
-local modified=section(original,upgrading and '-- BEC_V1_PRODUCTION_OVERLAP_V1:' or '-- BEC_V1_PIPELINE_V1:','local function serve()',[==[-- BEC_V1_PRODUCTION_OVERLAP_V2: overlap independent AE jobs and conversion on bulk routes.
+local previous=original:find('BEC_V1_PRODUCTION_OVERLAP_V2',1,true) and '-- BEC_V1_PRODUCTION_OVERLAP_V2:'
+ or original:find('BEC_V1_PRODUCTION_OVERLAP_V1',1,true) and '-- BEC_V1_PRODUCTION_OVERLAP_V1:'
+local upgrading=previous~=nil
+local modified=section(original,previous or '-- BEC_V1_PIPELINE_V1:','local function serve()',[==[-- BEC_V1_PRODUCTION_OVERLAP_V3: overlap independent AE jobs and conversion on bulk routes.
 local sequentialPrepare=prepareStreaming
 prepareStreaming=function(target)
  resolveRawNames(target)
@@ -39,6 +41,7 @@ prepareStreaming=function(target)
  record.pipeline.recipe=recipe;record.pipeline.startConsumed={}
  for name,n in pairs(record.required) do record.pipeline.startConsumed[name]=n-record.remaining[name] end
  local halted,released=false,false
+ local releasedAt;local lastFeedback;local feedbackAt=0
  local lastRequired=record.required
  local tierMethod=c.methods(NODE).getRequiredTier~=nil
  local function tierValue()local t=call(NODE,"getRequiredTier");return type(t)=="table" and t.tier or t end
@@ -69,6 +72,20 @@ prepareStreaming=function(target)
   end
   if state~="crafting" and state~="paused-immediate" and not(state=="nanite-tier-too-low" and tierCovered) then
    changed=true;reason=reason or ("节点状态: "..tostring(state))
+  end
+  if released and releasedAt and computer.uptime()-releasedAt>=3 then
+   local output=call(RS,"getOutput",sides.top)
+   local feedback
+   if output~=0 then
+    feedback="本脚本已放行，但暂停输出被改为 "..tostring(output).."；检查其他运行脚本或红石控制"
+   elseif state=="paused-immediate" then
+    feedback="本脚本暂停输出=0，节点仍立即暂停；检查其他控制仓收到的红石信号"
+   end
+   if feedback and (feedback~=lastFeedback or computer.uptime()>=feedbackAt) then
+    print("放行核对: "..feedback)
+    record.pipeline.feedback={reason=feedback,output=output,state=state,at=computer.uptime()}
+    save(record.stage);lastFeedback=feedback;feedbackAt=computer.uptime()+15
+   elseif not feedback then lastFeedback=nil;record.pipeline.feedback=nil end
   end
   if changed then
    if not halted then print("生产暂停: "..reason.."；已提交的供液申请继续核对，不重复下单。") end
@@ -158,22 +175,26 @@ prepareStreaming=function(target)
   end
   local req=productionGuard()
   local funded=not halted
+  local shortages={}
   if funded then
    local consumed=call(NODE,"getConsumedCondensate")
    assert(type(consumed)=="table","当前消耗记录不可读")
    for name,n in pairs(req) do
     local used=integer(consumed[name] or 0);assert(used<=n,"节点消耗超过当前需求")
-    if (stock[name] or 0)<n-used then funded=false end
+    if (stock[name] or 0)<n-used then
+     funded=false;shortages[#shortages+1]=name.." 缺 "..(n-used-(stock[name] or 0)).." mB"
+    end
    end
   end
   if funded and not released then
    checkRecipe(req)
    record.pipeline.overlap=true;save("pipeline-production-release-pending")
    local releaseReq=productionGuard()
-   if not halted and same(releaseReq,req) then pause(0);released=true;save("pipeline-producing")
-    print("当前配方材料已够，开始生产；其余收液、下单和纠缠继续。") end
+   if not halted and same(releaseReq,req) then pause(0);released=true;releasedAt=computer.uptime();save("pipeline-producing")
+    print("当前配方材料已够，暂停输出已设0；节点运行状态持续核对，其余供液纠缠继续。") end
   elseif not funded and released then
    pause(15);released=false;save("pipeline-waiting-material")
+   if #shortages>0 then print("生产等料: "..table.concat(shortages,"；").."；供液纠缠继续。") end
   end
   if ready and (halted or not funded) and (not converting or call(GEN,"isMachineActive")==false) then
    pause(15)

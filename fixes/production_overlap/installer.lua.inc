@@ -3,14 +3,16 @@ local fs=require('filesystem');local c=require('component')
 local path='/home/bec_auto.lua'
 local function read(p)local f=assert(io.open(p,'r'));local s=f:read('*a');f:close();return assert(s)end
 local original=read(path)
-if original:find('BEC_V1_PRODUCTION_OVERLAP_V2',1,true)then print('生产/纠缠并行补丁V2已安装');return end
+if original:find('BEC_V1_PRODUCTION_OVERLAP_V3',1,true)then print('生产放行回读补丁已安装');return end
 local function section(s,first,last,new)
  local a,b=s:find(first,1,true);assert(a and not s:find(first,b+1,true),'入口缺失或不唯一: '..first)
  local z=assert(s:find(last,b+1,true),'结束入口缺失: '..last)
  return s:sub(1,a-1)..new..s:sub(z)
 end
-local upgrading=original:find('BEC_V1_PRODUCTION_OVERLAP_V1',1,true)~=nil
-local modified=section(original,upgrading and '-- BEC_V1_PRODUCTION_OVERLAP_V1:' or '-- BEC_V1_PIPELINE_V1:','local function serve()',[==[PREPARE_BODY]==]..'\n')
+local previous=original:find('BEC_V1_PRODUCTION_OVERLAP_V2',1,true) and '-- BEC_V1_PRODUCTION_OVERLAP_V2:'
+ or original:find('BEC_V1_PRODUCTION_OVERLAP_V1',1,true) and '-- BEC_V1_PRODUCTION_OVERLAP_V1:'
+local upgrading=previous~=nil
+local modified=section(original,previous or '-- BEC_V1_PIPELINE_V1:','local function serve()',[==[PREPARE_BODY]==]..'\n')
 modified=section(modified,'if type(old)=="table" and type(old.pipeline)=="table" and old.plan~=nil then','local streaming=',[==[RECOVER_BODY]==]..'\n')
 if not upgrading then
 local marker='local expected=prepareStreaming(target)'
