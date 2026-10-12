@@ -6,6 +6,8 @@
 
 **用鼠标填写地址：[离线绑定工具说明](tools/BINDING.md)** · [下载网页工具](tools/bec-binding.html)。4×4 节点位置、空位跳过、公共组件绑定、保存草稿和导出 V2 配置。
 
+**V1 硬盘盒接法的 V2 蜂群新版：[安装与接线说明](https://github.com/Alivn-chao/gtnh-bec-automation/blob/bec-v2-cell-io-preview-2026-10-12/experimental/bec_v2/CELL_IO.md)**。支持存储盘整盘装入/回收、同组多节点共用蜂群。
+
 **正在使用V1：[独立缓存脚本修正与替换说明](fixes/cache_bulk/README.md)** · [下载V1 bec_cache.lua](https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/main/fixes/cache_bulk/bec_cache.lua)。只更新缓存脚本，沿用现有界面和配置，无需安装V2。
 
 V1 若在缓存完成后恢复时报“该阶段存在未确认操作”，参见 [cache-working 恢复补丁](fixes/cache_resume/README.md)。
