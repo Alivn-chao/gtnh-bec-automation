@@ -1,5 +1,7 @@
 # 在家里的 Codex 接着做
 
+2026-10-13 用户换HV输入总线后transferItem返回非1停机；真实IOjournal beforeReading30720/requiredCarbon1/pending from0 source2 to2 dest1 count0/stage moving-cell，无holding。图确认原2槽空盘仍在、蜂群实数37604、北面MEIO空；不能声称具体朝向限制已定。先前说输入总线直接可替箱过于确定，已承认读取不等于可取盘。新增nanites_perf/recover_empty_move.lua只恢复这一未搬动第一步：要求Q后pause15/GENoff inactive/两IO全空且RS0、底面小普通箱（<=54且非gt.blockmachines）原2槽空盘、蜂群封顶30720；备份IO+auto journal并回读，IOdone保留original证据/清pending，清匹配auto.naniteStage，不改其它记录或机器/程序；二日志间失败可再执行完成标记清理不搬盘。4模拟通过，未游戏实测；用户须保留硬盘槽位顺序更换箱子。
+
 2026-10-13 实机perf图：一次total20.35秒、bank12.9、emptyPorts3.5、runPort1.3（自身0.95）、save0.75；getStackInSlot305次16.35秒，另一次548次35.75秒，确认逐槽扫描为主要开销，尚未确认批量回退具体原因。用户“继续”授权先前提出只读格式检查，新增fixes/nanites_perf/check_bulk.lua：报告reader类型/count/getAll错误/索引范围/盘元数据缺失/少量实际槽抽查，英文报告/home/bec_nanites_bulk_check.txt，无机器写操作不改自动程序；4模拟通过（false方法、零基格式、缺metadata、reader错误）。用户图压缩箱243槽仅9盘，说明大箱放大逐槽开销；普通27槽可减少扫描，尚未更换/未宣称整次时间保证。
 
 2026-10-13 用户45秒换蜂后问探测仓，明确先不改程序；核对Beta3探测仓Analog输出当前required tier而非provided，阈值不参与，无法分同级family或直接加速盘IO。随后用户授权“有什么办法能测 跑个测试吗”：新增独立 fixes/nanites_perf/run.lua 测试启动器，在内存包装实际快速蜂群模块再启动原UI resume，不覆盖已安装程序、不新增搬盘/暂停操作；统计阶段inclusive/exclusive、日志读写、component.invoke方法，最近10次真实换蜂另存/home/bec_nanites_perf.txt，无动作复查不写报告；正常控制器日志仍按原行为运行。出错恢复loadfile，未知转移不重放；报告失败不改变交换结果。6项Lua5.2真实模块模拟核对4次搬盘/数量/源文件保持/自身求和/回调等待/未知响应保留pending与不重试/无切换不写/报告失败/旧模块拒绝；尚未游戏实测，45秒具体瓶颈未确诊。
