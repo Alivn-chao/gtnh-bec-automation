@@ -58,12 +58,17 @@ local function hive()
  return n,p
 end
 local function guard()
- assert(call(PAUSE,'getOutput',1)==15,'换蜂必须保持传送节点暂停红石15')
  local s=call(NODE,'getState')
- assert(s=='paused-immediate' or s=='nanite-tier-too-low' or
-  s=='idle' and call(NODE,'isWorkAllowed')==false,'节点状态不适合换蜂：'..tostring(s))
- assert(needed()==record.requiredTier,'换蜂过程中配方等级变化，保留现场')
- assert(not record.requiredFamily or requiredFamily()==record.requiredFamily,'换蜂过程中蜂群类型需求变化，保留现场')
+ if context and context.passive then
+  assert(s=='crafting' or s=='paused-immediate' or s=='nanite-tier-too-low' or s=='idle','节点状态不适合换蜂：'..tostring(s))
+  record.requiredTier=needed();record.requiredFamily=requiredFamily()
+ else
+  assert(call(PAUSE,'getOutput',1)==15,'换蜂必须保持传送节点暂停红石15')
+  assert(s=='paused-immediate' or s=='nanite-tier-too-low' or
+   s=='idle' and call(NODE,'isWorkAllowed')==false,'节点状态不适合换蜂：'..tostring(s))
+  assert(needed()==record.requiredTier,'换蜂过程中配方等级变化，保留现场')
+  assert(not record.requiredFamily or requiredFamily()==record.requiredFamily,'换蜂过程中蜂群类型需求变化，保留现场')
+ end
  if context and context.check then context.check() end
  if context and context.stopping and context.stopping() then error('换蜂已暂停，保留现场') end
 end
@@ -243,6 +248,7 @@ local function loadCell(disk)
  print('整盘装入：T'..item.tier..' / 仓内'..record.operationTotal..' 个，空盘槽 '..disk.slot)
 end
 local M={}
+M.passiveStages=true
 -- Read-only decision for the controller. Never fills an already compatible hive
 -- merely to change its quantity; same-tier family preference is intentional.
 function M.needsSwitch()
@@ -250,8 +256,15 @@ function M.needsSwitch()
  if not whole(need) or need<1 then return false end
  local old=oldRecord();assert(not old or old.stage=='done','旧蜂群IO未完成，保留盘和日志，不自动重放')
  local size=discover();emptyPorts()
- local h,p=hive();local best=choose(bank(size),need,family)
- if h<MIN or not p or p.tier<need then return true end
+ local cells=bank(size);local h,p=hive();local best=choose(cells,need,family)
+ if h<MIN or not p or p.tier<need then
+  if best then return true end
+  local available=h
+  if p and p.tier>=need then for _,disk in ipairs(cells) do
+   if disk.item and disk.item.family==p.name then available=available+disk.count end
+  end;return available>=MIN end
+  return false
+ end
  return best~=nil and (best.item.tier<p.tier or best.exact and p.name~=family)
 end
 function M.preview()
@@ -284,7 +297,10 @@ function M.ensure(ctx)
   if known then extra=pack(cells,known.key)
   else for _,disk in ipairs(cells) do if disk.item and disk.item.family==p.name then extra={disk};break end end end
   if #extra==0 then return false end
- else assert(best,'硬盘盒缺少满足T'..need..'的至少64个蜂群') end
+ else
+  if not best and context and context.passive then return false end
+  assert(best,'硬盘盒缺少满足T'..need..'的至少64个蜂群')
+ end
  if h>0 and (not keeping or not known) then
   local hasEmpty=false;for _,disk in ipairs(cells) do if disk.empty then hasEmpty=true;break end end
   assert(hasEmpty,'缺少可接收新类型的空数字奇点盘，旧蜂群未搬运')
@@ -292,14 +308,30 @@ function M.ensure(ctx)
  record={version=2,kind='cell-io',requiredTier=need,requiredFamily=family,holding=known,stage='prepared'}
  guard();archive();save('prepared')
  local ok,result=xpcall(function()
-  if h>0 and (not keeping or not known) then recover(cells);cells=bank(size);best=choose(cells,need,family);assert(best,'回收后没有可装入蜂群') end
+  if h>0 and (not keeping or not known) then
+   recover(cells);cells=bank(size)
+   if context and context.passive then need=needed();family=requiredFamily() end
+   -- Once empty, the node cannot progress. Choose the latest requirement.
+   if not whole(need) or need<1 then
+    emptyPorts();save('done');print('蜂群已完整回盘；当前没有合成需求');return true
+   end
+   best=choose(cells,need,family)
+   if not best and context and context.passive then
+    emptyPorts();save('done');print('蜂群已完整回盘；等待满足T'..need..'的库存');return true
+   end
+   assert(best,'回收后没有可装入蜂群')
+  elseif context and context.passive and h==0 then
+   need=needed();family=requiredFamily()
+   best=whole(need) and need>=1 and choose(cells,need,family) or nil
+   if not best then emptyPorts();save('done');return false end
+  end
   local picked
   if keeping and known then picked=extra else picked=best.picked end
   for _,disk in ipairs(picked) do loadCell(disk) end
   emptyPorts();guard()
-  local n,t=hive();assert(n>=MIN and t.tier>=need,'换蜂后数量或等级不足')
+  local n,t=hive();assert(n>=MIN and (context and context.passive or t.tier>=need),'换蜂后数量或等级不足')
   assert(record.holding and math.min(record.holding.count,DISPLAY_CAP)==n and record.holding.family==t.name,'换蜂后身份核对失败')
-  save('done');print('蜂群IO完成：T'..t.tier..' / '..n..' 个；节点仍暂停')
+  save('done');print('蜂群IO完成：T'..t.tier..' / '..n..' 个'..(context and context.passive and '；由节点判断当前阶段' or '；节点仍暂停'))
   return true
  end,debug.traceback)
  local cut,cutError=pcall(off)

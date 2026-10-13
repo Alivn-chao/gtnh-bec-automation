@@ -3,16 +3,24 @@ local fs=require('filesystem');local c=require('component')
 local path='/home/bec_auto.lua'
 local function read(p)local f=assert(io.open(p,'r'));local s=f:read('*a');f:close();return assert(s)end
 local original=read(path)
-if original:find('BEC_V1_NANITES_STAGE_V1',1,true)then print('阶段优选换蜂补丁已安装');return end
+if original:find('BEC_V1_NANITES_STAGE_V2',1,true)then print('阶段停稳换蜂补丁已安装');return end
 assert(original:find('BEC_V1_PRODUCTION_OVERLAP_V3',1,true),'先安装最新生产并行 V3 补丁')
 assert(original:find('/home/bec_nanites.lua',1,true),'须使用已接入自动换蜂的V1控制器，不能替换历史基准文件')
 local worker=assert(loadfile('/home/bec_nanites.lua','t',_ENV))()
-assert(type(worker)=='table' and type(worker.needsSwitch)=='function','先安装新版阶段优选蜂群模块')
+assert(type(worker)=='table' and type(worker.needsSwitch)=='function' and worker.passiveStages,'先安装新版自动停顿换蜂模块')
 local function insert(s,marker,body)
  local a,b=s:find(marker,1,true);assert(a and not s:find(marker,b+1,true),'入口缺失或不唯一: '..marker)
  return s:sub(1,a-1)..body..s:sub(a)
 end
-local modified=insert(original,'-- BEC_V1_PRODUCTION_OVERLAP_V3:','local serviceNaniteStage\n')
+local modified
+local legacy='-- BEC_V1_NANITES_STAGE_V1:'
+local first,last=original:find(legacy,1,true)
+if first then
+ assert(not original:find(legacy,last+1,true),'旧阶段换蜂入口不唯一')
+ local finish=assert(original:find('local function serve()',last+1,true),'旧阶段换蜂结束入口缺失')
+ modified=original:sub(1,first-1)..[==[STAGE_BODY]==]..'\n'..original:sub(finish)
+else
+modified=insert(original,'-- BEC_V1_PRODUCTION_OVERLAP_V3:','local serviceNaniteStage\n')
 modified=insert(modified,'local function serve()',[==[STAGE_BODY]==]..'\n')
 local marker='local function productionGuard()'
 local a,b=modified:find(marker,1,true);assert(a and not modified:find(marker,b+1,true),'阶段检查入口不唯一')
@@ -20,6 +28,10 @@ modified=modified:sub(1,b)..'\n  serviceNaniteStage()\n'..modified:sub(b+1)
 local recovery='local old=ser.unserialize(contents)'
 local x,y=modified:find(recovery,1,true);assert(x and not modified:find(recovery,y+1,true),'恢复入口缺失或不唯一')
 modified=modified:sub(1,y)..'; assert(not(type(old)=="table" and old.naniteStage),"旧阶段换蜂未确认完成，保留蜂群与生产日志，禁止重放") '..modified:sub(y+1)
+end
+local insufficient='else changed=true;reason="蜂群不足以运行当前阶段，等待旧窗口收尾" end'
+local p,q=modified:find(insufficient,1,true);assert(p and not modified:find(insufficient,q+1,true),'蜂群不足处理入口缺失或不唯一')
+modified=modified:sub(1,p-1)..'else neededTier=nextTier;tierCovered=true end'..modified:sub(q+1)
 assert(load(modified,'@'..path,'t',_ENV),'阶段换蜂补丁语法检查失败')
 local function paused()
  assert(c.invoke('266f65b5-20be-4543-8f2f-bfd2d0816611','getOutput',1)==15,'先按Q正常退出生产UI')
