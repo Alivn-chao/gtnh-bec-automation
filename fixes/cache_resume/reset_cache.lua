@@ -1,4 +1,5 @@
 -- Deliberate cache abandonment. No AE request, fluid transfer, or production reset.
+-- BEC_V1_CACHE_RESET_BUSY_V3: AE jobs cannot write the isolated subnet without our transfer/config.
 local c=require('component');local ser=require('serialization');local fs=require('filesystem')
 local clock=require('computer');local event=require('event');local sides=require('sides')
 local MAIN='3afdc4cf-04e3-4ae9-8be6-e753c23a249d';local SUB='86311657-33d1-41b5-a0d9-0aee7b5c2c50'
@@ -21,8 +22,6 @@ local function rawStock()local rows=call(SUB,'getFluidsInNetwork');assert(type(r
 local function guard()
  assert(call(RS,'getOutput',sides.top)==15,'节点未暂停：请先停止生产')
  local state=call(NODE,'getState');assert(state=='idle' or state=='paused-immediate' or state=='assembler-offline' or state=='unpowered' or state=='nanite-tier-too-low','节点正在运行，不能重置缓存')
- local cpus=call(MAIN,'getCpus');assert(type(cpus)=='table' and next(cpus)~=nil,'AE CPU状态不可读')
- for _,cpu in pairs(cpus)do assert(cpu.busy==false,'AE仍有运行任务或忙闲未知：在ME等待完成或取消后，再按Z')end
  for slot=0,5 do assert(call(MAIN,'getFluidInterfaceConfiguration',slot)==nil,'供液接口仍有配置，不能盲目重置')end
 end
 local function cfg()local t=decode(assert(read(CONFIG),'缺少缓存配置'));assert(t.version==1 and type(t.target)=='number' and t.target>0 and (t.overrides==nil or type(t.overrides)=='table'),'缓存配置不符');return t end
@@ -37,7 +36,7 @@ local function main()
  guard();assert(call(GEN,'getName')=='multi.bec.generator','纠缠装置不符')
  assert(call(GEN,'isWorkAllowed')==false and call(GEN,'isMachineActive')==false,'纠缠装置尚未停机：等待当前工作结束再按Z')
  local productionText=assert(read('/home/bec_auto.journal'),'没有生产记录');local production=decode(productionText)
- assert(production.stage=='cache-working' and production.pending==nil and production.configOwned==false and production.plan==nil,'该错误不是后台缓存中断：重置键不会删除生产订单')
+ assert(production.stage=='cache-working' and production.pending==nil and production.configOwned==false and production.plan==nil,'当前阶段 '..tostring(production.stage)..' 不是可放弃的后台缓存：重置键不会删除生产订单或未确认搬液')
  assert(type(production.requests)=='table' and type(production.transfers)=='table','生产操作记录缺失')
  for _,job in pairs(production.requests)do assert(job.state=='done','生产还有未确认申请')end
  for _,move in pairs(production.transfers)do assert(move.ok==true and move.amount==move.requested,'生产搬料未确认')end
@@ -84,7 +83,7 @@ local function main()
   end
   local expected={};for kind,n in pairs(before)do expected[kind]=n end
   for name,n in pairs(raw)do local kind=routes[name];expected[kind]=(expected[kind] or 0)+n end
-  p={version=1,kind='cache-reset',stage='prepared',oldCache=cacheText,oldProduction=productionText,before=before,raw=raw,routes=routes,expected=expected,targets=targets,reconciliation=reconciliation,cacheBackup=backup(CACHE),configBackup=backup(CONFIG)}
+  p={version=1,kind='cache-reset',stage='prepared',oldCache=cacheText,oldProduction=productionText,before=before,raw=raw,routes=routes,expected=expected,targets=targets,reconciliation=reconciliation,retainedRequests=old.requests,cacheBackup=backup(CACHE),configBackup=backup(CONFIG)}
   write(PROGRESS,p)
  end
  assert(productionText==p.oldProduction,'生产记录已改变，停止重置')
@@ -114,9 +113,9 @@ local function main()
  for kind in pairs(p.targets)do config.overrides[kind]=0 end
  write(CONFIG,config)
  local target={};for kind in pairs(p.targets)do target[kind]=final[kind] or 0 end
- write(CACHE,{version=1,kind='cache',background=true,stage='stopped',incomplete=false,configOwned=false,requests={},transfers={},target=target,abandoned=true,resetRecord=PROGRESS,originalJournal=p.cacheBackup})
+ write(CACHE,{version=1,kind='cache',background=true,stage='stopped',incomplete=false,configOwned=false,requests={},transfers={},target=target,abandoned=true,retainedRequests=p.retainedRequests or decode(p.oldCache).requests,resetRecord=PROGRESS,originalJournal=p.cacheBackup})
  p.stage='done';write(PROGRESS,p)
- print('缓存重置完成：旧记录已备份，库存保留；本轮类型已停补，可在C里重新设置。')
+ print('缓存重置完成：旧记录已备份，库存保留；已有AE任务继续，不取消、不重下。本轮类型已停补，可在C里重新设置。')
 end
 local ok,err=xpcall(main,debug.traceback)
 if armed then pcall(call,GEN,'setWorkAllowed',false)end

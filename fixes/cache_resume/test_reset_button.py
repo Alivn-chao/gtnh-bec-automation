@@ -1,4 +1,4 @@
-import runpy
+import runpy,sys
 from pathlib import Path
 g=runpy.run_path(str(Path(__file__).with_name('test_abandon.py')))
 source=Path(__file__).with_name('reset_cache.lua').read_text(encoding='utf-8')
@@ -24,9 +24,25 @@ w=s.writes;assert r.eval('function()'+source+'\nend')()[0];assert s.writes==w
 r.execute(g['setup']+prepare);assert r.eval('function()'+source+'\nend')()[0]
 assert s.files['/home/bec_cache.reset.before-reset-1'] is not None
 print('General cache reset, new closure with original archive, inventory/config preserved, repeated and later reset: PASS')
-for extra in ('s.busy=true',"local old=require('serialization').unserialize(s.files['/home/bec_cache.journal']);old.pending={};s.files['/home/bec_cache.journal']=require('serialization').serialize(old,false)", 's.left=577'):
+for extra in ("local old=require('serialization').unserialize(s.files['/home/bec_cache.journal']);old.pending={};s.files['/home/bec_cache.journal']=require('serialization').serialize(old,false)", 's.left=577'):
  r,ok,err,old=run(extra);assert not ok and r.globals().s.starts==0 and r.globals().s.files['/home/bec_cache.journal']==old
-print('Busy AE / pending transfer / non-integral batch refuse reset: PASS')
+print('Pending transfer / non-integral batch refuse reset: PASS')
+for extra in ('s.busy=true',r'''
+local c=require('component');local invoke=c.invoke
+c.invoke=function(a,m,...)if m=='getCpus' then error('CPU task data unreadable')end;return invoke(a,m,...)end
+'''):
+ r,ok,err,old=run(extra);assert ok,err
+ assert r.globals().s.space==144576 and r.globals().s.left==0
+ closed=r.eval("require('serialization').unserialize(s.files['/home/bec_cache.journal'])")
+ assert closed.retainedRequests[1].state=='submitted'
+ assert r.globals().s.files['/home/bec_cache.journal.before-reset-1']==old
+print('Busy/unreadable AE does not block isolated cache reset; original requests retained without replay: PASS')
+for extra in ("local ser=require('serialization');local p=ser.unserialize(s.files['/home/bec_auto.journal']);p.stage='pipeline-converting';s.files['/home/bec_auto.journal']=ser.serialize(p,false)",
+ "local ser=require('serialization');local p=ser.unserialize(s.files['/home/bec_auto.journal']);p.requests={{state='submitted'}};s.files['/home/bec_auto.journal']=ser.serialize(p,false)",
+ "local c=require('component');local invoke=c.invoke;c.invoke=function(a,m,...)if m=='getFluidInterfaceConfiguration'then return {name='spatialfluid'}end;return invoke(a,m,...)end"):
+ r,ok,err,old=run(extra);assert not ok
+ assert r.globals().s.starts==0 and r.globals().s.files['/home/bec_cache.journal']==old
+print('Production pipeline/unfinished production request/live interface configuration still refuse reset without changes: PASS')
 r,ok,err,old=run('s.failConvert=true');assert not ok and not r.globals().s.enabled
 r.execute('s.failConvert=false');assert r.eval('function()'+source+'\nend')()[0]
 assert r.globals().s.space==144576
@@ -93,9 +109,32 @@ upgrade.globals().files['/home/bec_ui.lua']=u['patched']
 oldPatch=subprocess.check_output(['git','show','f439a94:fixes/cache_resume/patch_reset_button.lua'],cwd=g['ROOT']).decode('utf-8')
 upgrade.eval('function()'+oldPatch+'\nend')();upgrade.eval('function()'+patch+'\nend')()
 assert upgrade.globals().files['/home/bec_ui.lua']==patched
-print('Existing reset V1 upgrades to identical V2 worker without changing other UI patches: PASS')
+print('Existing reset V1 upgrades to identical V3 worker without changing other UI patches: PASS')
+upgrade=uiBase['LuaRuntime'](unpack_returned_tuples=True);upgrade.execute(uiBase['literal']('fixes/process_reset/test_reset.py','installer'))
+upgrade.globals().files['/home/bec_ui.lua']=u['patched']
+v2Patch=subprocess.check_output(['git','show','690bfe1:fixes/cache_resume/patch_reset_button.lua'],cwd=g['ROOT']).decode('utf-8')
+upgrade.eval('function()'+v2Patch+'\nend')()
+# Preserve the newest CPU/manual-supply UI additions during reset-worker upgrade.
+upgrade.globals().files['/home/bec_ui.lua']+='\n-- BEC_V1_CPU_WAIT_UI_V1: preserve newest UI\n'
+upgrade.eval('function()'+patch+'\nend')()
+assert upgrade.globals().files['/home/bec_ui.lua']==patched+'\n-- BEC_V1_CPU_WAIT_UI_V1: preserve newest UI\n'
+print('Existing reset V2 upgrades to V3 while preserving newer CPU/manual UI: PASS')
+sys.path.insert(0,str(g['ROOT']/'fixes/cpu_wait'))
+import test_wait as cpuTests
+combined=cpuTests.InstallerTests().fixture()
+combined.eval('function()'+v2Patch+'\nend')()
+combined.execute(cpuTests.PATCH)
+controlBefore=combined.globals().files['/home/bec_auto.lua']
+combined.eval('function()'+patch+'\nend')()
+combinedUI=combined.globals().files['/home/bec_ui.lua']
+combined.execute('assert(load(...))',combinedUI)
+assert 'BEC_V1_CPU_WAIT_UI_V1:' in combinedUI and 'local cpuReason=record.pipeline' in combinedUI
+assert 'BEC_V1_UI_CACHE_RESET_V3' in combinedUI
+assert combined.globals().files['/home/bec_auto.lua']==controlBefore
+print('Actual newest CPU/manual patch plus reset V2 upgrades cleanly to V3, controller untouched: PASS')
 r=uiBase['LuaRuntime'](unpack_returned_tuples=True);r.globals().pyWidth=uiBase['width'];r.globals().pySub=uiBase['sub']
 r.execute(uiBase['base']+uiBase['gpu']+uiBase['extra']+g['setup']+prepare+r'''
+s.busy=true
 s.attempts=0
 s.controller=function(mode)
  s.attempts=s.attempts+1
