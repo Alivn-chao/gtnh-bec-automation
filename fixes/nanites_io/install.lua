@@ -4,8 +4,8 @@ local fs=require('filesystem')
 local internet=require('internet')
 local target='/home/bec_nanites.lua'
 local urls={
- 'https://fastly.jsdelivr.net/gh/Alivn-chao/gtnh-bec-automation@main/fixes/nanites_io/bec_nanites.lua',
- 'https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/main/fixes/nanites_io/bec_nanites.lua'}
+ 'https://fastly.jsdelivr.net/gh/Alivn-chao/gtnh-bec-automation@a9264efdfd74d74d4f1cc207a61a08a11c926d58/fixes/nanites_io/bec_nanites.lua',
+ 'https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/a9264efdfd74d74d4f1cc207a61a08a11c926d58/fixes/nanites_io/bec_nanites.lua'}
 local node='b04787f9-5423-4b03-8549-c786d4ef38d0'
 local rs='266f65b5-20be-4543-8f2f-bfd2d0816611'
 local LENGTH,CHECKSUM=16818,2360169525
