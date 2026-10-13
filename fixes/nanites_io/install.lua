@@ -3,7 +3,9 @@ local c=require('component')
 local fs=require('filesystem')
 local internet=require('internet')
 local target='/home/bec_nanites.lua'
-local url='https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/main/fixes/nanites_io/bec_nanites.lua'
+local urls={
+ 'https://fastly.jsdelivr.net/gh/Alivn-chao/gtnh-bec-automation@1df5b7b2d01f8695bef42cf294162fcb64445da2/fixes/nanites_io/bec_nanites.lua',
+ 'https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/1df5b7b2d01f8695bef42cf294162fcb64445da2/fixes/nanites_io/bec_nanites.lua'}
 local node='b04787f9-5423-4b03-8549-c786d4ef38d0'
 local rs='266f65b5-20be-4543-8f2f-bfd2d0816611'
 local LENGTH,CHECKSUM=15408,1451703569
@@ -31,13 +33,21 @@ local function checksum(text)
 end
 paused()
 local original=read(target);assert(#original>0,'旧模块为空，取消安装')
-local chunks,size={},0
-for chunk in internet.request(url) do
- size=size+#chunk;assert(size<=LENGTH,'下载内容过长，旧文件未改动')
- chunks[#chunks+1]=chunk
+local source,lastError
+for _,url in ipairs(urls) do
+ local ok,result=pcall(function()
+  local chunks,size={},0
+  for chunk in internet.request(url) do
+   size=size+#chunk;assert(size<=LENGTH,'下载内容过长，旧文件未改动')
+   chunks[#chunks+1]=chunk
+  end
+  local text=table.concat(chunks)
+  assert(#text==LENGTH and checksum(text)==CHECKSUM,'下载校验失败，旧文件未改动')
+  return text
+ end)
+ if ok then source=result;break else lastError=result end
 end
-local source=table.concat(chunks)
-assert(#source==LENGTH and checksum(source)==CHECKSUM,'下载校验失败，旧文件未改动')
+assert(source,'所有下载源失败，旧文件未改动：'..tostring(lastError))
 local worker=assert(load(source,'@bec_nanites.cellio','t',_ENV))()
 assert(type(worker)=='table' and type(worker.preview)=='function' and type(worker.ensure)=='function','模块格式错误')
 worker.preview() -- Reads the verified cell layout; never calls ensure here.

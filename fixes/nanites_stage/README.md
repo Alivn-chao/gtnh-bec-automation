@@ -22,7 +22,7 @@ lua /home/bec_patch_nanite_stage.lua
 lua /home/bec_ui.lua resume
 ```
 
-raw无法连接时可替换URL前缀为 `https://fastly.jsdelivr.net/gh/Alivn-chao/gtnh-bec-automation@main/`。模块安装器内部仍请求raw并核对固定长度/校验值。不能用未经校验的下载替换游戏模块。
+raw无法连接时可替换URL前缀为 `https://fastly.jsdelivr.net/gh/Alivn-chao/gtnh-bec-automation@main/`。模块安装器优先Fastly、失败再用raw，两者固定同一提交并核对长度/校验值。不能用未经校验的下载替换游戏模块。
 
 两份安装器各自备份原文件，控制器备份名 `.before-nanite-stage-N`。配置和原订单日志保留。重复安装阶段补丁不重复写。先升级蜂群模块；缺少 `needsSwitch()` 或 V3 时控制器补丁拒绝安装。
 
