@@ -4,11 +4,11 @@ local fs=require('filesystem')
 local internet=require('internet')
 local target='/home/bec_nanites.lua'
 local urls={
- 'https://fastly.jsdelivr.net/gh/Alivn-chao/gtnh-bec-automation@a9264efdfd74d74d4f1cc207a61a08a11c926d58/fixes/nanites_io/bec_nanites.lua',
- 'https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/a9264efdfd74d74d4f1cc207a61a08a11c926d58/fixes/nanites_io/bec_nanites.lua'}
+ 'https://fastly.jsdelivr.net/gh/Alivn-chao/gtnh-bec-automation@e44b86c9ed8e12df9e21567bd6174216af85f2d5/fixes/nanites_io/bec_nanites.lua',
+ 'https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/e44b86c9ed8e12df9e21567bd6174216af85f2d5/fixes/nanites_io/bec_nanites.lua'}
 local node='b04787f9-5423-4b03-8549-c786d4ef38d0'
 local rs='266f65b5-20be-4543-8f2f-bfd2d0816611'
-local LENGTH,CHECKSUM=16818,2360169525
+local LENGTH,CHECKSUM=17681,3896609808
 local function paused()
  assert(c.invoke(rs,'getOutput',1)==15,'先停止生产UI，保持节点暂停红石15')
  assert(c.invoke(node,'isWorkAllowed')==false,'节点仍允许工作，取消安装')
