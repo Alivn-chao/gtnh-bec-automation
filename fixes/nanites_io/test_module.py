@@ -43,10 +43,11 @@ c.invoke=function(a,m,x,y,n,source,dest)
   if m=='getStackInSlot' then return inv[x][y] end
   if m=='getAllStacks' then
    bulkReads=bulkReads+1
-   local values={};for i=1,243 do values[i]=inv[0][i] and copy(inv[0][i]) or {} end
+   local size=x==0 and 243 or 12
+   local values={};for i=1,size do values[i]=inv[x][i] and copy(inv[x][i]) or {} end
    if zeroIndex then values[0]=values[1] end
    if missingMetadata then for _,v in pairs(values) do v.storedItemCount=nil end end
-   return {count=function() return 243 end,getAll=function() return values end}
+   return {count=function() return size end,getAll=function() return values end}
   end
   if m=='transferItem' then
    assert(n==1 and inv[x][source] and not inv[y][dest])
@@ -111,7 +112,7 @@ class ModuleTests(unittest.TestCase):
 
  def test_preview_and_bulk_read_false_method_flag(self):
   self.module.preview()
-  self.assertEqual(self.lua.globals().bulkReads,1)
+  self.assertEqual(self.lua.globals().bulkReads,3)
   self.assertEqual(self.lua.globals().moves,0)
   self.assertEqual(self.lua.globals().writes,0)
 

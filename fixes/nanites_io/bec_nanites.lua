@@ -61,7 +61,9 @@ local function guard()
  local s=call(NODE,'getState')
  if context and context.passive then
   assert(s=='crafting' or s=='paused-immediate' or s=='nanite-tier-too-low' or s=='idle','节点状态不适合换蜂：'..tostring(s))
-  record.requiredTier=needed();record.requiredFamily=requiredFamily()
+  local demand=call(NODE,'getRequiredTier')
+  record.requiredTier=type(demand)=='table' and demand.tier or demand
+  record.requiredFamily=type(demand)=='table' and demand.name or nil
  else
   assert(call(PAUSE,'getOutput',1)==15,'换蜂必须保持传送节点暂停红石15')
   assert(s=='paused-immediate' or s=='nanite-tier-too-low' or
@@ -73,7 +75,7 @@ local function guard()
  if context and context.stopping and context.stopping() then error('换蜂已暂停，保留现场') end
 end
 local function tick()
- if context and context.tick then context.tick(0.1) else os.sleep(0.1) end
+ if context and context.tick then context.tick(0.05) else os.sleep(0.05) end
  guard()
 end
 local function output(a,n)
@@ -122,29 +124,36 @@ local function discover()
  end end
  return size
 end
-local function emptyPorts()
- for _,side in ipairs({2,3}) do for slot=1,12 do
-  assert(stack(side,slot)==nil,'蜂群IO已有硬盘，保留未完成操作')
- end end
-end
-local function bank(size)
- local cells={}
+local function slotSnapshot(side,size)
  local ok,rows=pcall(function()
   if c.methods(T).getAllStacks==nil then return end
-  local reader=call(T,'getAllStacks',0)
+  local reader=call(T,'getAllStacks',side)
   assert(reader.count()==size,'批量槽数不符')
   local values=reader.getAll();assert(type(values)=='table')
   for index in pairs(values) do assert(whole(index) and index>=1 and index<=size,'批量槽号不符') end
   return values
  end)
- if not ok then rows=nil end
+ return ok and rows or nil
+end
+local function snapshotStack(rows,side,slot)
+ if not rows then return stack(side,slot) end
+ local item=rows[slot]
+ if type(item)=='table' and item.name==nil then return nil end
+ if item and (item.storedItemCount==nil or type(item.getAvailableItems)~='table') then return stack(side,slot) end
+ return item
+end
+local function emptyPorts()
+ for _,side in ipairs({2,3}) do
+ local rows=slotSnapshot(side,12)
+ for slot=1,12 do
+  assert(snapshotStack(rows,side,slot)==nil,'蜂群IO已有硬盘，保留未完成操作')
+ end end
+end
+local function bank(size)
+ local cells={}
+ local rows=slotSnapshot(0,size)
  for slot=1,size do
-  local item
-  if rows then
-   item=rows[slot]
-   if type(item)=='table' and item.name==nil then item=nil end
-   if item and (item.storedItemCount==nil or type(item.getAvailableItems)~='table') then item=stack(0,slot) end
-  else item=stack(0,slot) end
+  local item=snapshotStack(rows,0,slot)
   if item then
    local n,row=describe(item)
    cells[#cells+1]={slot=slot,count=n,item=row,
@@ -193,11 +202,12 @@ local function runPort(side,rs,endDisk,endHive,kind,key)
  while true do
   guard()
   local at,n,row
+  local rows=slotSnapshot(side,12)
   -- Read stationary output first; input/output readings can straddle an AE tick.
-  for slot=7,12 do local item=stack(side,slot);if item then
+  for slot=7,12 do local item=snapshotStack(rows,side,slot);if item then
    assert(not at,'IO输出口出现多张盘');at=slot;n,row=describe(item)
   end end
-  if not at then local item=stack(side,1);if item then n,row=describe(item) end end
+  if not at then local item=snapshotStack(rows,side,1);if item then n,row=describe(item) end end
   local h,p=hive()
   if record.operationTotal then
    assert(not n or n<=record.operationTotal,'盘内数量超出本次目标')
@@ -249,6 +259,7 @@ local function loadCell(disk)
 end
 local M={}
 M.passiveStages=true
+M.fastStages=true
 -- Read-only decision for the controller. Never fills an already compatible hive
 -- merely to change its quantity; same-tier family preference is intentional.
 function M.needsSwitch()
@@ -278,6 +289,7 @@ function M.preview()
  emptyPorts()
 end
 function M.ensure(ctx)
+ local started=clock.uptime()
  local need=needed();if not whole(need) or need<1 then return false end
  context=ctx;local size=discover()
  local old=oldRecord();assert(not old or old.stage=='done','旧蜂群IO未完成，保留盘和日志，不自动重放')
@@ -290,6 +302,12 @@ function M.ensure(ctx)
  if not (known and known.count==h and h<DISPLAY_CAP and p and known.family==p.name and known.tier==p.tier) then known=nil end
  local sameFamily=0
  if p then for _,disk in ipairs(cells) do if disk.item and disk.item.family==p.name then sameFamily=sameFamily+disk.count end end end
+ if context and context.stage then
+  local switch
+  if h<MIN or not p or p.tier<need then switch=best~=nil or p and p.tier>=need and h+sameFamily>=MIN
+  else switch=best~=nil and (best.item.tier<p.tier or best.exact and p.name~=family) end
+  if not switch then return false end
+ end
  local keeping=h>0 and p.tier>=need and h+sameFamily>=MIN
   and (not best or best.item.tier>=p.tier and not(best.exact and p.name~=family))
  local extra={}
@@ -306,7 +324,9 @@ function M.ensure(ctx)
   assert(hasEmpty,'缺少可接收新类型的空数字奇点盘，旧蜂群未搬运')
  end
  record={version=2,kind='cell-io',requiredTier=need,requiredFamily=family,holding=known,stage='prepared'}
- guard();archive();save('prepared')
+ guard()
+ if context and context.beforeAction then context.beforeAction() end
+ archive();save('prepared')
  local ok,result=xpcall(function()
   if h>0 and (not keeping or not known) then
    recover(cells);cells=bank(size)
@@ -331,7 +351,7 @@ function M.ensure(ctx)
   emptyPorts();guard()
   local n,t=hive();assert(n>=MIN and (context and context.passive or t.tier>=need),'换蜂后数量或等级不足')
   assert(record.holding and math.min(record.holding.count,DISPLAY_CAP)==n and record.holding.family==t.name,'换蜂后身份核对失败')
-  save('done');print('蜂群IO完成：T'..t.tier..' / '..n..' 个'..(context and context.passive and '；由节点判断当前阶段' or '；节点仍暂停'))
+  save('done');print('蜂群IO完成：T'..t.tier..' / '..n..' 个；耗时 '..string.format('%.2f',clock.uptime()-started)..' 秒'..(context and context.passive and '；由节点判断当前阶段' or '；节点仍暂停'))
   return true
  end,debug.traceback)
  local cut,cutError=pcall(off)

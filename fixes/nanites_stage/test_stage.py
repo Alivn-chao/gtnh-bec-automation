@@ -215,6 +215,7 @@ class StageTests(unittest.TestCase):
 
  def test_progress_advances_during_io_wait_without_control_writes(self):
   self.lua.execute(r'''
+   noBulk=true
    seedHive(19612);inv[0][9]=disk(0);inv[0][10]=disk(128,'Carbon',100)
    local invoke=c.invoke;local hidden=0
    c.invoke=function(a,m,x,y,...)
