@@ -1,5 +1,7 @@
 # 在家里的 Codex 接着做
 
+2026-10-13 新现场submitted恢复阻塞与GitHub同步：用户cacheUI后台缓存让位/节点有配方，实际auto.lua321报原液申请尚未确认完成禁止重复下单，pause15 GENoff。GitHub connector transport失败，schannel fetch TLS失败后git -c http.sslBackend=openssl fetch成功，远端097a591之后14提交最新2da26a1，main fastforward已同步（不改outputs）。新链stage passive/batchStop/idleRecovery/fastCycle/first10+IO1/7仍保留requests全部done的恢复guard，当前非“库存目标不够”且不能证明AE真实未完成。新增独立check_requests.lua只读读auto.journal unfinishedraw/计划+确认delivered/主子场对应库存/CPU active+pending匹配和不可读摘要，禁止任何机器写/日志写/请求取消或重放；3场景mock实时raw任务/旧submitted但idle/不可读CPU通过。新GitHub相关测试idle8/fast25/first10合并7/emptyRecovery4/batch8共52通过模拟；不能当实机验收。要用户回终端执行只读报告查看具体request与CPU，尚未确认旧AE是否结束，未删除guard/改done/覆盖最新蜂群模块。旧完整module安装会覆盖first10/IO1/7需避免盲重装。
+
 2026-10-13 用户追加南北端口只读1，解释输入1完成输出7..12后用户明确“那就是1和7”：first10安装器升级合并IO_SLOTS_1_7_V1，只正常检查端口1/7，runPort先读stationary7无输出才读输入1，不获取端口快照/其它槽。安装前两次全12槽空闲+RS0检查，一端一次一盘且7空，端口需程序独占无其它盘；保持日志、数量/身份、未知转移不重放。可从fast原版或first10-only原位升级；7模拟通过，真整轮4moves禁端口1/7外读取/所有getAllStacks、旧版升级、输出8非空拒绝等。须先用户换普通箱并按原槽位恢复原2空盘->empty_move恢复RECOVERED->新合并补丁->UIresume。仍未游戏实测。
 
 2026-10-13 用户明确请求普通箱子只检测前10格：新增nanites_perf/patch_first10.lua原位修改实际fast模块bank函数为直接读取1..min(size,10)，不获取全盒快照；IO端口12槽检查不变，不改阶段暂停/搬盘/日志核对/控制器。要求先换小普通箱、按原槽位复原原2槽空盘、运行上面的recover_empty_move看到RECOVERED，再pendingdone/Q/GENoffinactive条件安装，临时文件flush回读语法/独立backup/回滚/幂等。蜂群盘及可回收空盘都需前10格（装入后空盘可复用），11后忽略。完整模块副本/独立安装checksum未修改，今后重装整份模块会覆盖需重新应用first10。5模拟通过：真正4次搬盘禁全盒读取/10后读取、范围外空盘不可选、备份/幂等/不改生产日志、回滚、pending拒绝；未游戏实测。
