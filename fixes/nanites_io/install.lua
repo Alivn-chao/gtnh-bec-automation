@@ -6,7 +6,7 @@ local target='/home/bec_nanites.lua'
 local url='https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/main/fixes/nanites_io/bec_nanites.lua'
 local node='b04787f9-5423-4b03-8549-c786d4ef38d0'
 local rs='266f65b5-20be-4543-8f2f-bfd2d0816611'
-local LENGTH,CHECKSUM=14283,550471779
+local LENGTH,CHECKSUM=15408,1451703569
 local function paused()
  assert(c.invoke(rs,'getOutput',1)==15,'先停止生产UI，保持节点暂停红石15')
  assert(c.invoke(node,'isWorkAllowed')==false,'节点仍允许工作，取消安装')

@@ -46,6 +46,10 @@ end
 local function needed()
  local v=call(NODE,'getRequiredTier');return type(v)=='table' and v.tier or v
 end
+local function requiredFamily()
+ local v=call(NODE,'getRequiredTier')
+ return type(v)=='table' and v.name or nil
+end
 local function hive()
  local n=call(NODE,'getAvailableNanites');assert(whole(n),'蜂群仓数量无效')
  local p=call(NODE,'getProvidedTier')
@@ -59,6 +63,7 @@ local function guard()
  assert(s=='paused-immediate' or s=='nanite-tier-too-low' or
   s=='idle' and call(NODE,'isWorkAllowed')==false,'节点状态不适合换蜂：'..tostring(s))
  assert(needed()==record.requiredTier,'换蜂过程中配方等级变化，保留现场')
+ assert(not record.requiredFamily or requiredFamily()==record.requiredFamily,'换蜂过程中蜂群类型需求变化，保留现场')
  if context and context.check then context.check() end
  if context and context.stopping and context.stopping() then error('换蜂已暂停，保留现场') end
 end
@@ -153,13 +158,15 @@ local function pack(cells,key)
  for _,disk in ipairs(candidates) do picked[#picked+1]=disk;n=n+disk.count end
  return picked,n
 end
-local function choose(cells,need)
+local function choose(cells,need,family)
  local seen,best={},nil
  for _,disk in ipairs(cells) do if disk.item and not seen[disk.item.key] then
   local item=disk.item;seen[item.key]=true
   local picked,n=pack(cells,item.key)
-  if item.tier>=need and n>=MIN and (not best or item.tier<best.item.tier or item.tier==best.item.tier and n>best.count) then
-   best={item=item,count=n,picked=picked}
+  local exact=item.tier==need and item.family==family
+  if item.tier>=need and n>=MIN and (not best or exact and not best.exact
+   or exact==best.exact and (item.tier<best.item.tier or item.tier==best.item.tier and n>best.count)) then
+   best={item=item,count=n,picked=picked,exact=exact}
   end
  end end
  return best
@@ -236,6 +243,17 @@ local function loadCell(disk)
  print('整盘装入：T'..item.tier..' / 仓内'..record.operationTotal..' 个，空盘槽 '..disk.slot)
 end
 local M={}
+-- Read-only decision for the controller. Never fills an already compatible hive
+-- merely to change its quantity; same-tier family preference is intentional.
+function M.needsSwitch()
+ local need,family=needed(),requiredFamily()
+ if not whole(need) or need<1 then return false end
+ local old=oldRecord();assert(not old or old.stage=='done','旧蜂群IO未完成，保留盘和日志，不自动重放')
+ local size=discover();emptyPorts()
+ local h,p=hive();local best=choose(bank(size),need,family)
+ if h<MIN or not p or p.tier<need then return true end
+ return best~=nil and (best.item.tier<p.tier or best.exact and p.name~=family)
+end
 function M.preview()
  local size=discover();local h,p=hive();local cells=bank(size)
  print('蜂群IO：南3装入，北2回收，底0硬盘盒 '..size..' 槽；整盘搬运，数量由放盘控制')
@@ -251,14 +269,16 @@ function M.ensure(ctx)
  context=ctx;local size=discover()
  local old=oldRecord();assert(not old or old.stage=='done','旧蜂群IO未完成，保留盘和日志，不自动重放')
  emptyPorts()
- local cells=bank(size);local h,p=hive();local best=choose(cells,need)
+ local family=requiredFamily()
+ local cells=bank(size);local h,p=hive();local best=choose(cells,need,family)
  local known=old and old.holding
  -- A saturated node reading cannot prove the current raw quantity. Recover to
  -- read the actual quantity before another operation, even with an old record.
  if not (known and known.count==h and h<DISPLAY_CAP and p and known.family==p.name and known.tier==p.tier) then known=nil end
  local sameFamily=0
  if p then for _,disk in ipairs(cells) do if disk.item and disk.item.family==p.name then sameFamily=sameFamily+disk.count end end end
- local keeping=h>0 and p.tier>=need and h+sameFamily>=MIN and (not best or best.item.tier>=p.tier)
+ local keeping=h>0 and p.tier>=need and h+sameFamily>=MIN
+  and (not best or best.item.tier>=p.tier and not(best.exact and p.name~=family))
  local extra={}
  if keeping then
   if known then extra=pack(cells,known.key)
@@ -269,10 +289,10 @@ function M.ensure(ctx)
   local hasEmpty=false;for _,disk in ipairs(cells) do if disk.empty then hasEmpty=true;break end end
   assert(hasEmpty,'缺少可接收新类型的空数字奇点盘，旧蜂群未搬运')
  end
- record={version=2,kind='cell-io',requiredTier=need,holding=known,stage='prepared'}
+ record={version=2,kind='cell-io',requiredTier=need,requiredFamily=family,holding=known,stage='prepared'}
  guard();archive();save('prepared')
  local ok,result=xpcall(function()
-  if h>0 and (not keeping or not known) then recover(cells);cells=bank(size);best=choose(cells,need);assert(best,'回收后没有可装入蜂群') end
+  if h>0 and (not keeping or not known) then recover(cells);cells=bank(size);best=choose(cells,need,family);assert(best,'回收后没有可装入蜂群') end
   local picked
   if keeping and known then picked=extra else picked=best.picked end
   for _,disk in ipairs(picked) do loadCell(disk) end

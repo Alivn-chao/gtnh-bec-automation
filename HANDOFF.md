@@ -1,5 +1,8 @@
 # 在家里的 Codex 接着做
 
+2026-10-13 阶段优选换蜂：用户指出高等级兼容会按2^(提供-需求)减速，要求有对应库存即切换。新增 fixes/nanites_stage：对应类型/同等级/更高等级依次选择，模块needsSwitch只读，阶段等级或类型变化即查、同阶段2秒查；watcher tick及overlap productionGuard接入，暂停节点15并停稳GEN后整盘换蜂，核对需求/消耗/阶段/门，恢复原输出和GEN状态。部分IO未确认保留两日志，不重放；naniteStage未清除阻止自动恢复。安装要求已接蜂群的V1+overlap V3，保留旧控制器/配置/订单，独立备份。原35IO/模块/安装测试和新增12个模块+协调器/安装模拟通过；未游戏实测，未修改实际/home文件。
+
+
 2026-10-13 overlap V3放行回读：用户第二张完整UI仍立即暂停，T4/需求T1/64并行、GEN关闭、stage显示整批原液已齐，末日志放行和GEN启动，无红故障。承认先前“打印开始生产=机器运行”不足；本地MTEBECIONode源码incrementProgressTime检查所有controllerHatches的PAUSE_INSTANT信号，任一接收即PausedImmediate。本次不能仅图确定其他控制源还是程序路径。新增V3 marker/旧V1V2原位升级，pause0后releasedAt，3秒后回读ownRS top和NODEstate，own0+stillpaused提示其他控制仓红石，own非0提示被其他脚本/红石改写；pipeline.feedback落盘/同原因15秒最多一条，正常后清内存；打印改成输出设0/持续核对，不宣称机器已产，不强行争抢覆盖外部信号。模拟externalhatch/外部writer15区分通过，原连续/中断恢复/订单守恒回归通过；待现场安装看EVENTS。未实机解决具体控制源，不能声称已根治。
 
 2026-10-13 overlap V2阶段蜂群误停：用户节点GUI立即暂停，提供19612 T4，当前需求银T2，下一碳T1 progress4500，四种数值已满；GUI不能证明控制面板具体fault。检查发现overlap V1把getRequiredTier任何变化置sticky halted，即使T4覆盖T2也等旧窗口全收转换。修复仅同归一化配方在当前provided.tier>=nextTier且数量>=64时更新neededTier继续；nanite-tier-too-low状态滞后但读数明确覆盖也允许下一tick继续；真正不足/不同配方/异常仍暂停旧窗口收尾，新增具体生产暂停print。marker BEC_V1_PRODUCTION_OVERLAP_V2，安装器兼容旧pipeline或V1helper，仅初装包围serve，旧V1不双包，备份独立。旧5e08f6b安装器真实git内容升级编译/backup/wrapper唯一、T1->T2提供T4连续10份+不足T5停机、原完整供液/转换/退出恢复/未确认拒绝回归通过。现场实际暂停原因需EVENTS，不能仅凭GUI宣称确证；未实机验证。
