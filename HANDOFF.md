@@ -1,5 +1,7 @@
 # 在家里的 Codex 接着做
 
+2026-10-13 用户追加南北端口只读1，解释输入1完成输出7..12后用户明确“那就是1和7”：first10安装器升级合并IO_SLOTS_1_7_V1，只正常检查端口1/7，runPort先读stationary7无输出才读输入1，不获取端口快照/其它槽。安装前两次全12槽空闲+RS0检查，一端一次一盘且7空，端口需程序独占无其它盘；保持日志、数量/身份、未知转移不重放。可从fast原版或first10-only原位升级；7模拟通过，真整轮4moves禁端口1/7外读取/所有getAllStacks、旧版升级、输出8非空拒绝等。须先用户换普通箱并按原槽位恢复原2空盘->empty_move恢复RECOVERED->新合并补丁->UIresume。仍未游戏实测。
+
 2026-10-13 用户明确请求普通箱子只检测前10格：新增nanites_perf/patch_first10.lua原位修改实际fast模块bank函数为直接读取1..min(size,10)，不获取全盒快照；IO端口12槽检查不变，不改阶段暂停/搬盘/日志核对/控制器。要求先换小普通箱、按原槽位复原原2槽空盘、运行上面的recover_empty_move看到RECOVERED，再pendingdone/Q/GENoffinactive条件安装，临时文件flush回读语法/独立backup/回滚/幂等。蜂群盘及可回收空盘都需前10格（装入后空盘可复用），11后忽略。完整模块副本/独立安装checksum未修改，今后重装整份模块会覆盖需重新应用first10。5模拟通过：真正4次搬盘禁全盒读取/10后读取、范围外空盘不可选、备份/幂等/不改生产日志、回滚、pending拒绝；未游戏实测。
 
 2026-10-13 用户换HV输入总线后transferItem返回非1停机；真实IOjournal beforeReading30720/requiredCarbon1/pending from0 source2 to2 dest1 count0/stage moving-cell，无holding。图确认原2槽空盘仍在、蜂群实数37604、北面MEIO空；不能声称具体朝向限制已定。先前说输入总线直接可替箱过于确定，已承认读取不等于可取盘。新增nanites_perf/recover_empty_move.lua只恢复这一未搬动第一步：要求Q后pause15/GENoff inactive/两IO全空且RS0、底面小普通箱（<=54且非gt.blockmachines）原2槽空盘、蜂群封顶30720；备份IO+auto journal并回读，IOdone保留original证据/清pending，清匹配auto.naniteStage，不改其它记录或机器/程序；二日志间失败可再执行完成标记清理不搬盘。4模拟通过，未游戏实测；用户须保留硬盘槽位顺序更换箱子。
