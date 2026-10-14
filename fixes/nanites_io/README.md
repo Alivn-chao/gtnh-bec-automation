@@ -1,5 +1,17 @@
 # V1 蜂群存储盘搬运
 
+## ME IO 设置手动复原后重新搬盘
+
+2026-10-14 用户误触 ME IO 设置，换蜂中断，随后确认设置已复原，只要求重新开始搬盘。下载本目录 `restart.lua`，先 Q 退出 UI，再运行 `lua /home/bec_bee_restart.lua`。成功后 `lua /home/bec_ui.lua resume` 返回自动化。
+
+默认命令备份原蜂群 IO 日志和生产换蜂标记，关闭两端 ME IO 的红石，检查全部 12 槽并重复确认蜂群读数稳定。端口有盘时显示南/北及具体槽号，要求取回底部箱子前10格再运行同一命令；不会自动重放旧 pending 或清掉未归位的盘。两端空且停稳后，新建已主动重置的 IO 状态，旧 stage/pending 在备份及 exchangeRestart 中保留，清除 production.naniteStage，其余生产记录原样保留。
+
+随后直接加载游戏已有 `/home/bec_nanites.lua`，调用 `ensure({stage=true})` 重新按当前需求选盘。保留 first10、IO1/7 等已安装优化，不重装模块。若兼容蜂群已够用则不追加；30720 仍仅为封顶读数，不冒充真实物料总数。新搬盘失败仍由原模块留新日志，不重放结果未知的请求。
+
+仅重置标记而不搬盘：`lua /home/bec_bee_restart.lua reset`。只读检查：`lua /home/bec_bee_restart.lua check`。要求节点已暂停15、GEN关闭且inactive；未退出UI时不接管端口。备份为 `bec_nanites_io.journal.before-restart-N` 和 `bec_auto.journal.before-bee-restart-N`，状态替换先临时写入/flush/readback，再改名，失败还原。两份状态更新中途失败可以再执行；完成两份更新前不开始新的搬盘。
+
+`test_restart.py` 的11个 Lua5.2模拟覆盖：真实模块从仓内0重新装入盘、各端口输入/输出留盘拒绝并提示归位后重开、只读和未暂停不写端口、重置后正常重复不追加、状态替换回滚、第二份记录失败重试、新搬盘响应未知保留、复用实际first10/IO1/7模块不覆盖、饱和读数不假定实物数。尚未游戏实测。
+
 2026-10-13 V2：按用户要求，阶段协调器使用 `ensure({passive=true,...})`，利用节点自己的等级不足停顿，不主动暂停节点或停GEN。正常阶段变化不抛错，回收后重读当前需求。独立 `test` 仍要求手动暂停，避免单独接线测试启动生产。新增阶段优选，对应类型优先于同等级兼容类型，再选择更高等级；有更合适库存时换蜂，没有时保留兼容蜂群。`needsSwitch()` 只读判断，不为增补数量而频繁回收。运行中主动切换需要同时安装 [阶段协调补丁](../nanites_stage/README.md)，仅替换本模块不会增加控制器调用时机。
 
 ## 自动模块（2026-10-11 新版）
