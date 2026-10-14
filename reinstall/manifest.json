@@ -1,0 +1,87 @@
+[
+  {
+    "name": "automation_demo.lua",
+    "size": 2464,
+    "checksum": 3590512264
+  },
+  {
+    "name": "bec_auto.lua",
+    "size": 73186,
+    "checksum": 2204143129
+  },
+  {
+    "name": "bec_bee_restart.lua",
+    "size": 6673,
+    "checksum": 1727298972
+  },
+  {
+    "name": "bec_cache.config",
+    "size": 40,
+    "checksum": 594873840
+  },
+  {
+    "name": "bec_cache.lua",
+    "size": 28870,
+    "checksum": 4226225003
+  },
+  {
+    "name": "bec_cache_ui.lua",
+    "size": 12560,
+    "checksum": 4040312061
+  },
+  {
+    "name": "bec_check.lua",
+    "size": 910,
+    "checksum": 3679727260
+  },
+  {
+    "name": "bec_clean.lua",
+    "size": 2019,
+    "checksum": 1165012568
+  },
+  {
+    "name": "bec_hd.config",
+    "size": 101,
+    "checksum": 3219594098
+  },
+  {
+    "name": "bec_hd.lua",
+    "size": 11765,
+    "checksum": 3202616409
+  },
+  {
+    "name": "bec_history.lua",
+    "size": 1098,
+    "checksum": 3287645135
+  },
+  {
+    "name": "bec_initialize.lua",
+    "size": 8119,
+    "checksum": 4171324930
+  },
+  {
+    "name": "bec_nanites.lua",
+    "size": 17713,
+    "checksum": 3876160642
+  },
+  {
+    "name": "bec_pattern.lua",
+    "size": 2977,
+    "checksum": 2540891175
+  },
+  {
+    "name": "bec_patterns.lua",
+    "size": 7499,
+    "checksum": 1281814973
+  },
+  {
+    "name": "bec_start.lua",
+    "size": 1122,
+    "checksum": 4115708755
+  },
+  {
+    "name": "bec_ui.lua",
+    "size": 31215,
+    "checksum": 4183191812
+  }
+]
