@@ -7,7 +7,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'work/lua_runtime'))
 from lupa.lua52 import LuaRuntime
 HERE=Path(__file__).parent
-SOURCE=(HERE/'install.lua').read_text(encoding='utf-8')
+SOURCE=(HERE/'install_network.lua').read_text(encoding='utf-8')
 ENV=r'''
 files={};dirs={['/home']=true};downloads={};calls=0;oldAttached=false;space=4194304
 local fs={}
@@ -73,6 +73,13 @@ class InstallTests(unittest.TestCase):
   for name,text in g.payloads.items():self.assertEqual(g.files['/home/'+name],text)
   self.assertEqual(g.calls,0);self.assertIsNone(g.files['/home/bec_auto.journal'])
   self.assertIsNone(g.files['/home/bec_nanites_io.journal']);self.assertIsNone(g.dirs['/home/bec_install_stage'])
+ def test_single_file_complete_installer_needs_no_extra_downloads(self):
+  r=self.fixture(OLD)
+  r.eval('function(...)'+(HERE/'install.lua').read_text(encoding='utf-8')+'\nend')()
+  self.assertEqual(len(r.globals().downloads),0);self.assertEqual(r.globals().calls,0)
+  for name,text in r.globals().payloads.items():
+   if name!='bec_cache.config':self.assertEqual(r.globals().files['/home/'+name],text)
+  self.assertIsNotNone(r.globals().files['/home/bec/recipes/test.dat'])
  def test_old_drive_import_preserves_exact_recipes_settings_leaves_history_behind(self):
   r=self.fixture(OLD);self.install(r);g=r.globals()
   self.assertEqual(g.files['/home/bec_cache.config'],g.files['/mnt/old/home/bec_cache.config'])
@@ -143,8 +150,8 @@ hasHD=true
 ''')
   r.eval('function(...)'+(HERE/'files/bec_start.lua').read_text(encoding='utf-8')+'\nend')('initialize')
   calls=r.globals().calls;self.assertEqual(len(calls),3)
-  self.assertEqual(calls[1][1],'/home/bec_bee_restart.lua');self.assertEqual(calls[1][2],'reset')
-  self.assertEqual(calls[2][1],'/home/bec_initialize.lua')
+  self.assertEqual(calls[1][1],'/home/bec_initialize.lua')
+  self.assertEqual(calls[2][1],'/home/bec_bee_restart.lua');self.assertEqual(calls[2][2],'reset')
   self.assertEqual(calls[3][1],'/home/bec_hd.lua');self.assertEqual(calls[3][2],'resume')
  def test_full_published_controller_runs_a_stocked_batch_with_gate_and_history_module(self):
   def literal(path,name):

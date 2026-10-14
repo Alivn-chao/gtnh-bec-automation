@@ -87,15 +87,24 @@ def build():
     validator=LuaRuntime(unpack_returned_tuples=True)
     entries=[]
     for name,text in sorted(bundle.items()):
-        text=text.replace('\r\n','\n')
+        text='\n'.join(line.rstrip()for line in text.replace('\r\n','\n').splitlines())+'\n'
         validator.execute('assert(load(...))',text if name.endswith('.lua')else 'return '+text)
         data=text.encode('utf-8');(OUT/name).write_bytes(data)
         entries.append({'name':name,'size':len(data),'checksum':zlib.adler32(data)&0xffffffff})
     (HERE/'manifest.json').write_text(json.dumps(entries,indent=2)+'\n',encoding='utf-8')
     manifest='{\n'+',\n'.join('{name=%s,size=%d,checksum=%d}'%(json.dumps(e['name']),e['size'],e['checksum'])for e in entries)+'\n}'
     installer=(HERE/'installer.lua.inc').read_text(encoding='utf-8').replace('MANIFEST_BODY',manifest)
-    validator.execute('assert(load(...))',installer)
-    (HERE/'install.lua').write_text(installer,encoding='utf-8')
+    network=installer.replace('PAYLOAD_BODY','{}')
+    validator.execute('assert(load(...))',network)
+    (HERE/'install_network.lua').write_text(network,encoding='utf-8')
+    payloads=[]
+    for entry in entries:
+        text=(OUT/entry['name']).read_text(encoding='utf-8')
+        assert ']========]'not in text
+        payloads.append('[%s]=[========[%s]========]'%(json.dumps(entry['name']),text))
+    full=installer.replace('PAYLOAD_BODY','{\n'+',\n'.join(payloads)+'\n}')
+    validator.execute('assert(load(...))',full)
+    (HERE/'install.lua').write_text(full,encoding='utf-8')
     print(f'{len(entries)} files, {sum(e["size"]for e in entries)} bytes, all Lua 5.2 syntax verified')
     return bundle
 

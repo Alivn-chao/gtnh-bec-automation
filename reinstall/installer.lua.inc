@@ -2,14 +2,23 @@
 local first,second=...
 local importOnly=first=='import'
 local oldHome=first;if importOnly then oldHome=second end
-local fs=require('filesystem');local internet=require('internet');local ser=require('serialization')
-local TAG='bec-v1-full-2026-10-14'
+local fs=require('filesystem');local ser=require('serialization');local internet
+local TAG='bec-v1-full-2026-10-14.1'
 local manifest=MANIFEST_BODY
+local bundled=PAYLOAD_BODY
 local stage='/home/bec_install_stage'
 local function read(p)local f=io.open(p,'r');if not f then return end;local t=f:read('*a');f:close();return t end
 local function write(p,t)local f=assert(io.open(p,'w'));assert(f:write(t));assert(f:flush());f:close();assert(read(p)==t,'写入回读失败: '..p)end
 local function checksum(text)local a,b=1,0;for i=1,#text do a=(a+text:byte(i))%65521;b=(b+a)%65521 end;return b*65536+a end
+local function validate(entry,text)
+ assert(#text==entry.size and checksum(text)==entry.checksum,'下载校验失败')
+ if entry.name:match('%.lua$')then assert(load(text,'@'..entry.name,'t',_ENV),'Lua语法错误')
+ else assert(type(ser.unserialize(text))=='table','默认配置无效')end
+ return text
+end
 local function fetch(entry)
+ if bundled[entry.name]then return validate(entry,bundled[entry.name])end
+ internet=internet or require('internet')
  local roots={'https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/'..TAG..'/reinstall/files/',
  'https://fastly.jsdelivr.net/gh/Alivn-chao/gtnh-bec-automation@'..TAG..'/reinstall/files/'}
  local errors={}
@@ -18,10 +27,7 @@ local function fetch(entry)
    local pieces,n={},0;for chunk in internet.request(root..entry.name)do
     assert(type(chunk)=='string');n=n+#chunk;assert(n<=entry.size,'下载内容超出预期');pieces[#pieces+1]=chunk
    end
-   local text=table.concat(pieces);assert(#text==entry.size and checksum(text)==entry.checksum,'下载校验失败')
-   if entry.name:match('%.lua$')then assert(load(text,'@'..entry.name,'t',_ENV),'Lua语法错误')
-   else assert(type(ser.unserialize(text))=='table','默认配置无效')end
-   return text
+   return validate(entry,table.concat(pieces))
   end)
   if ok then return result end;errors[#errors+1]=tostring(result)
  end

@@ -156,7 +156,7 @@ if not priority and remaining>0 and (not job or job.state=='done' or job.state==
    end
    missing=deficit()
    if missing>0 then
-    
+
     attempts=attempts+1;assert(attempts<=3,'原液被其他设备争抢，保留已收库存')
     job={raw=raw,amount=missing,unit='mB',state='pending',securedBefore=previous[raw]or 0}
     record.requests[#record.requests+1]=job;save('craft-request-pending')
@@ -659,7 +659,7 @@ if mode=="reset" then
  mode="run"
 end
 
-if fs.exists(JOURNAL) then local f=assert(io.open(JOURNAL,"r"));local contents=f:read("*a");f:close() local old=ser.unserialize(contents); assert(not(type(old)=="table" and old.naniteStage),"旧阶段换蜂未确认完成，保留蜂群与生产日志，禁止重放") 
+if fs.exists(JOURNAL) then local f=assert(io.open(JOURNAL,"r"));local contents=f:read("*a");f:close() local old=ser.unserialize(contents); assert(not(type(old)=="table" and old.naniteStage),"旧阶段换蜂未确认完成，保留蜂群与生产日志，禁止重放")
 if type(old)=="table" and type(old.pipeline)=="table" and old.plan~=nil then
  assert(mode=="resume" or mode=="restock","流水未完成，请用resume核对")
  assert(old.pending==nil and old.configOwned==false,"流水存在未确认搬液，保留日志核对")

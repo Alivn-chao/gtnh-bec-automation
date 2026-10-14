@@ -6,8 +6,8 @@
   },
   {
     "name": "bec_auto.lua",
-    "size": 73186,
-    "checksum": 2204143129
+    "size": 73181,
+    "checksum": 1633258873
   },
   {
     "name": "bec_bee_restart.lua",
@@ -77,7 +77,7 @@
   {
     "name": "bec_start.lua",
     "size": 1122,
-    "checksum": 4115708755
+    "checksum": 1162067
   },
   {
     "name": "bec_ui.lua",
