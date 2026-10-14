@@ -49,7 +49,7 @@ io={open=function(p,m)
  return {read=function()return t end,write=function(_,s)t=t..s;return true end,
  flush=function()files[p]=t;return true end,close=function()end}
 end}
-print=function()end
+messages={};print=function(...)local row={};for i=1,select('#',...)do row[i]=tostring(select(i,...))end;messages[#messages+1]=table.concat(row,' ')end
 '''
 OLD=r'''
 oldAttached=true;dirs['/mnt/old/home']=true;dirs['/mnt/old/home/bec/recipes']=true
@@ -75,11 +75,26 @@ class InstallTests(unittest.TestCase):
   self.assertIsNone(g.files['/home/bec_nanites_io.journal']);self.assertIsNone(g.dirs['/home/bec_install_stage'])
  def test_single_file_complete_installer_needs_no_extra_downloads(self):
   r=self.fixture(OLD)
-  r.eval('function(...)'+(HERE/'install.lua').read_text(encoding='utf-8')+'\nend')()
+  r.eval('function(...)'+(HERE/'install_full.lua').read_text(encoding='utf-8')+'\nend')()
   self.assertEqual(len(r.globals().downloads),0);self.assertEqual(r.globals().calls,0)
   for name,text in r.globals().payloads.items():
    if name!='bec_cache.config':self.assertEqual(r.globals().files['/home/'+name],text)
   self.assertIsNotNone(r.globals().files['/home/bec/recipes/test.dat'])
+ def test_default_entry_runs_as_top_level_openos_chunk_with_visible_progress(self):
+  r=self.fixture()
+  r.execute((HERE/'install.lua').read_text(encoding='utf-8'))
+  rows=list(r.globals().messages.values())
+  self.assertIn('BEC INSTALL 2026-10-14.2 - starting',rows[0])
+  self.assertTrue(any('下载 17/17' in row for row in rows))
+  self.assertTrue(any('完整安装完成' in row for row in rows))
+  self.assertEqual(len(r.globals().downloads),17)
+  self.assertEqual((HERE/'install.lua').read_bytes(),(HERE/'install_network.lua').read_bytes())
+ def test_empty_http_response_cannot_report_installation_success(self):
+  r=self.fixture();r.globals().payloads['automation_demo.lua']=''
+  with self.assertRaisesRegex(Exception,'下载校验失败'):self.install(r)
+  rows=list(r.globals().messages.values())
+  self.assertTrue(any('BEC INSTALL FAILED:' in row for row in rows))
+  self.assertIsNone(r.globals().files['/home/bec_start.lua'])
  def test_old_drive_import_preserves_exact_recipes_settings_leaves_history_behind(self):
   r=self.fixture(OLD);self.install(r);g=r.globals()
   self.assertEqual(g.files['/home/bec_cache.config'],g.files['/mnt/old/home/bec_cache.config'])

@@ -97,6 +97,7 @@ def build():
     network=installer.replace('PAYLOAD_BODY','{}')
     validator.execute('assert(load(...))',network)
     (HERE/'install_network.lua').write_text(network,encoding='utf-8')
+    (HERE/'install.lua').write_text(network,encoding='utf-8')
     payloads=[]
     for entry in entries:
         text=(OUT/entry['name']).read_text(encoding='utf-8')
@@ -104,7 +105,7 @@ def build():
         payloads.append('[%s]=[========[%s]========]'%(json.dumps(entry['name']),text))
     full=installer.replace('PAYLOAD_BODY','{\n'+',\n'.join(payloads)+'\n}')
     validator.execute('assert(load(...))',full)
-    (HERE/'install.lua').write_text(full,encoding='utf-8')
+    (HERE/'install_full.lua').write_text(full,encoding='utf-8')
     print(f'{len(entries)} files, {sum(e["size"]for e in entries)} bytes, all Lua 5.2 syntax verified')
     return bundle
 

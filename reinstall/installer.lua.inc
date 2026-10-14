@@ -1,9 +1,12 @@
+print('BEC INSTALL 2026-10-14.2 - starting')
+local installArgs=table.pack(...)
+local function install(...)
 -- Complete V1 install for a NEW OpenOS disk. Does not start machinery.
 local first,second=...
 local importOnly=first=='import'
 local oldHome=first;if importOnly then oldHome=second end
 local fs=require('filesystem');local ser=require('serialization');local internet
-local TAG='bec-v1-full-2026-10-14.1'
+local TAG='bec-v1-full-2026-10-14.2'
 local manifest=MANIFEST_BODY
 local bundled=PAYLOAD_BODY
 local stage='/home/bec_install_stage'
@@ -133,3 +136,9 @@ print('已迁移登记配方 '..recipes..' 个；没有复制历史日志，也�
 print('只读查看：lua /home/bec_start.lua monitor')
 print('盘归位且ME IO设置正确后，从现场初始化并运行：lua /home/bec_start.lua initialize')
 if recipes==0 then print('尚未迁移配方：保留旧盘，用安装器 import /mnt/旧盘地址/home 迁移，或用 bec_patterns.lua 登记样板。')end
+end
+local ok,reason=xpcall(function()return install(table.unpack(installArgs,1,installArgs.n))end,debug.traceback)
+if not ok then
+ print('BEC INSTALL FAILED: '..tostring(reason))
+ error(reason,0)
+end
