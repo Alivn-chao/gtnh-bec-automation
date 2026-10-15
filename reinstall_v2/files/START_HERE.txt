@@ -1,0 +1,24 @@
+BEC V2 全新安装 / OpenOS
+
+普通屏配置：lua /home/bec_v2/main.lua setup
+OCHD配置：lua /home/bec_v2/main.lua setup-hd
+
+新用户必须从原加工样板副本登记需求，不直接使用缺少需求记录的已转换样板。
+配置完先pause，等待纠缠器停稳，将原样板副本放入工坊接口。
+
+lua /home/bec_v2/main.lua pause
+lua /home/bec_v2/main.lua patterns preview
+lua /home/bec_v2/main.lua patterns run
+
+将转换后样板移到生产接口，再monitor核对；Q退出监控后run启动。
+lua /home/bec_v2/main.lua monitor
+lua /home/bec_v2/main.lua run
+
+日志上传可选：lua /home/bec_v2/main.lua reports
+使用自己的仓库和仅该仓库Contents读写token，不分享凭据。
+
+完整接线和分享说明：
+https://github.com/Alivn-chao/gtnh-bec-automation/tree/bec-v2-clean-2026-10-15/reinstall_v2
+
+配置和安装不会开机；pause和run会控制机器。约束场始终保持开启。
+不同时运行V1/V2控制同一设备。全部V2数据保留在/home/bec_v2。

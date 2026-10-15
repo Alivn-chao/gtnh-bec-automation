@@ -1,0 +1,31 @@
+"""Create a self-contained OpenOS installer and distributable clean-install ZIP."""
+from pathlib import Path
+import hashlib
+import json
+import zipfile
+
+HERE=Path(__file__).resolve().parent
+def literal(s):
+    for n in range(1,20):
+        ending=']'+'='*n+']'
+        if ending not in s:return '['+'='*n+'['+s+ending
+    raise ValueError('delimiter collision')
+
+def build():
+    entries=[]; manifest={}
+    for p in sorted((HERE/'files').rglob('*')):
+        if not p.is_file():continue
+        name=p.relative_to(HERE/'files').as_posix()
+        data=p.read_bytes().replace(b'\r\n',b'\n')
+        entries.append('{'+json.dumps(name)+','+literal(data.decode('utf-8'))+'}')
+        manifest[name]={'bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()}
+    text='-- BEC V2 clean-install bundle; no V1 dependency.\nlocal FILES={\n'+',\n'.join(entries)+'\n}\n'+(HERE/'installer.lua.inc').read_text(encoding='utf-8')
+    (HERE/'install.lua').write_text(text,encoding='utf-8',newline='\n')
+    (HERE/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8',newline='\n')
+    output=HERE/'dist';output.mkdir(exist_ok=True)
+    with zipfile.ZipFile(output/'bec-v2-clean-install.zip','w',zipfile.ZIP_DEFLATED)as z:
+        for p in [HERE/'install.lua',HERE/'README.md',HERE/'manifest.json',*(HERE/'files').rglob('*')]:
+            if p.is_file():z.writestr(p.relative_to(HERE).as_posix(),p.read_bytes().replace(b'\r\n',b'\n'))
+    print('Bundled',len(entries),'files;',len(text.encode('utf-8')),'installer bytes')
+
+if __name__=='__main__':build()

@@ -1,0 +1,114 @@
+local c=require('component')
+local term=require('term')
+return function(C,addOnly)
+ local function ask(label,default)
+  io.write(label..(default~=nil and ' ['..tostring(default)..']' or '')..': ')
+  local answer=assert(io.read(),'配置输入已取消')
+  return answer=='' and default or answer
+ end
+ local function number(label,default,lo,hi)
+  while true do local n=tonumber(ask(label,default));if n and n==math.floor(n) and n>=lo and n<=hi then return n end;print('请输入 '..lo..' 到 '..hi..' 的整数') end
+ end
+ local function pick(label,kind,method)
+  local rows={}
+  for a,t in c.list() do if (not kind or t==kind) and (not method or c.methods(a)[method]~=nil) then rows[#rows+1]={a,t} end end
+  table.sort(rows,function(a,b)return a[1]<b[1]end)
+  print('\n'..label)
+  for i,r in ipairs(rows) do print(i..'  '..r[2]..'  '..r[1]) end
+  assert(#rows>0,'找不到 '..label..'；请接入OC网络')
+  while true do
+   local value=ask('输入序号或地址前缀')
+   local index=tonumber(value)
+   if index and rows[index] then return rows[index][1] end
+   local selected,count=nil,0
+   for _,r in ipairs(rows) do if r[1]:sub(1,#value)==value then selected=r[1];count=count+1 end end
+   if count==1 then return selected end
+   print('选择不唯一或不存在')
+  end
+ end
+ term.clear();print('BEC V2 / 独立测试版配置向导')
+ print('方向：0下 1上 2北 3南 4西 5东；配置时只读取设备')
+ local previous=C.read(C.path('config.dat'))
+ if previous then
+  for group in ipairs(previous.groups)do
+   for _,file in ipairs({'nanites.journal','nanites-cell.journal'})do local r=C.read(C.path('state/group-'..group..'/'..file));assert(not r or r.stage=='done','蜂群记录未完成，禁止改设备配置')end
+   local old=C.read(C.path('state/group-'..group..'/cohort.dat'))
+   assert(not old or old.stage=='stopped','本组旧进度尚未结束；先按原配置核对恢复，禁止更换设备绑定')
+  end
+  print('已有配置。重新配置会备份旧配置，不修改稳定版。')
+ end
+ if addOnly then
+  assert(previous,'首次安装请先运行setup')
+  assert(#previous.nodes<16,'已经达到16台节点上限')
+  for _,g in ipairs(previous.groups)do for _,a in ipairs(g.generators)do
+   assert(c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false,'先停止生产服务和纠缠器再扩容')
+  end end
+  for _,n in ipairs(previous.nodes)do
+   local state=c.invoke(n.address,'getState')
+   assert((state=='idle'or state=='paused-immediate'or state=='nanite-tier-too-low')and c.invoke(n.redstone,'getOutput',n.pauseSide)==15,'先暂停原有节点再扩容')
+  end
+  local count=number('扩容后的总节点数量',#previous.nodes+1,#previous.nodes+1,16)
+  for group,g in ipairs(previous.groups)do print('设备组 '..group..'：'..g.name)end
+  for i=#previous.nodes+1,count do
+   print('\n=== 新增传送节点 '..i..' ===')
+   local group=number('归属现有设备组',1,1,#previous.groups)
+   previous.nodes[i]={name=ask('节点名称','节点'..i),group=group,
+    address=pick('新传送节点','bec_io_node','getState'),redstone=pick('新节点暂停红石I/O','redstone','setOutput'),
+    pauseSide=number('红石输出方向',1,0,5),gate=previous.groups[group].gate}
+  end
+  C.validate(previous,true);C.write(C.path('config.dat'),previous)
+  print('扩容已保存；原有设备地址保留。先运行monitor检查，再run启动。');return
+ end
+ local count=number('传送节点数量',previous and #previous.nodes or 1,1,16)
+ local groupCount=number('观测阵列/设备组数量',1,1,count)
+ local cfg={version=2,nodes={},groups={},cacheTarget=144000}
+ cfg.mainInterface=pick('主网供液接口','me_interface','getFluidsInNetwork')
+ cfg.recipeDirectory=ask('配方需求记录目录（新用户直接回车）','/home/bec_v2/recipes')
+ if ask('绑定样板处理工坊接口？新用户建议y，已有记录可选n','y')=='y'then
+  cfg.workshopInterface=pick('专用工坊ME接口（不要选择生产接口）','me_interface','getInterfacePattern')
+ end
+ for i=1,groupCount do
+  print('\n=== 设备组 '..i..' ===')
+  local g={name=ask('设备组名称','观测阵列'..i),generators={},bulkTransposers={}}
+  g.storage=pick('此组约束场','bec_storage','getStoredCondensate')
+  g.gate=pick('此组韦门','bec_diode','setCondensateFilters')
+  g.subInterface=pick('此组原液子网接口','me_interface','getFluidsInNetwork')
+  g.transposer=pick('主网到此子网的供液转运器','transposer')
+  g.mainSide=number('转运器主网方向',4,0,5);g.subSide=number('转运器子网方向',5,0,5)
+  local generators=number('此组纠缠器数量',1,1,64)
+  for j=1,generators do g.generators[j]=pick('纠缠器 '..j,'gt_machine','setWorkAllowed') end
+  local bulk=number('此组额外高速供液转运器数量（没有填0）',0,0,64)
+  for j=1,bulk do g.bulkTransposers[j]=pick('高速供液转运器 '..j,'transposer') end
+  local enabled=ask('启用此组自动换蜂群？y/n','n')=='y'
+  g.nanites={enabled=enabled}
+  if enabled then
+   local n=g.nanites
+   n.mode=ask('蜂群模式：cell-io硬盘盒 / me-interface旧接口','cell-io')
+   assert(n.mode=='cell-io'or n.mode=='me-interface','蜂群模式无效')
+   n.transposer=pick('蜂群转运器','transposer')
+   if n.mode=='cell-io'then
+    n.loadRedstone=pick('装入端ME IO控制红石','redstone','setOutput')
+    n.returnRedstone=pick('回收端ME IO控制红石','redstone','setOutput')
+    n.bankSide=number('硬盘盒方向',0,0,5);n.loadSide=number('装入ME IO方向',3,0,5);n.returnSide=number('回收ME IO方向',2,0,5)
+    n.loadOutputSide=number('装入端红石输出方向',0,0,5);n.returnOutputSide=number('回收端红石输出方向',0,0,5)
+   else
+    n.supplyInterface=pick('备用蜂群子网接口','me_interface','getItemsInNetwork')
+    n.hatchInterface=pick('收容总线子网接口','me_interface','getItemsInNetwork')
+    n.supplySide=number('备用网接口方向',2,0,5);n.hatchSide=number('收容网接口方向',4,0,5)
+   end
+  end
+  cfg.groups[i]=g
+ end
+ for i=1,count do
+  print('\n=== 传送节点 '..i..' ===')
+  local group=number('归属设备组',1,1,groupCount)
+  cfg.nodes[i]={name=ask('节点名称','节点'..i),group=group,
+   address=pick('传送节点','bec_io_node','getState'),
+   redstone=pick('暂停控制红石I/O','redstone','setOutput'),
+   pauseSide=number('红石输出方向',1,0,5),
+   gate=cfg.groups[group].gate}
+ end
+ C.validate(cfg,true)
+ C.write(C.path('config.dat'),cfg)
+ print('\n配置已保存。运行 lua /home/bec_v2/main.lua monitor 先看仪表盘。')
+end
