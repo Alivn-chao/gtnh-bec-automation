@@ -1,3 +1,5 @@
+2026-10-15 用户实机绑定页填不完整无法保存且需退出查地址，要求草稿、方向中文点选、固定ME-IO、嵌原OCHD网页风格。已改OCHD0.3.2-alpha4-drafts：嵌入PanelGui原框架，白卡蓝导航；原生隐藏文本框支持CtrlV/全选/光标，方向上1下0南3北2东5西4；新增action7 binding_draft独立权限/已知字段/版本边界，允许半截输入，action6正式应用保持严格校验。草稿存bindings.draft.dat，与config.dat分离；返回/关闭尝试自动暂存，显式暂存等待回执；应用前先草稿落盘，失败保留。草稿并发CAS，正式配置改变则不套用旧草稿，无硬件写。仅表单固定MEIO、旧运行核心兼容不删。BEC完整包reinstall_v2同步，新加update_bindings.lua两文件备份回滚更新，现有用户不重装。23Java/15绑定Lua/8空盘与更新事务测试通过、1080p保留67原alpha4条目；未游戏验收。OCHD发布v0.3.2-alpha4-drafts；BEC新鲜安装tag bec-v2-clean-2026-10-15.1，旧发布保留。
+
 2026-10-15 用户本地只有V1，明确要从OpenOS空硬盘装V2并分享。新增reinstall_v2完整自包含install.lua/zip：V2cell-io核心e1f3818+已验证reports挂接+OCHD67ac4cec配置模块内置，新增main setup-hd/reports入口，初次没有配置配方日志token。临时目录全文件语法/flush/回读后rename发布，已有/home/bec_v2直接拒绝；不操作硬件、不自动启动、不依赖V1。分享版报告目标改为本地填写owner/repo（main分支），待传绑定目标不随换凭据重定向；不预置作者凭据。说明明确V2未迁入V1后续提速与预缓存。发布tag bec-v2-clean-2026-10-15，OCHD仍单独双端替换jar。20核心场景/19盘IO/7桥接/6安装事务/14报告及自选仓库/9绑定共75项模拟通过，未实机验证。
 
 # 在家里的 Codex 接着做

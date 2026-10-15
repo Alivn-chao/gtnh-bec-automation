@@ -19,6 +19,8 @@ fs.makeDirectory=function(p)dirs[p]=true;return true end
 fs.remove=function(p)files[p]=nil;dirs[p]=nil;return true end
 fs.rename=function(a,b)
  if failRename then return false end
+ if renamePattern and a:find(renamePattern,1,true)then return false end
+ if files[a]then assert(not fs.exists(b));files[b]=files[a];files[a]=nil;return true end
  assert(not fs.exists(b));assert(dirs[a]);dirs[b]=true;dirs[a]=nil
  local move={};for p,s in pairs(files)do if p:sub(1,#a+1)==a..'/'then move[p]=s end end
  for p,s in pairs(move)do files[b..p:sub(#a+1)]=s;files[p]=nil end
@@ -44,6 +46,24 @@ def fixture():
     lua=LuaRuntime(unpack_returned_tuples=True);lua.execute(SETUP);return lua
 
 class InstallTests(unittest.TestCase):
+    def update_fixture(self):
+        lua=fixture();lua.execute(INSTALL)
+        lua.execute("files['/home/bec_v2/lib/ochd_bindings.lua']='return {} --old';files['/home/bec_v2/setup_hd.lua']='return true --old';files['/home/bec_v2/config.dat']='keep-config';files['/home/bec_v2/state-evidence']='keep-journal'")
+        return lua
+
+    def test_binding_only_update_preserves_data_and_is_idempotent(self):
+        lua=self.update_fixture();source=(HERE/'update_bindings.lua').read_text(encoding='utf-8')
+        lua.execute(source);before=lua.eval('count');lua.execute(source)
+        self.assertEqual(lua.eval('count'),before)
+        self.assertEqual(lua.globals().files['/home/bec_v2/config.dat'],'keep-config')
+        self.assertEqual(lua.globals().files['/home/bec_v2/state-evidence'],'keep-journal')
+        self.assertIn('function M.saveDraft',lua.globals().files['/home/bec_v2/lib/ochd_bindings.lua'])
+
+    def test_binding_update_failure_restores_both_programs(self):
+        lua=self.update_fixture();lua.globals().renamePattern='setup_hd.lua.drafts-new-'
+        with self.assertRaisesRegex(Exception,'旧程序已恢复'):lua.execute((HERE/'update_bindings.lua').read_text(encoding='utf-8'))
+        self.assertEqual(lua.globals().files['/home/bec_v2/lib/ochd_bindings.lua'],'return {} --old')
+        self.assertEqual(lua.globals().files['/home/bec_v2/setup_hd.lua'],'return true --old')
     def test_blank_disk_installs_exact_manifest_without_v1_or_machine_access(self):
         lua=fixture();lua.execute(INSTALL)
         manifest=json.loads((HERE/'manifest.json').read_text())

@@ -12,8 +12,8 @@
     "sha256": "afda6e7f7a1820052c7feec4eaab86fdcba32c884c49758a7674ee3fb6cc715a"
   },
   "lib/ochd_bindings.lua": {
-    "bytes": 10666,
-    "sha256": "78271c5650efa2159aa2180837d7a78e75cda2ffc3f94a3e8059c0abf8428d2d"
+    "bytes": 11343,
+    "sha256": "5af73c6018b3ef2fa76234c0b3460e18ee19b522b79e57a26b57ea6ebffe65ca"
   },
   "lib/patterns.lua": {
     "bytes": 1254,
@@ -60,11 +60,11 @@
     "sha256": "221eeddc0de6be3be44d26a0384bb32eb6c56aa1ad47571e61c46875eb9bb713"
   },
   "setup_hd.lua": {
-    "bytes": 2266,
-    "sha256": "a2f2961fcd39b759ea0b96676bd0bca610fc4ce959f3bfa492f4b47b656b2d55"
+    "bytes": 3112,
+    "sha256": "cfe5260ceff367d46ca14a911424280c24792da46aa56a97d75625a327b8b05d"
   },
   "START_HERE.txt": {
-    "bytes": 1017,
-    "sha256": "52cdcdc2658c459e776fe43ee5aa1078b1d1a316d6214197a4eacded370bfcea"
+    "bytes": 1019,
+    "sha256": "39f6b8d459f1cf09597f391ff79859271a61a214c70022df9cf9f264da64ba74"
   }
 }

@@ -2,14 +2,14 @@
 
 适用 GTNH 2.9.0 Beta 3、OpenComputers + OpenOS。这里的“空硬盘”指已安装 OpenOS、没有 V1/V2 文件的硬盘；完全未格式化的盘须先用 OpenOS 安装盘执行 `install`，重启取出安装盘。准备联网卡、`wget`、普通 OC 屏幕/键盘、足够内存和磁盘、组件容量。
 
-本包包含 V2 主程序、1–16 节点分组、两种自动换蜂模式、样板处理、普通屏幕仪表盘、OCHD 本地地址配置、可选 GitHub 故障报告和受限旧历史清理。无需 V1，也不需要再安装此前的绑定/报告补丁。发布页提供 `bec-v2-clean-install.zip`；离线把其中 `install.lua` 复制到游戏电脑执行，或把 `files` 内全部内容放到 `/home/bec_v2/`（不要多套一层files）。
+本包包含 V2 主程序、1–16 节点分组、ME-IO自动换蜂配置、样板处理、普通屏幕仪表盘、OCHD 本地地址配置、可选 GitHub 故障报告和受限旧历史清理。无需 V1，也不需要再安装此前的绑定/报告补丁。发布页提供 `bec-v2-clean-install.zip`；离线把其中 `install.lua` 复制到游戏电脑执行，或把 `files` 内全部内容放到 `/home/bec_v2/`（不要多套一层files）。
 
 ## 1. 安装
 
 在游戏OC终端执行：
 
 ```sh
-wget -f https://fastly.jsdelivr.net/gh/Alivn-chao/gtnh-bec-automation@bec-v2-clean-2026-10-15/reinstall_v2/install.lua /home/bec_v2_install.lua
+wget -f https://fastly.jsdelivr.net/gh/Alivn-chao/gtnh-bec-automation@bec-v2-clean-2026-10-15.1/reinstall_v2/install.lua /home/bec_v2_install.lua
 lua /home/bec_v2_install.lua
 ```
 
@@ -26,7 +26,7 @@ lua /home/bec_v2_install.lua
 - 普通物品：主网生产ME接口 → 物品子网缓冲 → 节点ME输入总线；成品经ME输出总线回主网。
 - 样板：独立工坊ME接口，用于转换原加工样板副本，与生产接口分开。
 - 存储盘换蜂：普通箱子/硬盘盒、OC转运器、两只12槽ME IO端口、各自红石I/O；常见方向下0箱子、南3装入、北2回收、两红石向下0。装入硬盘→收容网，回收收容网→硬盘，两端选工序完成后移到输出口。本包沿用已发布V2的全槽读取和输出7–12确认，尚未迁入V1后来“只扫前10/端口1与7”的性能补丁。
-- 也支持旧双ME接口换蜂模式；备用网与仅暴露蜂群仓的收容网分开，通过ME接口搬蜂，不直接搬显示槽。不需要换蜂时可禁用并手动放蜂。
+- 运行核心兼容旧双ME接口配置；新版OCHD配置页统一ME-IO，不需要换蜂时整套蜂群设备留空并手动放蜂。
 
 先在机器已闲置/暂停、所有纠缠器已关闭且不活动时配置。方向统一0下、1上、2北、3南、4西、5东。
 
@@ -39,13 +39,13 @@ lua /home/bec_v2/main.lua setup
 
 向导依次选择节点数量、设备组数量和各设备，支持设备序号或唯一地址前缀；新用户配方目录用默认 `/home/bec_v2/recipes`。不要使用说明截图里的其他存档地址。
 
-OCHD可选入口：[下载1080p alpha4绑定版](https://github.com/Alivn-chao/oc-hd-panel/releases/tag/v0.3.1-alpha4-bindings)，客户端/服务器都替换旧JAR并重启。在OC接入一个OCHD主组件后：
+OCHD可选入口：[下载1080p alpha4绑定版](https://github.com/Alivn-chao/oc-hd-panel/releases/tag/v0.3.2-alpha4-drafts)，客户端/服务器都替换旧JAR并重启。在OC接入一个OCHD主组件后：
 
 ```sh
 lua /home/bec_v2/main.lua setup-hd
 ```
 
-右键OCHD → 设置 → 设备地址绑定，支持Ctrl+V、Ctrl+A；保存等待成功回执，在OC键盘按Q退出配置服务。空配置默认一组，可填1–16节点；多个独立组先用普通setup创建，再用OCHD编辑。OCHD目前提供地址配置，生产仍使用普通OC仪表盘；保存不启动生产。
+右键OCHD → 设置 → 设备地址绑定，支持Ctrl+V、Ctrl+A；“暂存草稿”允许空项、半截地址并保存到OC硬盘；“应用绑定”才完整校验。返回设置/关闭界面会尝试自动暂存，建议等待明确暂存回执再去查地址。方向直接选择上/下/南/北/东/西。绑定嵌在原有白色卡片、蓝色导航的OCHD页面中。保存等待成功回执，在OC键盘按Q退出配置服务。空配置默认一组，可填1–16节点；多个独立组先用普通setup创建，再用OCHD编辑。OCHD目前提供地址配置，生产仍使用普通OC仪表盘；保存不启动生产。
 
 ## 3. 登记配方和启动
 
@@ -84,3 +84,15 @@ lua /home/bec_v2/main.lua reports
 ## 版本与边界
 
 生产核心固定来自V2 cell-io `e1f381885ed446d20fdfb21e310a176e36f19d7d`；报告来自 `274b79d` 并增加分享包自选仓库；OCHD配置来自 `67ac4cec`，改为V2目录内加载。仅新增setup-hd/reports入口，不迁入V1近期切蜂、快配方、预缓存或韦门提速修改；不能把本包当作那些提速已完成。V2后台固定库存预缓存尚未迁入。模拟、语法、安装失败和回读测试不等于GTNH实机验收。
+
+## 已装10月15日完整V2包：仅更新绑定页
+
+先Q退出配置服务；客户端/服务器替换OCHD 0.3.2-alpha4-drafts并重启。无需重装V2，也不删除已有数据：
+
+```sh
+wget -f https://fastly.jsdelivr.net/gh/Alivn-chao/gtnh-bec-automation@bec-v2-clean-2026-10-15.1/reinstall_v2/update_bindings.lua /home/bec_v2_update_bindings.lua
+lua /home/bec_v2_update_bindings.lua
+lua /home/bec_v2/main.lua setup-hd
+```
+
+此更新器仅备份替换绑定模块和配置页面，不写生产配置、配方或现场日志。草稿保存在 `/home/bec_v2/bindings.draft.dat`，与生效配置分开。
