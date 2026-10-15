@@ -1,5 +1,7 @@
 # 在家里的 Codex 接着做
 
+2026-10-15 用户要V2故障报告自动上传GitHub并删本地旧日志，新增fixes/v2_reports/内嵌安装器，基于公开V2 cell-io原文件原位挂engine/main，不变更生产运行核心/配置/日志；故障暂停后保存白名单journal+最后已知同组任务+最近事件，非实时硬件全扫，48KiB/report，token本地掩码向导github-upload.dat（gitignore），仅Alivn-chao/gtnh-bec-automation Contents写入权限。上传异步step不sleep、不机器控制；GET相同路径比对，不存在PUT，201后GET逐字验证后uploaded；丢响应重启幂等，失败60s后重试。uploaded本地留3，pending上限5满则只计数摘要；生产/蜂群自动历史只允许stopped/done且无pending/plan、搬运全确认/AE全done，逐文件协程清理每前缀留3；current/.previous/未知/人工证据/配置配方/回滚不删。模块初始化/网络失败不会替换生产故障处理。10项Lua5.2模拟通过，尚无OC实机HTTPS上传，用户需本地配置token，不索取或导出连接器凭据。另用户要求本地OCHD配置绑定并CtrlV，按游戏内设置页工作中，未误认为浏览器网页。
+
 2026-10-14 .2 安装入口修复：用户新盘截图 wget .1 install.lua success，但 lua 两次无任何输出，bec_start.lua 不存在。未获游戏文件大小，不能断言内存或空文件根因。官方 OpenOS lua.lua 会直接 load/pcall 文件，空脚本能正常静默结束；wget.lua 不核对响应总长度。默认 install.lua 改用约9KB联网入口，full离线版本另存 install_full.lua。两种入口启动即英文版本行，xpcall失败可见输出，所有17文件逐个长度/Adler32/语法校验，空HTTP响应拒绝；程序全部验证后才暴露。16个Lua5.2模拟通过，新增默认入口顶层运行进度及空响应测试。新标签 bec-v1-full-2026-10-14.2；旧标签不移动。仍待实机验收，若无启动行需 ls -l 核对下载文件。
 
 2026-10-14 完整重装包交付改为 .1：原thin tag bec-v1-full-2026-10-14 保持不移动；为避免用户逐个下载遇TLS问题，install.lua现内嵌全部17文件（208326B实际程序），仅wget一次后离线校验展开；thin版另存install_network.lua保留raw/CDN/断点重试。最终交付tag bec-v1-full-2026-10-14.1。launcher initialize顺序修正为先现场initialize自行RS15/GENoff（不假定换盘后红石保留），再bee reset，最后一个HD或普通UI resume。新增单文件零额外网络+精确配方配置迁移测试，总14通过；生成代码清理行末空格并重算manifest/size，docs同步。用户只需新盘OpenOS后下载完整install.lua运行；旧盘保留可自动迁移或后补import，不格式化/写旧盘。
