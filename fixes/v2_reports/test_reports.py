@@ -99,6 +99,12 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(sum(m=='PUT'for m,_ in calls),1)
         self.assertEqual(lua.eval("C.read(C.path('diagnostics/index.dat')).reports[1].status"),'uploaded')
 
+    def test_written_report_is_adopted_after_crash_before_index_update(self):
+        lua,remote,_,_=fixture();lua.execute("R.capture(1,E,'failure')")
+        lua.execute("local state=C.read(C.path('diagnostics/index.dat'));state.reports={};C.write(C.path('diagnostics/index.dat'),state);R=reportModule(cfg,C)")
+        self.assertEqual(lua.eval("#C.read(C.path('diagnostics/index.dat')).reports"),1)
+        pump(lua);self.assertEqual(len(remote),1)
+
     def test_failed_upload_keeps_pending_and_caps_at_five(self):
         lua,_,_,errors=fixture();errors['status']=403
         for _ in range(8):lua.execute("R.capture(1,E,'failure')")

@@ -51,6 +51,20 @@ return setmetatable(M,{__call=function(_,cfg,C)
   assert(type(row.id)=='string' and row.id:match('^[%w%-]+$'),'Invalid report id')
   return dir..'/'..row.id..'.txt'
  end
+ -- Complete an interrupted report/index transaction before accepting a new fault.
+ local writing=C.read(dir..'/writing.dat')
+ if writing and type(writing.row)=='table'then
+  local row=writing.row;local exists=false
+  for _,r in ipairs(state.reports)do if r.id==row.id then exists=true end end
+  if not exists then
+   local text=read(reportPath(row))
+   if text then
+    local ok,data=pcall(ser.unserialize,text)
+    row.status=ok and type(data)=='table'and data.format=='bec-v2-diagnostic-v1'and 'pending'or 'incomplete'
+    state.reports[#state.reports+1]=row;save()
+   end
+  end
+ end
  local function prune()
   local uploaded={}
   for _,r in ipairs(state.reports)do if r.status=='uploaded'then uploaded[#uploaded+1]=r end end
@@ -106,7 +120,7 @@ return setmetatable(M,{__call=function(_,cfg,C)
   assert(not fs.exists(reportPath(row)),'Diagnostic id already exists')
   -- Reserve sequence before writing so a crash never reuses a published path.
   state.next=state.next+1;save()
-  C.write(dir..'/writing.dat',{version=1,id=id})
+  C.write(dir..'/writing.dat',{version=1,row=row})
   local f=assert(io.open(reportPath(row),'w'));assert(f:write(text));assert(f:flush());f:close()
   assert(read(reportPath(row))==text,'Diagnostic report read-back failed')
   state.reports[#state.reports+1]=row;save();prune()
@@ -212,6 +226,7 @@ return setmetatable(M,{__call=function(_,cfg,C)
      if not fs.isDirectory(path)then
       local text=read(path);local ok,r=pcall(function()return text and ser.unserialize(text)end)
       local complete=ok and type(r)=='table' and r.stage==job.stage and r.pending==nil and r.plan==nil
+       and r.configOwned~=true and r.naniteStage==nil and r.pipeline==nil
       for _,move in ipairs(complete and r.transfers or {})do if move.ok~=true then complete=false end end
       for _,request in ipairs(complete and r.requests or {})do if request.state~='done'then complete=false end end
       if complete then candidates[#candidates+1]={path=path,index=tonumber(suffix),time=fs.lastModified(path)}end

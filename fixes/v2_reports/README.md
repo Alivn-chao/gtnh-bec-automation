@@ -22,3 +22,7 @@ lua /home/bec_v2/report_setup.lua
 - 清理逐文件让出调度；删除前再次核对mtime，避免清理扫描期间被替换的记录。
 
 本次不包含之前讨论的韦门/节点快照提速，也不迁移V1被动换蜂逻辑；这些是独立修改。
+
+断电恢复：写报告前持久化writing.dat；报告文件已完整写入而index尚未更新时，重启会核对并收编，半写报告保留为incomplete并计入待上传上限。历史清理另外拒绝configOwned、naniteStage和pipeline尚在使用的记录。11项Lua5.2模拟通过。
+
+OCHD本地地址绑定另见 https://github.com/Alivn-chao/oc-hd-panel/releases/tag/v0.3.1-alpha4-bindings ，基于用户提供的1080p alpha4，客户端/服务端均需更新。绑定与本报告安装器独立。
