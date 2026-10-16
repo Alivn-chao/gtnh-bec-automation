@@ -11,8 +11,9 @@ from test_read_optimization import fixture
 HERE=Path(__file__).resolve().parent;ROOT=HERE.parents[1]
 WORLD=(HERE/'two_recipe_world.lua').read_text(encoding='utf-8-sig')
 
-def run(baseline=False,bank_size=27,latency_ms=0,controlled_input=False,force_v2_directory=False):
+def run(baseline=False,bank_size=27,latency_ms=0,controlled_input=False,force_v2_directory=False,bulk_count=5):
  l=fixture();l.globals().BANK_SIZE=bank_size;l.globals().RPC_LATENCY=latency_ms/1000;l.globals().CONTROLLED_INPUT=controlled_input
+ l.globals().BULK_COUNT=bulk_count
  if baseline:
   for name in ['lib/bridge.lua','lib/engine.lua','runtime/controller.lua','runtime/nanites_cell.lua']:
    l.globals().s.files['/home/bec_v2/'+name]=subprocess.check_output(['git','show','549df6e:reinstall_v2/files/'+name],cwd=ROOT).decode('utf-8')

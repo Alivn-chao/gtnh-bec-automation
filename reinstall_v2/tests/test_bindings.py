@@ -54,6 +54,31 @@ def fixture():
     lua.execute('fields=B.v2Fields(cfg);data=payload(fields,B.revision(original))')
     return lua
 
+class TenBulkPortTests(unittest.TestCase):
+    def test_tenth_binding_round_trip_preserves_first_five_and_partial_draft(self):
+        l=fixture();l.execute('''
+cfg.groups[1].bulkTransposers={};for i=1,5 do cfg.groups[1].bulkTransposers[i]=string.format('%08x-1234-4567-89ab-123456789abc',200+i)end
+local fields=B.v2Fields(cfg);local first=cfg.groups[1].bulkTransposers[1]
+for _,f in ipairs(fields)do if f.key:match('^g1.bulk%d+$')then
+ local i=tonumber(f.key:match('(%d+)$'));if i>5 then f.value=string.format('%08x-1234-4567-89ab-123456789abc',100+i)end
+end end
+local next=B.applyV2(cfg,payload(fields,B.revision(original)),B.revision(original))
+assert(#next.groups[1].bulkTransposers==10 and next.groups[1].bulkTransposers[1]==first)
+for i=1,5 do assert(next.groups[1].bulkTransposers[i]==cfg.groups[1].bulkTransposers[i])end
+assert(next.groups[1].bulkTransposers[10]=='0000006e-1234-4567-89ab-123456789abc')
+local old={version=1,base=B.revision(original),values={['g1.bulk5']='part-five',['n3.address']='partial-node'}}
+local restored=B.draftFields(cfg,old,original)
+local values={};for _,f in ipairs(restored)do values[f.key]=f.value end
+assert(values['g1.bulk5']=='part-five' and values['g1.bulk10']=='')
+assert(values['n3.address']=='partial-node')
+''')
+    def test_sixteen_group_field_catalog_does_not_hit_old_flat_page_limit(self):
+        l=fixture();l.execute('''
+local ser=require('serialization');for i=2,16 do cfg.groups[i]=ser.unserialize(ser.serialize(cfg.groups[1],false))end
+local fields=B.v2Fields(cfg);assert(#fields>512 and #fields<=1024)
+assert(#payload(fields,B.revision(original))<32768)
+''')
+
 class BindingTests(unittest.TestCase):
     def test_partial_draft_survives_reload_without_validating_or_changing_active_config(self):
         lua=fixture()

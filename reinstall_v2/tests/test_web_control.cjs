@@ -40,5 +40,7 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
  assert.equal(f.sent[0].args.key,'g2.generator2');
  f=fixture();f.snapshot('1',{}, {generatorSlots:6});f.snapshot('2',{}, {group:2,groupCount:2,generatorSlots:4});
  assert.equal(f.scene.modules.filter(m=>m.kind==='generator').length,4,'another group must not expose unsupported leftover fields');
- console.log('Page save races and model binding: 8 scenarios passed');
+ f=fixture();f.scene.modules.push({id:'bulk-transposer-10',kind:'peripheral',role:'bulk'});f.snapshot('1');
+ f.context.window.BEC_BINDING_DIRTY({modules:{'bulk-transposer-10':{address:'tenth'}}});assert.equal(f.sent[0].args.key,'g1.bulk10');
+ console.log('Page save races and model binding: 9 scenarios passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

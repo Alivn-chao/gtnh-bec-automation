@@ -2,6 +2,11 @@
 import unittest
 from simulate_two_recipes import run
 class PipelineSimulationTests(unittest.TestCase):
+ def test_second_recipe_uses_tenth_high_speed_port(self):
+  r=run(bulk_count=10,latency_ms=10)
+  self.assertIsNone(r['error']);self.assertTrue(r['healthy_completion'])
+  used=[e['detail']for e in r['events']if e['kind']=='fluid-port']
+  self.assertIn('bulk10',used);self.assertNotIn('bulk3',used)
  def test_two_outputs_with_v2_recipe_directory(self):
   r=run();self.assertIsNone(r['error']);self.assertAlmostEqual(r['total_seconds'],49.15,places=2)
   self.assertEqual([x['item']for x in r['outputs']],['simulation:product_a','simulation:product_b'])

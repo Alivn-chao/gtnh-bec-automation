@@ -1,4 +1,363 @@
-local files={{path="/home/bec_v2/lib/bridge.lua",preview5="15577:279131571",preview4="14972:1082549461",preview1="13410:2517241504",preview2="14483:790541300",preview21="14572:3934966185",preview3="14885:2931246636",added=false,before=[=[local c=require('component')
+local files={{path="/home/bec_v2/lib/ochd_bindings.lua",preview6="11343:2039590392",preview5="11343:2039590392",preview4="11343:2039590392",preview1="",preview2="",preview21="",preview3="",added=false,before=[=[-- Strict data-only binding editor shared by the V1 monitor and V2 setup page.
+local c=require('component');local fs=require('filesystem');local ser=require('serialization')
+local M={}
+local function uuid(s)return type(s)=='string'and s:match('^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$')end
+local function read(p)local f=io.open(p,'r');if not f then return end;local s=f:read('*a');f:close();return s end
+local function clone(t)return ser.unserialize(ser.serialize(t,false))end
+local function field(out,key,label,value,kind)
+ out[#out+1]={key=key,label=label,value=value==nil and ''or tostring(value),kind=kind or 'uuid'}
+end
+function M.revision(text)
+ local a,b=1,0;for i=1,#(text or '')do a=(a+text:byte(i))%65521;b=(b+a)%65521 end
+ return string.format('%.0f',b*65536+a)
+end
+function M.parse(payload,fields,revision,draft)
+ assert(type(payload)=='string'and #payload<=32768,'绑定数据过大')
+ if revision then
+  local base,rest=payload:match('^_revision=(%d+)\n(.*)$')
+  assert(base==revision and rest,'绑定配置已变化，请重新打开页面');payload=rest
+ end
+ local specs,values={},{}
+ for _,f in ipairs(fields)do specs[f.key]=f.kind end
+ for line in (payload..'\n'):gmatch('(.-)\n')do
+  local key,v=line:match('^([%w_.-]+)=(.*)$')
+  assert(key and specs[key]and values[key]==nil and #v<=160,'字段未知、重复或格式不正确')
+  assert(not v:find('[\r\n=]'),'字段不能包含换行或等号')
+  local kind=specs[key]
+  if v~=''and not draft then
+   if kind=='uuid'then assert(uuid(v),'请输入完整组件地址：'..key)
+   elseif kind=='path'then assert(v:match('^/[%w_./-]+$')and not v:find('..',1,true),'目录格式不正确')
+   elseif kind=='mode'then assert(v=='cell-io'or v=='me-interface','蜂群模式不正确')
+   else
+    assert(v:match('^%d+$')and tonumber(v)<=2147483647,'数值格式不正确：'..key)
+    if kind=='side'then assert(tonumber(v)<=5,'方向必须为0至5')end
+   end
+  end
+  values[key]=v
+ end
+ for _,f in ipairs(fields)do assert(values[f.key]~=nil,'缺少字段：'..f.key)end
+ return values
+end
+function M.commit(path,value,expected,request)
+ assert(read(path)==expected,'配置已被其他程序修改，请重新打开绑定页')
+ local suffix=tostring(request);assert(suffix:match('^%d+$'),'保存请求编号无效')
+ local temp=path..'.hd.new.'..suffix;local backup=path..'.hd.bak.'..suffix
+ assert(not fs.exists(temp)and not fs.exists(backup),'同一保存请求已有文件，请先核对')
+ local text=ser.serialize(value,false)
+ local f=assert(io.open(temp,'w'));assert(f:write(text));assert(f:flush());f:close()
+ assert(read(temp)==text and type(ser.unserialize(text))=='table','临时配置回读失败')
+ assert(read(path)==expected,'配置在保存期间改变')
+ if expected then assert(fs.rename(path,backup),'原配置备份失败')end
+ local ok,reason=pcall(function()assert(fs.rename(temp,path),'配置替换失败');assert(read(path)==text,'保存回读失败')end)
+ if not ok then
+  if fs.exists(path)then assert(fs.rename(path,path..'.hd.failed.'..suffix))end
+  if expected then assert(fs.rename(backup,path),'配置恢复失败')end
+  error('保存失败，原配置已恢复：'..tostring(reason))
+ end
+ return expected and backup or nil
+end
+function M.v1Fields(cfg)
+ local out={};field(out,'node','V1高清监控 · 传送节点',cfg.node);field(out,'field','V1高清监控 · 约束场',cfg.field);return out
+end
+function M.saveV1(connection,payload,request)
+ local path='/home/bec_hd.config';local expected=read(path)
+ assert(expected and ser.serialize(ser.unserialize(expected),false)==ser.serialize(connection,false),'高清连接配置已变化')
+ local values=M.parse(payload,M.v1Fields(connection),M.revision(expected));assert(uuid(values.node)and uuid(values.field),'两项地址都需要填写')
+ assert(c.methods(values.node).getRequiredCondensate~=nil and c.methods(values.field).getStoredCondensate~=nil,'节点或约束场类型不匹配')
+ local next=clone(connection);next.node=values.node;next.field=values.field
+ return next,M.commit(path,next,expected,request)
+end
+function M.v2Fields(cfg)
+ local out={}
+ field(out,'mainInterface','公共 · 主网供液ME接口',cfg.mainInterface)
+ field(out,'workshopInterface','公共 · 样板工坊ME接口（可空）',cfg.workshopInterface)
+ field(out,'recipeDirectory','公共 · 配方目录',cfg.recipeDirectory,'path')
+ field(out,'cacheTarget','公共 · 库存参考目标',cfg.cacheTarget or 144000,'integer')
+ for i,g in ipairs(cfg.groups)do
+  local prefix='g'..i..'.';local title='组'..i..' · '
+  for _,row in ipairs({{'storage','约束场'},{'gate','公共韦门'},{'subInterface','原液子网ME接口'},{'transposer','供液转运器'}})do field(out,prefix..row[1],title..row[2],g[row[1]])end
+  field(out,prefix..'mainSide',title..'主网侧方向',g.mainSide or 4,'side');field(out,prefix..'subSide',title..'子网侧方向',g.subSide or 5,'side')
+  assert(#g.generators<=16,'本页面最多配置16台纠缠器/组')
+  for j=1,math.max(4,#g.generators)do field(out,prefix..'generator'..j,title..'纠缠器'..j..'（多余可空）',g.generators[j])end
+  for j=1,math.max(5,#(g.bulkTransposers or {}))do field(out,prefix..'bulk'..j,title..'高速供液口'..j..'（可空）',(g.bulkTransposers or {})[j])end
+  local n=g.nanites or {}
+  for _,row in ipairs({{'transposer','转运器'},{'loadRedstone','装入红石'},{'returnRedstone','回收红石'}})do
+   field(out,prefix..'bee_'..row[1],title..'蜂群 · '..row[2],n[row[1]])
+  end
+  for _,row in ipairs({{'bankSide',0,'箱子方向'},{'loadSide',3,'装入端口方向'},{'returnSide',2,'回收端口方向'},{'loadOutputSide',0,'装入红石输出方向'},{'returnOutputSide',0,'回收红石输出方向'}})do
+   field(out,prefix..'bee_'..row[1],title..'蜂群 · '..row[3],n[row[1]]or row[2],'side')
+  end
+ end
+ local slots={};for i,n in ipairs(cfg.nodes)do slots[n.slot or i]=n end
+ for i=1,16 do
+  local n=slots[i]or {};local prefix='n'..i..'.';local title='节点'..i..' · '
+  field(out,prefix..'address',title..'组件地址（空位不填）',n.address)
+  field(out,prefix..'redstone',title..'暂停红石地址',n.redstone)
+  field(out,prefix..'pauseSide',title..'暂停红石方向',n.pauseSide or 1,'side')
+  field(out,prefix..'group',title..'设备组编号',n.group or 1,'integer')
+  field(out,prefix..'gate',title..'独立韦门（空则用组韦门）',n.gate)
+ end
+ assert(#out<=512,'绑定字段超过页面容量');return out
+end
+function M.applyV2(cfg,payload,revision)
+ local values=M.parse(payload,M.v2Fields(cfg),revision);local next=clone(cfg)
+ next.mainInterface=values.mainInterface;next.workshopInterface=values.workshopInterface~=''and values.workshopInterface or nil
+ next.recipeDirectory=values.recipeDirectory;next.cacheTarget=tonumber(values.cacheTarget)
+ for i,g in ipairs(next.groups)do
+  local p='g'..i..'.'
+  for _,key in ipairs({'storage','gate','subInterface','transposer'})do g[key]=values[p..key]end
+  g.mainSide=tonumber(values[p..'mainSide']);g.subSide=tonumber(values[p..'subSide'])
+  g.generators={};for j=1,math.max(4,#cfg.groups[i].generators)do local v=values[p..'generator'..j];if v~=''then g.generators[#g.generators+1]=v end end
+  g.bulkTransposers={};for j=1,math.max(5,#(cfg.groups[i].bulkTransposers or {}))do local v=values[p..'bulk'..j];if v~=''then g.bulkTransposers[#g.bulkTransposers+1]=v end end
+  local n={mode='cell-io'};g.nanites=n
+  for _,key in ipairs({'transposer','loadRedstone','returnRedstone'})do n[key]=values[p..'bee_'..key]~=''and values[p..'bee_'..key]or nil end
+  for _,key in ipairs({'bankSide','loadSide','returnSide','loadOutputSide','returnOutputSide'})do n[key]=tonumber(values[p..'bee_'..key])end
+  n.enabled=n.transposer~=nil
+  assert(n.enabled or not(n.loadRedstone or n.returnRedstone or n.supplyInterface or n.hatchInterface),'蜂群设备需完整填写或一起留空')
+ end
+ local oldSlots={};for i,n in ipairs(cfg.nodes)do oldSlots[n.slot or i]=n end
+ next.nodes={}
+ for i=1,16 do
+  local p='n'..i..'.';local a,r=values[p..'address'],values[p..'redstone']
+  if a~=''or r~=''then
+   assert(uuid(a)and uuid(r),'节点组件和暂停红石地址需一起填写')
+   local group=tonumber(values[p..'group']);assert(next.groups[group],'节点设备组不存在')
+   local row=oldSlots[i]and clone(oldSlots[i])or {name='节点'..i}
+   row.slot=i;row.address=a;row.redstone=r;row.group=group;row.pauseSide=tonumber(values[p..'pauseSide'])
+   row.gate=values[p..'gate']~=''and values[p..'gate']or next.groups[group].gate
+   next.nodes[#next.nodes+1]=row
+  end
+ end
+ return next
+end
+function M.saveV2(C,cfg,payload,request,expected,revision)
+ local function unfinished()
+  for i in ipairs(cfg.nodes)do
+   local r=C.read(C.path('state/node-'..i..'/production.journal'))
+   assert(not r or r.stage=='stopped'and not r.pending and not r.plan,'有未完成生产记录，暂不改绑定')
+   for _,move in ipairs(r and r.transfers or {})do assert(move.ok==true,'旧搬运未确认，暂不改绑定')end
+   for _,job in ipairs(r and r.requests or {})do assert(job.state=='done','旧申请未确认，暂不改绑定')end
+  end
+  for i in ipairs(cfg.groups)do
+   local path='state/group-'..i..'/'
+   for _,name in ipairs({'cohort.dat','nanites-cell.journal','nanites.journal'})do
+    local r=C.read(C.path(path..name));assert(not r or r.stage==(name=='cohort.dat'and 'stopped'or 'done'),'有未完成批次或换蜂记录，暂不改绑定')
+   end
+  end
+ end
+ unfinished()
+ for _,n in ipairs(cfg.nodes)do assert(c.invoke(n.address,'getState')~='crafting','旧绑定仍在生产，先退出控制器')end
+ for _,g in ipairs(cfg.groups)do for _,a in ipairs(g.generators)do assert(c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false,'原绑定纠缠器须先停止活动')end end
+ local next=M.applyV2(cfg,payload,revision or M.revision(expected));C.validate(next,true)
+ for _,n in ipairs(next.nodes)do
+  local state=c.invoke(n.address,'getState')
+  assert(state=='idle'or(state=='paused-immediate'or state=='nanite-tier-too-low')and c.invoke(n.redstone,'getOutput',n.pauseSide)==15,'先停止生产再改绑定')
+ end
+ for _,g in ipairs(next.groups)do for _,a in ipairs(g.generators)do assert(c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false,'纠缠器须先停止活动')end end
+ unfinished();return next,M.commit(C.path('config.dat'),next,expected,request)
+end
+-- Drafts preserve raw incomplete input without touching active config or hardware.
+function M.draftFields(cfg,record,expected)
+ local fields=M.v2Fields(cfg)
+ if type(record)=='table'and record.version==1 and record.base==M.revision(expected)and type(record.values)=='table'then
+  for _,f in ipairs(fields)do
+   local value=record.values[f.key]
+   if type(value)=='string'and #value<=160 and not value:find('[\r\n=]')then f.value=value end
+  end
+ end
+ return fields
+end
+function M.saveDraft(C,cfg,payload,request,expected,rawDraft,revision)
+ assert(read(C.path('config.dat'))==expected,'正式配置已变化，请重新打开')
+ local values=M.parse(payload,M.v2Fields(cfg),revision,true)
+ local path=C.path('bindings.draft.dat')
+ local backup=M.commit(path,{version=1,base=M.revision(expected),values=values},rawDraft,request)
+ if backup then fs.remove(backup)end
+ return read(path)
+end
+M.read=read
+return M
+]=],source=[=[-- BEC_BULK_SLOTS_10
+-- Strict data-only binding editor shared by the V1 monitor and V2 setup page.
+local c=require('component');local fs=require('filesystem');local ser=require('serialization')
+local M={}
+local function uuid(s)return type(s)=='string'and s:match('^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$')end
+local function read(p)local f=io.open(p,'r');if not f then return end;local s=f:read('*a');f:close();return s end
+local function clone(t)return ser.unserialize(ser.serialize(t,false))end
+local function field(out,key,label,value,kind)
+ out[#out+1]={key=key,label=label,value=value==nil and ''or tostring(value),kind=kind or 'uuid'}
+end
+function M.revision(text)
+ local a,b=1,0;for i=1,#(text or '')do a=(a+text:byte(i))%65521;b=(b+a)%65521 end
+ return string.format('%.0f',b*65536+a)
+end
+function M.parse(payload,fields,revision,draft)
+ assert(type(payload)=='string'and #payload<=32768,'绑定数据过大')
+ if revision then
+  local base,rest=payload:match('^_revision=(%d+)\n(.*)$')
+  assert(base==revision and rest,'绑定配置已变化，请重新打开页面');payload=rest
+ end
+ local specs,values={},{}
+ for _,f in ipairs(fields)do specs[f.key]=f.kind end
+ for line in (payload..'\n'):gmatch('(.-)\n')do
+  local key,v=line:match('^([%w_.-]+)=(.*)$')
+  assert(key and specs[key]and values[key]==nil and #v<=160,'字段未知、重复或格式不正确')
+  assert(not v:find('[\r\n=]'),'字段不能包含换行或等号')
+  local kind=specs[key]
+  if v~=''and not draft then
+   if kind=='uuid'then assert(uuid(v),'请输入完整组件地址：'..key)
+   elseif kind=='path'then assert(v:match('^/[%w_./-]+$')and not v:find('..',1,true),'目录格式不正确')
+   elseif kind=='mode'then assert(v=='cell-io'or v=='me-interface','蜂群模式不正确')
+   else
+    assert(v:match('^%d+$')and tonumber(v)<=2147483647,'数值格式不正确：'..key)
+    if kind=='side'then assert(tonumber(v)<=5,'方向必须为0至5')end
+   end
+  end
+  values[key]=v
+ end
+ for _,f in ipairs(fields)do assert(values[f.key]~=nil,'缺少字段：'..f.key)end
+ return values
+end
+function M.commit(path,value,expected,request)
+ assert(read(path)==expected,'配置已被其他程序修改，请重新打开绑定页')
+ local suffix=tostring(request);assert(suffix:match('^%d+$'),'保存请求编号无效')
+ local temp=path..'.hd.new.'..suffix;local backup=path..'.hd.bak.'..suffix
+ assert(not fs.exists(temp)and not fs.exists(backup),'同一保存请求已有文件，请先核对')
+ local text=ser.serialize(value,false)
+ local f=assert(io.open(temp,'w'));assert(f:write(text));assert(f:flush());f:close()
+ assert(read(temp)==text and type(ser.unserialize(text))=='table','临时配置回读失败')
+ assert(read(path)==expected,'配置在保存期间改变')
+ if expected then assert(fs.rename(path,backup),'原配置备份失败')end
+ local ok,reason=pcall(function()assert(fs.rename(temp,path),'配置替换失败');assert(read(path)==text,'保存回读失败')end)
+ if not ok then
+  if fs.exists(path)then assert(fs.rename(path,path..'.hd.failed.'..suffix))end
+  if expected then assert(fs.rename(backup,path),'配置恢复失败')end
+  error('保存失败，原配置已恢复：'..tostring(reason))
+ end
+ return expected and backup or nil
+end
+function M.v1Fields(cfg)
+ local out={};field(out,'node','V1高清监控 · 传送节点',cfg.node);field(out,'field','V1高清监控 · 约束场',cfg.field);return out
+end
+function M.saveV1(connection,payload,request)
+ local path='/home/bec_hd.config';local expected=read(path)
+ assert(expected and ser.serialize(ser.unserialize(expected),false)==ser.serialize(connection,false),'高清连接配置已变化')
+ local values=M.parse(payload,M.v1Fields(connection),M.revision(expected));assert(uuid(values.node)and uuid(values.field),'两项地址都需要填写')
+ assert(c.methods(values.node).getRequiredCondensate~=nil and c.methods(values.field).getStoredCondensate~=nil,'节点或约束场类型不匹配')
+ local next=clone(connection);next.node=values.node;next.field=values.field
+ return next,M.commit(path,next,expected,request)
+end
+function M.v2Fields(cfg)
+ local out={}
+ field(out,'mainInterface','公共 · 主网供液ME接口',cfg.mainInterface)
+ field(out,'workshopInterface','公共 · 样板工坊ME接口（可空）',cfg.workshopInterface)
+ field(out,'recipeDirectory','公共 · 配方目录',cfg.recipeDirectory,'path')
+ field(out,'cacheTarget','公共 · 库存参考目标',cfg.cacheTarget or 144000,'integer')
+ for i,g in ipairs(cfg.groups)do
+  local prefix='g'..i..'.';local title='组'..i..' · '
+  for _,row in ipairs({{'storage','约束场'},{'gate','公共韦门'},{'subInterface','原液子网ME接口'},{'transposer','供液转运器'}})do field(out,prefix..row[1],title..row[2],g[row[1]])end
+  field(out,prefix..'mainSide',title..'主网侧方向',g.mainSide or 4,'side');field(out,prefix..'subSide',title..'子网侧方向',g.subSide or 5,'side')
+  assert(#g.generators<=16,'本页面最多配置16台纠缠器/组')
+  for j=1,math.max(4,#g.generators)do field(out,prefix..'generator'..j,title..'纠缠器'..j..'（多余可空）',g.generators[j])end
+  for j=1,math.max(10,#(g.bulkTransposers or {}))do field(out,prefix..'bulk'..j,title..'高速供液口'..j..'（可空）',(g.bulkTransposers or {})[j])end
+  local n=g.nanites or {}
+  for _,row in ipairs({{'transposer','转运器'},{'loadRedstone','装入红石'},{'returnRedstone','回收红石'}})do
+   field(out,prefix..'bee_'..row[1],title..'蜂群 · '..row[2],n[row[1]])
+  end
+  for _,row in ipairs({{'bankSide',0,'箱子方向'},{'loadSide',3,'装入端口方向'},{'returnSide',2,'回收端口方向'},{'loadOutputSide',0,'装入红石输出方向'},{'returnOutputSide',0,'回收红石输出方向'}})do
+   field(out,prefix..'bee_'..row[1],title..'蜂群 · '..row[3],n[row[1]]or row[2],'side')
+  end
+ end
+ local slots={};for i,n in ipairs(cfg.nodes)do slots[n.slot or i]=n end
+ for i=1,16 do
+  local n=slots[i]or {};local prefix='n'..i..'.';local title='节点'..i..' · '
+  field(out,prefix..'address',title..'组件地址（空位不填）',n.address)
+  field(out,prefix..'redstone',title..'暂停红石地址',n.redstone)
+  field(out,prefix..'pauseSide',title..'暂停红石方向',n.pauseSide or 1,'side')
+  field(out,prefix..'group',title..'设备组编号',n.group or 1,'integer')
+  field(out,prefix..'gate',title..'独立韦门（空则用组韦门）',n.gate)
+ end
+ assert(#out<=1024,'绑定字段超过页面容量');return out
+end
+function M.applyV2(cfg,payload,revision)
+ local values=M.parse(payload,M.v2Fields(cfg),revision);local next=clone(cfg)
+ next.mainInterface=values.mainInterface;next.workshopInterface=values.workshopInterface~=''and values.workshopInterface or nil
+ next.recipeDirectory=values.recipeDirectory;next.cacheTarget=tonumber(values.cacheTarget)
+ for i,g in ipairs(next.groups)do
+  local p='g'..i..'.'
+  for _,key in ipairs({'storage','gate','subInterface','transposer'})do g[key]=values[p..key]end
+  g.mainSide=tonumber(values[p..'mainSide']);g.subSide=tonumber(values[p..'subSide'])
+  g.generators={};for j=1,math.max(4,#cfg.groups[i].generators)do local v=values[p..'generator'..j];if v~=''then g.generators[#g.generators+1]=v end end
+  g.bulkTransposers={};for j=1,math.max(10,#(cfg.groups[i].bulkTransposers or {}))do local v=values[p..'bulk'..j];if v~=''then g.bulkTransposers[#g.bulkTransposers+1]=v end end
+  local n={mode='cell-io'};g.nanites=n
+  for _,key in ipairs({'transposer','loadRedstone','returnRedstone'})do n[key]=values[p..'bee_'..key]~=''and values[p..'bee_'..key]or nil end
+  for _,key in ipairs({'bankSide','loadSide','returnSide','loadOutputSide','returnOutputSide'})do n[key]=tonumber(values[p..'bee_'..key])end
+  n.enabled=n.transposer~=nil
+  assert(n.enabled or not(n.loadRedstone or n.returnRedstone or n.supplyInterface or n.hatchInterface),'蜂群设备需完整填写或一起留空')
+ end
+ local oldSlots={};for i,n in ipairs(cfg.nodes)do oldSlots[n.slot or i]=n end
+ next.nodes={}
+ for i=1,16 do
+  local p='n'..i..'.';local a,r=values[p..'address'],values[p..'redstone']
+  if a~=''or r~=''then
+   assert(uuid(a)and uuid(r),'节点组件和暂停红石地址需一起填写')
+   local group=tonumber(values[p..'group']);assert(next.groups[group],'节点设备组不存在')
+   local row=oldSlots[i]and clone(oldSlots[i])or {name='节点'..i}
+   row.slot=i;row.address=a;row.redstone=r;row.group=group;row.pauseSide=tonumber(values[p..'pauseSide'])
+   row.gate=values[p..'gate']~=''and values[p..'gate']or next.groups[group].gate
+   next.nodes[#next.nodes+1]=row
+  end
+ end
+ return next
+end
+function M.saveV2(C,cfg,payload,request,expected,revision)
+ local function unfinished()
+  for i in ipairs(cfg.nodes)do
+   local r=C.read(C.path('state/node-'..i..'/production.journal'))
+   assert(not r or r.stage=='stopped'and not r.pending and not r.plan,'有未完成生产记录，暂不改绑定')
+   for _,move in ipairs(r and r.transfers or {})do assert(move.ok==true,'旧搬运未确认，暂不改绑定')end
+   for _,job in ipairs(r and r.requests or {})do assert(job.state=='done','旧申请未确认，暂不改绑定')end
+  end
+  for i in ipairs(cfg.groups)do
+   local path='state/group-'..i..'/'
+   for _,name in ipairs({'cohort.dat','nanites-cell.journal','nanites.journal'})do
+    local r=C.read(C.path(path..name));assert(not r or r.stage==(name=='cohort.dat'and 'stopped'or 'done'),'有未完成批次或换蜂记录，暂不改绑定')
+   end
+  end
+ end
+ unfinished()
+ for _,n in ipairs(cfg.nodes)do assert(c.invoke(n.address,'getState')~='crafting','旧绑定仍在生产，先退出控制器')end
+ for _,g in ipairs(cfg.groups)do for _,a in ipairs(g.generators)do assert(c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false,'原绑定纠缠器须先停止活动')end end
+ local next=M.applyV2(cfg,payload,revision or M.revision(expected));C.validate(next,true)
+ for _,n in ipairs(next.nodes)do
+  local state=c.invoke(n.address,'getState')
+  assert(state=='idle'or(state=='paused-immediate'or state=='nanite-tier-too-low')and c.invoke(n.redstone,'getOutput',n.pauseSide)==15,'先停止生产再改绑定')
+ end
+ for _,g in ipairs(next.groups)do for _,a in ipairs(g.generators)do assert(c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false,'纠缠器须先停止活动')end end
+ unfinished();return next,M.commit(C.path('config.dat'),next,expected,request)
+end
+-- Drafts preserve raw incomplete input without touching active config or hardware.
+function M.draftFields(cfg,record,expected)
+ local fields=M.v2Fields(cfg)
+ if type(record)=='table'and record.version==1 and record.base==M.revision(expected)and type(record.values)=='table'then
+  for _,f in ipairs(fields)do
+   local value=record.values[f.key]
+   if type(value)=='string'and #value<=160 and not value:find('[\r\n=]')then f.value=value end
+  end
+ end
+ return fields
+end
+function M.saveDraft(C,cfg,payload,request,expected,rawDraft,revision)
+ assert(read(C.path('config.dat'))==expected,'正式配置已变化，请重新打开')
+ local values=M.parse(payload,M.v2Fields(cfg),revision,true)
+ local path=C.path('bindings.draft.dat')
+ local backup=M.commit(path,{version=1,base=M.revision(expected),values=values},rawDraft,request)
+ if backup then fs.remove(backup)end
+ return read(path)
+end
+M.read=read
+return M
+]=]},{path="/home/bec_v2/lib/bridge.lua",preview6="15577:279131571",preview5="15577:279131571",preview4="14972:1082549461",preview1="13410:2517241504",preview2="14483:790541300",preview21="14572:3934966185",preview3="14885:2931246636",added=false,before=[=[local c=require('component')
 local computer=require('computer')
 local C=assert(loadfile('/home/bec_v2/lib/config.lua'))()
 local M={}
@@ -480,7 +839,7 @@ function M.environment(cfg,index,engine)
  return instantiate(C.path('runtime/controller.lua'))
 end
 return M
-]=]},{path="/home/bec_v2/runtime/controller.lua",preview5="37104:3097960326",preview4="37080:3439859331",preview1="36384:3281062855",preview2="",preview21="",preview3="36893:1553718572",added=false,before=[=[local c = require("component") local ser = require("serialization") local computer = require("computer") local fs = require("filesystem")
+]=]},{path="/home/bec_v2/runtime/controller.lua",preview6="37104:3097960326",preview5="37104:3097960326",preview4="37080:3439859331",preview1="36384:3281062855",preview2="",preview21="",preview3="36893:1553718572",added=false,before=[=[local c = require("component") local ser = require("serialization") local computer = require("computer") local fs = require("filesystem")
 local sides = require("sides") local event = require("event") local mode = (...) or "preview" local JOURNAL = "/home/bec_auto.journal"
 local MAIN = "3afdc4cf-04e3-4ae9-8be6-e753c23a249d" local SUB = "86311657-33d1-41b5-a0d9-0aee7b5c2c50" local TRANS = "66fb280f-080d-4623-8d54-0dffd5cd5aad" local STORAGE = "237a9cac-118a-4b74-8755-0d0b0ad216c0"
 local NODE = "b04787f9-5423-4b03-8549-c786d4ef38d0" local GATE_ADDRESS = "cf2a0c4a-ab8d-4958-b1df-253094d6690c" local RS, GEN, GATE, armed, record local stopping=false
@@ -918,7 +1277,7 @@ if not ok then if armed then local paused = pcall(pause,15) local stopped = pcal
 local cleaned = true if record and record.configOwned then local success, result = pcall(call,MAIN,"setFluidInterfaceConfiguration",0) cleaned = success and result == true
 end print("恢复暂停: " .. tostring(paused) .. "；关闭纠缠装置: " .. tostring(stopped) .. "；清供液配置: " .. tostring(cleaned)) if not paused then print("请手动提供控制仓暂停信号。") end end
 print("程序停止: " .. tostring(err)) print("保留现场与日志；不要删除日志盲目重跑。约束场保持开启。") end
-]=]},{path="/home/bec_v2/lib/engine.lua",preview5="11288:931933717",preview4="11288:931933717",preview1="",preview2="",preview21="8215:3066878477",preview3="9855:1405689683",added=false,before=[=[local c=require('component')
+]=]},{path="/home/bec_v2/lib/engine.lua",preview6="11288:931933717",preview5="11288:931933717",preview4="11288:931933717",preview1="",preview2="",preview21="8215:3066878477",preview3="9855:1405689683",added=false,before=[=[local c=require('component')
 local clock=require('computer')
 return function(cfg,C,Bridge,monitor)
  local E={tasks={},groupOwner={},fluidOwner=nil,logs={},monitor=monitor,roundRobin={}}
@@ -1281,7 +1640,7 @@ return function(cfg,C,Bridge,monitor)
  end
  return E
 end
-]=]},{path="/home/bec_v2/runtime/nanites_cell.lua",preview5="14773:160252700",preview4="14773:160252700",preview1="",preview2="",preview21="",preview3="",added=false,before=[=[-- V2 module: whole-cell transfers through the verified south/north ME IO ports.
+]=]},{path="/home/bec_v2/runtime/nanites_cell.lua",preview6="14773:160252700",preview5="14773:160252700",preview4="14773:160252700",preview1="",preview2="",preview21="",preview3="",added=false,before=[=[-- V2 module: whole-cell transfers through the verified south/north ME IO ports.
 local c=require('component')
 local ser=require('serialization')
 local fs=require('filesystem')
@@ -1886,7 +2245,7 @@ function M.ensure(ctx)
  return result
 end
 return M
-]=]},{path="/home/bec_v2/lib/config.lua",preview5="7134:2524978389",preview4="7134:2524978389",preview1="",preview2="",preview21="",preview3="7134:2524978389",added=false,before=[=[local c=require('component')
+]=]},{path="/home/bec_v2/lib/config.lua",preview6="7134:2524978389",preview5="7134:2524978389",preview4="7134:2524978389",preview1="",preview2="",preview21="",preview3="7134:2524978389",added=false,before=[=[local c=require('component')
 local fs=require('filesystem')
 local ser=require('serialization')
 local M={ROOT='/home/bec_v2'}
@@ -2108,7 +2467,7 @@ function M.validate(cfg,live)
 end
 function M.load() return assert(M.read(M.path('config.dat')),'请先运行 setup') end
 return M
-]=]},{path="/home/bec_v2/lib/storage.lua",preview5="2444:2080658477",preview4="2444:2080658477",preview1="",preview2="",preview21="",preview3="",added=true,before=nil,source=[=[-- Bounded maintenance: completed archives only; never remove live/recovery data.
+]=]},{path="/home/bec_v2/lib/storage.lua",preview6="2444:2080658477",preview5="2444:2080658477",preview4="2444:2080658477",preview1="",preview2="",preview21="",preview3="",added=true,before=nil,source=[=[-- Bounded maintenance: completed archives only; never remove live/recovery data.
 local fs=require('filesystem');local ser=require('serialization')
 return function(C)
  local S={reserve=524288}
@@ -2155,7 +2514,7 @@ return function(C)
  end
  return S
 end
-]=]},{path="/home/bec_v2/main.lua",preview5="2807:377377484",preview4="2807:377377484",preview1="",preview2="",preview21="",preview3="",added=false,before=[=[local ROOT='/home/bec_v2'
+]=]},{path="/home/bec_v2/main.lua",preview6="2807:377377484",preview5="2807:377377484",preview4="2807:377377484",preview1="",preview2="",preview21="",preview3="",added=false,before=[=[local ROOT='/home/bec_v2'
 local function module(name)return assert(loadfile(ROOT..'/lib/'..name..'.lua'))()end
 local C=module('config')
 local mode,option=...
@@ -2257,7 +2616,7 @@ if not ok then E.reportFault(UI.selected(),tostring(err));print("V2已停止："
 if E.reports then print(E.reports.status)end
 for _,reason in ipairs(errors)do print('需人工检查：'..reason)end
 print(mode=='monitor'and '只读监控已退出'or 'V2已暂停所有组并关闭纠缠器；现场和日志保留')
-]=]},{path="/home/bec_v2/web.lua",preview5="2027:1356401707",preview4="2027:1356401707",preview1="",preview2="",preview21="",preview3="",added=true,before=nil,source=[=[local c=require('component');local event=require('event');local clock=require('computer')
+]=]},{path="/home/bec_v2/web.lua",preview6="2027:1356401707",preview5="2027:1356401707",preview4="2027:1356401707",preview1="",preview2="",preview21="",preview3="",added=true,before=nil,source=[=[local c=require('component');local event=require('event');local clock=require('computer')
 local ROOT='/home/bec_v2'
 local function module(n)return assert(loadfile(ROOT..'/lib/'..n..'.lua'))()end
 local C,B,W=module('config'),module('ochd_bindings'),module('web_json')
@@ -2291,7 +2650,7 @@ end,debug.traceback)
 local errors=H.close();for _,reason in ipairs(errors)do print('需人工检查：'..reason)end
 pcall(function()panel.release()end)
 assert(ok,err);assert(#errors==0,'暂停存在回读失败，请核对机器')
-]=]},{path="/home/bec_v2/lib/web_session.lua",preview5="8356:432333941",preview4="7956:3662685464",preview1="",preview2="",preview21="",preview3="",added=true,before=nil,source=[=[-- HTML is a data client. Only this Lua allowlist can save bindings or run V2.
+]=]},{path="/home/bec_v2/lib/web_session.lua",preview6="8356:432333941",preview5="8356:432333941",preview4="7956:3662685464",preview1="",preview2="",preview21="",preview3="",added=true,before=nil,source=[=[-- HTML is a data client. Only this Lua allowlist can save bindings or run V2.
 local c=require('component');local clock=require('computer');local ser=require('serialization')
 return function(C,B,W,options)
  options=options or {}
@@ -2406,7 +2765,7 @@ return function(C,B,W,options)
   actual('field',g.storage);actual('gate',g.gate)
   for j=1,math.max(1,#g.generators)do actual(j==1 and 'generator'or 'generator-'..j,g.generators[j])end
   local supply=out.phase=='supply';out.machines['fluid-transposer']=supply and 'phase'or 'idle'
-  for j=1,5 do out.machines['bulk-transposer-'..j]=supply and 'phase'or 'idle'end
+  for j=1,10 do out.machines['bulk-transposer-'..j]=supply and 'phase'or 'idle'end
   out.machines['nanite-transposer']=out.phase=='nanites'and 'phase'or 'idle'
   for i,n in ipairs(cfg.nodes)do if n.group==H.group then
    local state=read(n.address,'getState')or 'offline';local allowed=read(n.address,'isWorkAllowed')
@@ -2421,7 +2780,7 @@ return function(C,B,W,options)
  function H.engine()return E end
  return H
 end
-]=]},{path="/home/bec_v2/lib/web_json.lua",preview5="3795:1982527645",preview4="3795:1982527645",preview1="",preview2="",preview21="",preview3="",added=true,before=nil,source=[=[-- HTML package loader and bounded JSON decoder. Never evaluates page-provided Lua.
+]=]},{path="/home/bec_v2/lib/web_json.lua",preview6="3795:1982527645",preview5="3795:1982527645",preview4="3795:1982527645",preview1="",preview2="",preview21="",preview3="",added=true,before=nil,source=[=[-- HTML package loader and bounded JSON decoder. Never evaluates page-provided Lua.
 local fs=require('filesystem');local unicode=require('unicode')
 local M={null={}}
 function M.decode(text)
@@ -2481,7 +2840,7 @@ function M.package(directory)
  return {id=manifest.id,title=manifest.title,entry=manifest.entry or 'index.html',events=manifest.events or {},files=files}
 end
 return M
-]=]},{path="/home/bec_v2/lib/web_page.html",preview5="226106:568371390",preview4="223881:1516270899",preview1="",preview2="",preview21="",preview3="",added=true,before=nil,source=[=[<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BEC V2 · 结构绑定与自动化流程</title><meta name="description" content="用真实GTNH方块结构与贴图查看BEC装配线，旋转、分层、选模块并保存绑定草稿。"><style>:root{--ink:#263342;--muted:#8a95a3;--line:#e5eaf0;--blue:#2e77ee;--teal:#20a88e;--soft:#f5f8fc;--font:'Segoe UI','Microsoft YaHei',sans-serif}*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden}body{font:13px/1.5 var(--font);color:var(--ink);background:#fff}button,input,select{font:inherit}button{cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #6ba7ff;outline-offset:3px}button{transition:background .15s,color .15s,border .15s}button:hover{filter:brightness(.98)}button:disabled{cursor:not-allowed;opacity:.5}a{color:var(--blue);text-decoration:none}h1,h2,h3,p{margin:0}[hidden]{display:none!important}.topbar{height:70px;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 26px;gap:26px;background:#fff;position:relative;z-index:3}.brand{display:flex;align-items:center;gap:12px;color:var(--ink);white-space:nowrap}.brand strong{font-size:17px;letter-spacing:.3px}.brand strong>span{font-weight:400;color:#9aa5b2;font-size:12px;letter-spacing:1.2px}.brand-icon{position:relative;width:27px;height:30px;display:block}.brand-icon i{position:absolute;width:15px;height:15px;border:2px solid var(--blue);transform:rotate(30deg) skewY(-10deg);border-radius:2px;left:2px;top:4px}.brand-icon i:nth-child(2){left:10px;top:9px;background:white}.brand-icon i:nth-child(3){left:2px;top:14px;background:#eaf2ff}.top-divider{height:25px;border-left:1px solid var(--line)}.project-name{font-size:13px;font-weight:600;white-space:nowrap}.pill{margin-left:12px;padding:3px 7px;font-size:10px;color:#4983d1;background:#edf4ff;border-radius:4px;font-weight:400}.top-actions{margin-left:auto;display:flex;align-items:center;gap:10px}.save-status{font-size:11px;color:#8995a4;margin-right:12px;white-space:nowrap}.save-status i,.statusbar i{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--teal);margin-right:7px;vertical-align:middle}.save-status.busy i{background:#e9ac40}.save-status.error i{background:#e48163}.button{height:34px;padding:0 13px;border:1px solid #dfe6ef;border-radius:5px;background:#fff;color:#687789;font-size:11px}.button.primary{background:var(--blue);border-color:var(--blue);color:white;box-shadow:0 2px 5px #2e77ee16}.workspace{display:grid;grid-template-columns:238px minmax(300px,1fr) 292px;height:calc(100% - 100px)}.sidebar{border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;background:#fff}.side-head{padding:27px 22px 22px}.eyebrow{font-size:8px;font-weight:600;letter-spacing:1.8px;color:#9da8b5;display:block}.side-head h1{font-size:18px;letter-spacing:.3px;font-weight:600;margin-top:7px}.side-head p{font-size:10px;color:#a0a9b5;margin-top:9px;line-height:1.7}.search-box{display:flex;align-items:center;background:#f6f8fb;border:1px solid #edf0f5;border-radius:5px;margin:0 17px 24px;padding:7px 9px;gap:6px}.search-box>span{font-size:19px;line-height:15px;color:#97a4b4}.search-box input{background:none;border:0;outline:none;width:100%;min-width:0;font-size:10px;color:#68788b}.search-box kbd{border:1px solid #e2e7ee;border-radius:3px;font-size:9px;color:#a7b0bd;padding:0 4px}.line-header{display:flex;align-items:center;gap:8px;padding:0 20px 12px;color:#8592a3;font-size:10px}.line-header>b{color:#647487;font-weight:600}.count{margin-left:auto;background:#eff3f8;color:#98a5b4;padding:2px 6px;border-radius:4px;font:9px Consolas,monospace}.tree{overflow-y:auto;flex:1;padding:0 11px 20px}.tree-row{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;text-align:left;padding:10px 11px;border-radius:5px;margin:3px 0;color:#708094;position:relative;min-height:43px}.tree-row:hover{background:#f6f8fc}.tree-row.active{background:#edf4ff;color:#3478db}.tree-row.active:before{content:'';position:absolute;left:-11px;height:24px;width:3px;background:var(--blue);border-radius:0 3px 3px 0}.module-icon{font:17px var(--font);width:25px;height:25px;display:flex;align-items:center;justify-content:center;border:1px solid #dbe3ec;border-radius:5px;color:#8fa1b5;background:#f8fafc;flex-shrink:0}.tree-row.active .module-icon{border-color:#bdd3f4;color:var(--blue);background:#f6faff}.tree-title{font-size:11px;display:block;font-weight:500}.tree-role{font-size:8px;color:#a2acba;display:block;margin-top:2px}.state-dot{width:5px;height:5px;background:#bdc7d3;flex-shrink:0;display:inline-block;border-radius:50%;margin-left:auto}.state-dot.filled{background:var(--teal);box-shadow:0 0 0 3px #20a88e0a}.node-group-button{display:flex;align-items:center;gap:9px;width:100%;background:none;border:0;padding:12px 11px 6px;color:#8393a7;font-size:10px}.node-group-button .count{margin-left:auto}.node-rows{border-left:1px solid #eaf0f7;margin:6px 0 3px 22px;padding-left:9px}.node-rows .tree-row{min-height:33px;padding:7px 9px}.node-rows .tree-title{font-size:10px}.node-rows .tree-role{display:none}.node-rows .module-icon{width:19px;height:19px;font-size:12px}.node-rows .tree-row.active:before{left:-10px;height:18px;width:2px}.side-footer{padding:18px 22px;border-top:1px solid var(--line);background:#fbfcfe}.source-label{display:flex;align-items:center;gap:6px;font-size:10px;color:#8797a9}.verified{display:inline-flex;align-items:center;justify-content:center;border:1px solid #9fb7d2;border-radius:50%;width:12px;height:12px;font-size:8px;color:#6e96be}.side-footer p{font-size:9px;color:#a3adba;line-height:1.8;margin-top:7px}.text-button{background:none;border:0;padding:0;color:#729bd0;font-size:9px;margin-top:7px}.main{display:flex;flex-direction:column;min-height:0;min-width:0;background:#f1f4f8}.view-header{height:51px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 22px;border-bottom:1px solid #e1e8f0;background:#fafbfd;flex-shrink:0}.breadcrumb{display:flex;align-items:center;gap:10px;font-size:10px;color:#96a2b2;white-space:nowrap}.breadcrumb>span{color:#c0cad6;font-size:9px}.breadcrumb b{font-weight:500;color:#74879b}.view-modes{display:flex;background:#eef2f7;border:1px solid #e6ecf3;padding:3px;border-radius:5px}.view-modes button{background:none;border:0;padding:4px 10px;color:#9aa8b9;font-size:9px;border-radius:3px}.view-modes button.active{background:white;color:#4c7eb9;box-shadow:0 1px 3px #172b4510}.stage{position:relative;flex:1;overflow:hidden;min-height:250px;background:#f0f3f7}.stage>canvas{width:100%;height:100%;display:block;cursor:grab;touch-action:none}.stage>canvas.dragging{cursor:grabbing!important}.labels{position:absolute;inset:0;pointer-events:none}.device-label{position:absolute;transform:translate(-50%,-100%);white-space:nowrap;font-size:10px;border:1px solid #d4e0ed;background:#fffffff2;border-radius:4px;padding:4px 8px;box-shadow:0 2px 7px #39566f09;color:#607d99;pointer-events:auto;cursor:pointer;display:flex;align-items:center;gap:6px}.device-label:after{content:'';position:absolute;width:1px;height:13px;background:#a7bfd7;left:50%;top:100%}.device-label i{width:5px;height:5px;border-radius:2px;background:#6a9cd4}.device-label.node{font-size:8px;padding:3px 5px;color:#439984;border-color:#b6dbd0;background:#f9fffcf2}.device-label.node i{background:#41b18d}.device-label.selected{border-color:#69a3f1;color:#2875d9;box-shadow:0 0 0 3px #448bee0b}.stage-title{position:absolute;left:22px;top:20px;display:flex;align-items:center;gap:8px;color:#778b9f;font-size:10px;pointer-events:none}.live-dot{width:5px;height:5px;border-radius:50%;background:#729bc0}.stage-sub{color:#a5b2c0;font-size:9px;margin-left:3px}.viewport-tools{position:absolute;left:17px;top:58px;background:#fffffff2;border:1px solid #dfe6ef;border-radius:6px;box-shadow:0 2px 7px #2c435309;padding:4px;display:flex;flex-direction:column}.viewport-tools button{border:0;background:none;color:#8397ad;border-radius:3px;width:29px;height:30px;font-size:18px}.viewport-tools button:hover{background:#edf4fc;color:#347ede}.viewport-tools>div{border-top:1px solid #e8edf3;margin:3px}.orientation{position:absolute;right:16px;top:16px;display:flex;align-items:center;gap:3px;font-size:9px;color:#a0aebb}.orientation>span{margin-right:4px}.orientation button{border:1px solid #dce5ef;background:#f9fbfd;color:#95a6b9;font-size:8px;padding:4px 6px;border-radius:3px}.orientation button.active{border-color:#b5cdf0;background:#e8f1ff;color:#4f85cc}.model-callout{position:absolute;top:62px;left:64px;padding:15px 20px 14px 16px;border:1px solid #dde5ef;background:#fffffff0;border-radius:6px;pointer-events:auto;box-shadow:0 4px 18px #182c4205}.model-callout>span{font:7px Consolas,monospace;letter-spacing:1.5px;color:#a4b2c0;display:block}.model-callout strong{display:block;font-size:11px;font-weight:500;color:#70859c;margin:6px 0}.model-callout p{font-size:9px;color:#a4b0bf;line-height:1.8}.model-callout>button{position:absolute;right:7px;top:4px;border:0;background:none;color:#b4bfcd;font-size:15px}.axis-gizmo{position:absolute;bottom:26px;left:18px;width:73px;height:64px;opacity:.75}.axis-gizmo svg{width:100%;height:100%}.stage-help{position:absolute;bottom:13px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:9px;white-space:nowrap;font-size:8px;color:#9fadb9}.stage-help>span{color:#b8c3ce}.mouse-icon{width:9px;height:13px;border:1px solid #9aabba;border-radius:4px;display:block;position:relative}.mouse-icon:after{content:'';width:1px;height:4px;background:#9aabba;position:absolute;left:3px;top:1px}.renderer-badge{position:absolute;right:13px;bottom:12px;font:7px Consolas,monospace;color:#a9b6c3;letter-spacing:.4px}.layer-bar{height:61px;background:#fafcfe;display:flex;align-items:center;border-top:1px solid #dfe7ef;padding:0 22px;gap:11px;flex-shrink:0}.layer-icon{font-size:23px;color:#91a4b8;margin-right:0}.layer-title{min-width:76px;display:flex;flex-direction:column;gap:2px}.layer-title strong{font-size:10px;font-weight:500;color:#74889e}.layer-title>span{font:8px Consolas,monospace;color:#a2afbf}.layer-bar input{flex:1;min-width:50px;accent-color:#4e8ee9;height:3px;cursor:pointer}.layer-step{font-size:12px;width:20px;height:23px;border:0;background:#f0f4f9;border-radius:4px;color:#9caec0}.mini-button{border:1px solid #d6e5fa;background:#edf4ff;padding:5px 7px;color:#6b9ad7;font-size:8px;border-radius:4px}.view-options{height:42px;display:flex;align-items:center;gap:16px;border-top:1px solid #e8edf3;background:#fff;padding:0 22px;flex-shrink:0;font-size:8px;color:#93a3b4;white-space:nowrap}.view-options label{display:flex;align-items:center;gap:4px;cursor:pointer}.view-options input{width:10px;height:10px;accent-color:#6f99d2;margin:0}.legend{display:flex;gap:5px;align-items:center;margin-left:auto;font-size:7px;color:#a6b3c0}.legend i{display:inline-block;width:5px;height:5px;background:#b8c4d0;border-radius:50%;margin-left:6px}.legend i.filled{background:#20a88e}.legend i.selected{background:#488eea}.inspector{border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0;overflow-y:auto;background:#fff}.inspector-head{display:flex;align-items:center;justify-content:space-between;padding:28px 23px 22px;border-bottom:1px solid #eef1f6}.inspector-head h2{font-size:16px;font-weight:600;margin-top:7px}.property-icon{font-size:18px;color:#bcc8d4}.module-summary{padding:21px 23px 17px}.module-summary .summary-icon{width:41px;height:41px;display:flex;align-items:center;justify-content:center;font-size:23px;border:1px solid #dbe7f5;border-radius:7px;color:#6b96c8;background:#f3f8fe;margin-bottom:14px}.module-summary h3{font-size:15px;font-weight:600;letter-spacing:.2px}.module-summary p{font-size:9px;color:#9aaabc;margin-top:5px;line-height:1.8}.module-state{display:inline-flex;align-items:center;font-size:8px;gap:5px;margin-top:12px;border-radius:3px;background:#f2f5f9;padding:3px 6px;color:#9cabbc}.module-state i{width:4px;height:4px;border-radius:50%;background:#bac6d1}.module-state.filled{background:#edf9f4;color:#6d9b8d}.module-state.filled i{background:var(--teal)}.properties{border-top:1px solid #edf1f6;padding:18px 23px}.properties-title{font-size:9px;letter-spacing:.5px;color:#75899f;font-weight:500;margin-bottom:15px}.field{margin:0 0 17px}.field>label{display:flex;align-items:center;justify-content:space-between;font-size:10px;color:#8799ac;margin-bottom:7px}.field small{color:#b1bdcb;font-size:8px}.field input,.field select{width:100%;background:#fbfcfe;border:1px solid #e1e8f1;border-radius:5px;padding:10px 9px;color:#5a708a;font-size:10px;outline:none;transition:border-color .2s}.field input{font-family:Consolas,'Microsoft YaHei',monospace;font-size:9px}.field input:focus,.field select:focus{border-color:#83afea;box-shadow:0 0 0 3px #528fea0b}.field input::placeholder{color:#b6c2cf;font-size:8px}.field input.invalid{border-color:#edc2ad;background:#fffdfb}.field .hint{font-size:8px;line-height:1.8;color:#abb8c6;margin-top:6px}.field .hint.error{color:#cd9a80}.direction-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}.direction-grid button{background:#fbfcfe;border:1px solid #e1e8f1;border-radius:4px;color:#a4b1c0;font-size:9px;height:27px}.direction-grid button.active{background:#edf4ff;border-color:#adcaf0;color:#4c82c5}.module-metadata{border-top:1px solid #edf1f6;padding:19px 23px;color:#a6b3c1}.metadata-row{display:flex;justify-content:space-between;font-size:9px;margin:8px 0}.metadata-row b{font:9px Consolas,monospace;font-weight:normal;color:#7e91a7}.metadata-row.role{display:block;font-size:8px;line-height:1.8}.metadata-row.role b{display:block;word-break:break-all;margin-top:4px;font-size:8px}.inspector-bottom{margin-top:auto;padding:17px 23px;border-top:1px solid #eef2f6;background:#fbfcfe;display:flex;gap:9px;align-items:flex-start;color:#a5b5c6}.inspector-bottom>span{font-size:16px;color:#b6c6d6}.inspector-bottom p{font-size:8px;line-height:1.8;color:#a6b4c3}.section-note{font-size:10px;color:#9caebf;line-height:1.95;background:#f7fafe;padding:12px;border:1px solid #e8eef6;border-radius:5px}.related-button{width:100%;margin-top:12px;border:1px solid #cfe0f6;background:#f1f6ff;padding:9px;border-radius:5px;color:#6b95ce;font-size:9px}.validation-state{display:flex;align-items:center;gap:6px;font-size:8px;color:#a0b0c1;background:#f7fafc;padding:9px;border:1px solid #edf2f6;border-radius:4px}.validation-state.valid{color:#5d9c88;background:#f1faf6;border-color:#def0e6}.statusbar{height:30px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-size:8px;color:#a2afbd;background:#fbfcfe}.statusbar b{font:9px Consolas,monospace;color:#7f93a8;font-weight:normal}.status-divider{color:#d6dfe8;margin:0 12px}.toast{position:fixed;left:50%;bottom:55px;transform:translateX(-50%);z-index:10;padding:11px 18px;border:1px solid #dce7f3;background:#fffffff7;box-shadow:0 5px 25px #2b435318;border-radius:6px;font-size:11px;color:#6c8cac;max-width:90vw}.toast.error{border-color:#f1d2bd;color:#ba9277}dialog{border:1px solid #dae5f1;border-radius:10px;box-shadow:0 20px 100px #263b5229;max-width:510px;padding:32px;color:#506981;background:#fff}dialog::backdrop{background:#263c5150}dialog h2{font-size:22px;margin:10px 0 20px}dialog p{font-size:12px;line-height:1.9;color:#8b9fb3;margin-bottom:14px}dialog>a{display:inline-block;margin:8px 20px 12px 0;font-size:11px}.dialog-close{position:absolute;right:13px;top:9px;background:none;border:0;font-size:23px;color:#aab7c6}.license-note{font-size:9px!important;margin-top:12px}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#d7e0eb;border-radius:4px}@media(min-width:1600px){.workspace{grid-template-columns:260px minmax(300px,1fr) 320px}.side-head,.inspector-head{padding-top:30px}.view-options{font-size:10px}.legend{font-size:9px}.tree-title{font-size:12px}.node-rows .tree-title{font-size:11px}.stage-help{font-size:10px}.field input{font-size:10px}.field>label{font-size:11px}.field .hint{font-size:9px}.module-summary p{font-size:10px}.direction-grid button{font-size:10px}.metadata-row{font-size:10px}.validation-state{font-size:9px}.inspector-bottom p{font-size:9px}.device-label{font-size:12px}.device-label.node{font-size:10px}.tree-role{font-size:9px}.breadcrumb{font-size:11px}.stage-title{font-size:12px}.stage-sub{font-size:10px}}@media(max-width:1100px){.workspace{grid-template-columns:198px minmax(300px,1fr) 250px}.topbar{padding:0 18px;gap:16px}.top-actions{gap:7px}.save-status{display:none}.side-head{padding:23px 17px}.side-head p{font-size:9px}.inspector-head,.module-summary,.properties,.module-metadata{padding-left:18px;padding-right:18px}.view-header{padding:0 14px}.breadcrumb{gap:7px;font-size:9px}.view-modes button{font-size:8px;padding:4px 6px}.view-options{padding:0 12px;gap:10px;font-size:7px}.legend{display:none}.stage-sub{display:none}.model-callout{left:59px;padding:11px 15px}.model-callout p{font-size:8px}.top-divider{display:none}.brand strong>span{font-size:10px}.stage-help{font-size:7px;gap:5px}.renderer-badge{display:none}}@media(max-width:800px){.workspace{grid-template-columns:0 minmax(280px,1fr) 230px}.sidebar{overflow:hidden;border:0}.brand strong>span,.project-name .pill{display:none}.topbar{height:60px;padding:0 14px;gap:20px}.workspace{height:calc(100% - 86px)}.statusbar{height:26px}.statusbar>span:last-child{display:none}.top-actions .quiet{display:none}.project-name{font-size:11px}.button{padding:0 10px}.orientation{gap:2px;right:10px}.orientation>span{display:none}.orientation button{font-size:7px;padding:3px}.model-callout{display:none}.view-header{height:44px}.breadcrumb{display:none}.view-modes{margin-left:auto}.view-options{flex-wrap:wrap;height:52px;gap:6px 10px}.layer-bar{padding:0 12px;gap:7px}.layer-title{min-width:54px}.layer-icon{display:none}.stage-help{display:none}.stage-title{left:14px;font-size:9px}}@media(max-width:540px){.workspace{grid-template-columns:1fr;grid-template-rows:minmax(310px,55%) auto;overflow-y:auto}.main{min-height:360px}.inspector{border-left:0;border-top:1px solid var(--line);overflow:visible}.inspector-head{padding:17px 20px}.inspector-head h2{font-size:14px}.module-summary{padding:15px 20px}.module-summary .summary-icon{display:none}.properties{padding:15px 20px}.module-metadata{padding:15px 20px}.inspector-bottom{display:none}.topbar{gap:14px}.project-name{display:none}.top-actions{margin-left:auto}.statusbar{padding:0 13px}.stage-title{top:13px}.viewport-tools{top:44px;left:10px}.viewport-tools button{width:24px;height:26px}.axis-gizmo{width:50px;left:7px;bottom:10px}.view-options{height:40px}.layer-bar{height:48px}}@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+]=]},{path="/home/bec_v2/lib/web_page.html",preview6="231820:3886138659",preview5="226106:568371390",preview4="223881:1516270899",preview1="",preview2="",preview21="",preview3="",added=true,before=nil,source=[=[<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BEC V2 · 结构绑定与自动化流程</title><meta name="description" content="用真实GTNH方块结构与贴图查看BEC装配线，旋转、分层、选模块并保存绑定草稿。"><style>:root{--ink:#263342;--muted:#8a95a3;--line:#e5eaf0;--blue:#2e77ee;--teal:#20a88e;--soft:#f5f8fc;--font:'Segoe UI','Microsoft YaHei',sans-serif}*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden}body{font:13px/1.5 var(--font);color:var(--ink);background:#fff}button,input,select{font:inherit}button{cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #6ba7ff;outline-offset:3px}button{transition:background .15s,color .15s,border .15s}button:hover{filter:brightness(.98)}button:disabled{cursor:not-allowed;opacity:.5}a{color:var(--blue);text-decoration:none}h1,h2,h3,p{margin:0}[hidden]{display:none!important}.topbar{height:70px;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 26px;gap:26px;background:#fff;position:relative;z-index:3}.brand{display:flex;align-items:center;gap:12px;color:var(--ink);white-space:nowrap}.brand strong{font-size:17px;letter-spacing:.3px}.brand strong>span{font-weight:400;color:#9aa5b2;font-size:12px;letter-spacing:1.2px}.brand-icon{position:relative;width:27px;height:30px;display:block}.brand-icon i{position:absolute;width:15px;height:15px;border:2px solid var(--blue);transform:rotate(30deg) skewY(-10deg);border-radius:2px;left:2px;top:4px}.brand-icon i:nth-child(2){left:10px;top:9px;background:white}.brand-icon i:nth-child(3){left:2px;top:14px;background:#eaf2ff}.top-divider{height:25px;border-left:1px solid var(--line)}.project-name{font-size:13px;font-weight:600;white-space:nowrap}.pill{margin-left:12px;padding:3px 7px;font-size:10px;color:#4983d1;background:#edf4ff;border-radius:4px;font-weight:400}.top-actions{margin-left:auto;display:flex;align-items:center;gap:10px}.save-status{font-size:11px;color:#8995a4;margin-right:12px;white-space:nowrap}.save-status i,.statusbar i{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--teal);margin-right:7px;vertical-align:middle}.save-status.busy i{background:#e9ac40}.save-status.error i{background:#e48163}.button{height:34px;padding:0 13px;border:1px solid #dfe6ef;border-radius:5px;background:#fff;color:#687789;font-size:11px}.button.primary{background:var(--blue);border-color:var(--blue);color:white;box-shadow:0 2px 5px #2e77ee16}.workspace{display:grid;grid-template-columns:238px minmax(300px,1fr) 292px;height:calc(100% - 100px)}.sidebar{border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;background:#fff}.side-head{padding:27px 22px 22px}.eyebrow{font-size:8px;font-weight:600;letter-spacing:1.8px;color:#9da8b5;display:block}.side-head h1{font-size:18px;letter-spacing:.3px;font-weight:600;margin-top:7px}.side-head p{font-size:10px;color:#a0a9b5;margin-top:9px;line-height:1.7}.search-box{display:flex;align-items:center;background:#f6f8fb;border:1px solid #edf0f5;border-radius:5px;margin:0 17px 24px;padding:7px 9px;gap:6px}.search-box>span{font-size:19px;line-height:15px;color:#97a4b4}.search-box input{background:none;border:0;outline:none;width:100%;min-width:0;font-size:10px;color:#68788b}.search-box kbd{border:1px solid #e2e7ee;border-radius:3px;font-size:9px;color:#a7b0bd;padding:0 4px}.line-header{display:flex;align-items:center;gap:8px;padding:0 20px 12px;color:#8592a3;font-size:10px}.line-header>b{color:#647487;font-weight:600}.count{margin-left:auto;background:#eff3f8;color:#98a5b4;padding:2px 6px;border-radius:4px;font:9px Consolas,monospace}.tree{overflow-y:auto;flex:1;padding:0 11px 20px}.tree-row{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;text-align:left;padding:10px 11px;border-radius:5px;margin:3px 0;color:#708094;position:relative;min-height:43px}.tree-row:hover{background:#f6f8fc}.tree-row.active{background:#edf4ff;color:#3478db}.tree-row.active:before{content:'';position:absolute;left:-11px;height:24px;width:3px;background:var(--blue);border-radius:0 3px 3px 0}.module-icon{font:17px var(--font);width:25px;height:25px;display:flex;align-items:center;justify-content:center;border:1px solid #dbe3ec;border-radius:5px;color:#8fa1b5;background:#f8fafc;flex-shrink:0}.tree-row.active .module-icon{border-color:#bdd3f4;color:var(--blue);background:#f6faff}.tree-title{font-size:11px;display:block;font-weight:500}.tree-role{font-size:8px;color:#a2acba;display:block;margin-top:2px}.state-dot{width:5px;height:5px;background:#bdc7d3;flex-shrink:0;display:inline-block;border-radius:50%;margin-left:auto}.state-dot.filled{background:var(--teal);box-shadow:0 0 0 3px #20a88e0a}.node-group-button{display:flex;align-items:center;gap:9px;width:100%;background:none;border:0;padding:12px 11px 6px;color:#8393a7;font-size:10px}.node-group-button .count{margin-left:auto}.node-rows{border-left:1px solid #eaf0f7;margin:6px 0 3px 22px;padding-left:9px}.node-rows .tree-row{min-height:33px;padding:7px 9px}.node-rows .tree-title{font-size:10px}.node-rows .tree-role{display:none}.node-rows .module-icon{width:19px;height:19px;font-size:12px}.node-rows .tree-row.active:before{left:-10px;height:18px;width:2px}.side-footer{padding:18px 22px;border-top:1px solid var(--line);background:#fbfcfe}.source-label{display:flex;align-items:center;gap:6px;font-size:10px;color:#8797a9}.verified{display:inline-flex;align-items:center;justify-content:center;border:1px solid #9fb7d2;border-radius:50%;width:12px;height:12px;font-size:8px;color:#6e96be}.side-footer p{font-size:9px;color:#a3adba;line-height:1.8;margin-top:7px}.text-button{background:none;border:0;padding:0;color:#729bd0;font-size:9px;margin-top:7px}.main{display:flex;flex-direction:column;min-height:0;min-width:0;background:#f1f4f8}.view-header{height:51px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 22px;border-bottom:1px solid #e1e8f0;background:#fafbfd;flex-shrink:0}.breadcrumb{display:flex;align-items:center;gap:10px;font-size:10px;color:#96a2b2;white-space:nowrap}.breadcrumb>span{color:#c0cad6;font-size:9px}.breadcrumb b{font-weight:500;color:#74879b}.view-modes{display:flex;background:#eef2f7;border:1px solid #e6ecf3;padding:3px;border-radius:5px}.view-modes button{background:none;border:0;padding:4px 10px;color:#9aa8b9;font-size:9px;border-radius:3px}.view-modes button.active{background:white;color:#4c7eb9;box-shadow:0 1px 3px #172b4510}.stage{position:relative;flex:1;overflow:hidden;min-height:250px;background:#f0f3f7}.stage>canvas{width:100%;height:100%;display:block;cursor:grab;touch-action:none}.stage>canvas.dragging{cursor:grabbing!important}.labels{position:absolute;inset:0;pointer-events:none}.device-label{position:absolute;transform:translate(-50%,-100%);white-space:nowrap;font-size:10px;border:1px solid #d4e0ed;background:#fffffff2;border-radius:4px;padding:4px 8px;box-shadow:0 2px 7px #39566f09;color:#607d99;pointer-events:auto;cursor:pointer;display:flex;align-items:center;gap:6px}.device-label:after{content:'';position:absolute;width:1px;height:13px;background:#a7bfd7;left:50%;top:100%}.device-label i{width:5px;height:5px;border-radius:2px;background:#6a9cd4}.device-label.node{font-size:8px;padding:3px 5px;color:#439984;border-color:#b6dbd0;background:#f9fffcf2}.device-label.node i{background:#41b18d}.device-label.selected{border-color:#69a3f1;color:#2875d9;box-shadow:0 0 0 3px #448bee0b}.stage-title{position:absolute;left:22px;top:20px;display:flex;align-items:center;gap:8px;color:#778b9f;font-size:10px;pointer-events:none}.live-dot{width:5px;height:5px;border-radius:50%;background:#729bc0}.stage-sub{color:#a5b2c0;font-size:9px;margin-left:3px}.viewport-tools{position:absolute;left:17px;top:58px;background:#fffffff2;border:1px solid #dfe6ef;border-radius:6px;box-shadow:0 2px 7px #2c435309;padding:4px;display:flex;flex-direction:column}.viewport-tools button{border:0;background:none;color:#8397ad;border-radius:3px;width:29px;height:30px;font-size:18px}.viewport-tools button:hover{background:#edf4fc;color:#347ede}.viewport-tools>div{border-top:1px solid #e8edf3;margin:3px}.orientation{position:absolute;right:16px;top:16px;display:flex;align-items:center;gap:3px;font-size:9px;color:#a0aebb}.orientation>span{margin-right:4px}.orientation button{border:1px solid #dce5ef;background:#f9fbfd;color:#95a6b9;font-size:8px;padding:4px 6px;border-radius:3px}.orientation button.active{border-color:#b5cdf0;background:#e8f1ff;color:#4f85cc}.model-callout{position:absolute;top:62px;left:64px;padding:15px 20px 14px 16px;border:1px solid #dde5ef;background:#fffffff0;border-radius:6px;pointer-events:auto;box-shadow:0 4px 18px #182c4205}.model-callout>span{font:7px Consolas,monospace;letter-spacing:1.5px;color:#a4b2c0;display:block}.model-callout strong{display:block;font-size:11px;font-weight:500;color:#70859c;margin:6px 0}.model-callout p{font-size:9px;color:#a4b0bf;line-height:1.8}.model-callout>button{position:absolute;right:7px;top:4px;border:0;background:none;color:#b4bfcd;font-size:15px}.axis-gizmo{position:absolute;bottom:26px;left:18px;width:73px;height:64px;opacity:.75}.axis-gizmo svg{width:100%;height:100%}.stage-help{position:absolute;bottom:13px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:9px;white-space:nowrap;font-size:8px;color:#9fadb9}.stage-help>span{color:#b8c3ce}.mouse-icon{width:9px;height:13px;border:1px solid #9aabba;border-radius:4px;display:block;position:relative}.mouse-icon:after{content:'';width:1px;height:4px;background:#9aabba;position:absolute;left:3px;top:1px}.renderer-badge{position:absolute;right:13px;bottom:12px;font:7px Consolas,monospace;color:#a9b6c3;letter-spacing:.4px}.layer-bar{height:61px;background:#fafcfe;display:flex;align-items:center;border-top:1px solid #dfe7ef;padding:0 22px;gap:11px;flex-shrink:0}.layer-icon{font-size:23px;color:#91a4b8;margin-right:0}.layer-title{min-width:76px;display:flex;flex-direction:column;gap:2px}.layer-title strong{font-size:10px;font-weight:500;color:#74889e}.layer-title>span{font:8px Consolas,monospace;color:#a2afbf}.layer-bar input{flex:1;min-width:50px;accent-color:#4e8ee9;height:3px;cursor:pointer}.layer-step{font-size:12px;width:20px;height:23px;border:0;background:#f0f4f9;border-radius:4px;color:#9caec0}.mini-button{border:1px solid #d6e5fa;background:#edf4ff;padding:5px 7px;color:#6b9ad7;font-size:8px;border-radius:4px}.view-options{height:42px;display:flex;align-items:center;gap:16px;border-top:1px solid #e8edf3;background:#fff;padding:0 22px;flex-shrink:0;font-size:8px;color:#93a3b4;white-space:nowrap}.view-options label{display:flex;align-items:center;gap:4px;cursor:pointer}.view-options input{width:10px;height:10px;accent-color:#6f99d2;margin:0}.legend{display:flex;gap:5px;align-items:center;margin-left:auto;font-size:7px;color:#a6b3c0}.legend i{display:inline-block;width:5px;height:5px;background:#b8c4d0;border-radius:50%;margin-left:6px}.legend i.filled{background:#20a88e}.legend i.selected{background:#488eea}.inspector{border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0;overflow-y:auto;background:#fff}.inspector-head{display:flex;align-items:center;justify-content:space-between;padding:28px 23px 22px;border-bottom:1px solid #eef1f6}.inspector-head h2{font-size:16px;font-weight:600;margin-top:7px}.property-icon{font-size:18px;color:#bcc8d4}.module-summary{padding:21px 23px 17px}.module-summary .summary-icon{width:41px;height:41px;display:flex;align-items:center;justify-content:center;font-size:23px;border:1px solid #dbe7f5;border-radius:7px;color:#6b96c8;background:#f3f8fe;margin-bottom:14px}.module-summary h3{font-size:15px;font-weight:600;letter-spacing:.2px}.module-summary p{font-size:9px;color:#9aaabc;margin-top:5px;line-height:1.8}.module-state{display:inline-flex;align-items:center;font-size:8px;gap:5px;margin-top:12px;border-radius:3px;background:#f2f5f9;padding:3px 6px;color:#9cabbc}.module-state i{width:4px;height:4px;border-radius:50%;background:#bac6d1}.module-state.filled{background:#edf9f4;color:#6d9b8d}.module-state.filled i{background:var(--teal)}.properties{border-top:1px solid #edf1f6;padding:18px 23px}.properties-title{font-size:9px;letter-spacing:.5px;color:#75899f;font-weight:500;margin-bottom:15px}.field{margin:0 0 17px}.field>label{display:flex;align-items:center;justify-content:space-between;font-size:10px;color:#8799ac;margin-bottom:7px}.field small{color:#b1bdcb;font-size:8px}.field input,.field select{width:100%;background:#fbfcfe;border:1px solid #e1e8f1;border-radius:5px;padding:10px 9px;color:#5a708a;font-size:10px;outline:none;transition:border-color .2s}.field input{font-family:Consolas,'Microsoft YaHei',monospace;font-size:9px}.field input:focus,.field select:focus{border-color:#83afea;box-shadow:0 0 0 3px #528fea0b}.field input::placeholder{color:#b6c2cf;font-size:8px}.field input.invalid{border-color:#edc2ad;background:#fffdfb}.field .hint{font-size:8px;line-height:1.8;color:#abb8c6;margin-top:6px}.field .hint.error{color:#cd9a80}.direction-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}.direction-grid button{background:#fbfcfe;border:1px solid #e1e8f1;border-radius:4px;color:#a4b1c0;font-size:9px;height:27px}.direction-grid button.active{background:#edf4ff;border-color:#adcaf0;color:#4c82c5}.module-metadata{border-top:1px solid #edf1f6;padding:19px 23px;color:#a6b3c1}.metadata-row{display:flex;justify-content:space-between;font-size:9px;margin:8px 0}.metadata-row b{font:9px Consolas,monospace;font-weight:normal;color:#7e91a7}.metadata-row.role{display:block;font-size:8px;line-height:1.8}.metadata-row.role b{display:block;word-break:break-all;margin-top:4px;font-size:8px}.inspector-bottom{margin-top:auto;padding:17px 23px;border-top:1px solid #eef2f6;background:#fbfcfe;display:flex;gap:9px;align-items:flex-start;color:#a5b5c6}.inspector-bottom>span{font-size:16px;color:#b6c6d6}.inspector-bottom p{font-size:8px;line-height:1.8;color:#a6b4c3}.section-note{font-size:10px;color:#9caebf;line-height:1.95;background:#f7fafe;padding:12px;border:1px solid #e8eef6;border-radius:5px}.related-button{width:100%;margin-top:12px;border:1px solid #cfe0f6;background:#f1f6ff;padding:9px;border-radius:5px;color:#6b95ce;font-size:9px}.validation-state{display:flex;align-items:center;gap:6px;font-size:8px;color:#a0b0c1;background:#f7fafc;padding:9px;border:1px solid #edf2f6;border-radius:4px}.validation-state.valid{color:#5d9c88;background:#f1faf6;border-color:#def0e6}.statusbar{height:30px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-size:8px;color:#a2afbd;background:#fbfcfe}.statusbar b{font:9px Consolas,monospace;color:#7f93a8;font-weight:normal}.status-divider{color:#d6dfe8;margin:0 12px}.toast{position:fixed;left:50%;bottom:55px;transform:translateX(-50%);z-index:10;padding:11px 18px;border:1px solid #dce7f3;background:#fffffff7;box-shadow:0 5px 25px #2b435318;border-radius:6px;font-size:11px;color:#6c8cac;max-width:90vw}.toast.error{border-color:#f1d2bd;color:#ba9277}dialog{border:1px solid #dae5f1;border-radius:10px;box-shadow:0 20px 100px #263b5229;max-width:510px;padding:32px;color:#506981;background:#fff}dialog::backdrop{background:#263c5150}dialog h2{font-size:22px;margin:10px 0 20px}dialog p{font-size:12px;line-height:1.9;color:#8b9fb3;margin-bottom:14px}dialog>a{display:inline-block;margin:8px 20px 12px 0;font-size:11px}.dialog-close{position:absolute;right:13px;top:9px;background:none;border:0;font-size:23px;color:#aab7c6}.license-note{font-size:9px!important;margin-top:12px}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#d7e0eb;border-radius:4px}@media(min-width:1600px){.workspace{grid-template-columns:260px minmax(300px,1fr) 320px}.side-head,.inspector-head{padding-top:30px}.view-options{font-size:10px}.legend{font-size:9px}.tree-title{font-size:12px}.node-rows .tree-title{font-size:11px}.stage-help{font-size:10px}.field input{font-size:10px}.field>label{font-size:11px}.field .hint{font-size:9px}.module-summary p{font-size:10px}.direction-grid button{font-size:10px}.metadata-row{font-size:10px}.validation-state{font-size:9px}.inspector-bottom p{font-size:9px}.device-label{font-size:12px}.device-label.node{font-size:10px}.tree-role{font-size:9px}.breadcrumb{font-size:11px}.stage-title{font-size:12px}.stage-sub{font-size:10px}}@media(max-width:1100px){.workspace{grid-template-columns:198px minmax(300px,1fr) 250px}.topbar{padding:0 18px;gap:16px}.top-actions{gap:7px}.save-status{display:none}.side-head{padding:23px 17px}.side-head p{font-size:9px}.inspector-head,.module-summary,.properties,.module-metadata{padding-left:18px;padding-right:18px}.view-header{padding:0 14px}.breadcrumb{gap:7px;font-size:9px}.view-modes button{font-size:8px;padding:4px 6px}.view-options{padding:0 12px;gap:10px;font-size:7px}.legend{display:none}.stage-sub{display:none}.model-callout{left:59px;padding:11px 15px}.model-callout p{font-size:8px}.top-divider{display:none}.brand strong>span{font-size:10px}.stage-help{font-size:7px;gap:5px}.renderer-badge{display:none}}@media(max-width:800px){.workspace{grid-template-columns:0 minmax(280px,1fr) 230px}.sidebar{overflow:hidden;border:0}.brand strong>span,.project-name .pill{display:none}.topbar{height:60px;padding:0 14px;gap:20px}.workspace{height:calc(100% - 86px)}.statusbar{height:26px}.statusbar>span:last-child{display:none}.top-actions .quiet{display:none}.project-name{font-size:11px}.button{padding:0 10px}.orientation{gap:2px;right:10px}.orientation>span{display:none}.orientation button{font-size:7px;padding:3px}.model-callout{display:none}.view-header{height:44px}.breadcrumb{display:none}.view-modes{margin-left:auto}.view-options{flex-wrap:wrap;height:52px;gap:6px 10px}.layer-bar{padding:0 12px;gap:7px}.layer-title{min-width:54px}.layer-icon{display:none}.stage-help{display:none}.stage-title{left:14px;font-size:9px}}@media(max-width:540px){.workspace{grid-template-columns:1fr;grid-template-rows:minmax(310px,55%) auto;overflow-y:auto}.main{min-height:360px}.inspector{border-left:0;border-top:1px solid var(--line);overflow:visible}.inspector-head{padding:17px 20px}.inspector-head h2{font-size:14px}.module-summary{padding:15px 20px}.module-summary .summary-icon{display:none}.properties{padding:15px 20px}.module-metadata{padding:15px 20px}.inspector-bottom{display:none}.topbar{gap:14px}.project-name{display:none}.top-actions{margin-left:auto}.statusbar{padding:0 13px}.stage-title{top:13px}.viewport-tools{top:44px;left:10px}.viewport-tools button{width:24px;height:26px}.axis-gizmo{width:50px;left:7px;bottom:10px}.view-options{height:40px}.layer-bar{height:48px}}@media(prefers-reduced-motion:reduce){*{transition:none!important}}
 
 .view-options{flex-wrap:wrap;min-height:54px;height:auto;padding-top:8px;padding-bottom:8px;row-gap:6px}.peripheral-heading{margin-top:12px;border-top:1px solid var(--line);padding-top:14px}.peripheral-heading+.tree-row{margin-top:4px}.tree-role{display:block;max-width:165px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
@@ -2705,6 +3064,11 @@ public domain. More specicially, see CC0 1.0 Universal:
 {id:'bulk-transposer-3',key:'OC_TRANS',title:'高速供液转运器 03',p:[140,-7,50],role:'groups[1].bulkTransposers[3]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 03'},
 {id:'bulk-transposer-4',key:'OC_TRANS',title:'高速供液转运器 04',p:[152,-7,50],role:'groups[1].bulkTransposers[4]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 04'},
 {id:'bulk-transposer-5',key:'OC_TRANS',title:'高速供液转运器 05',p:[164,-7,50],role:'groups[1].bulkTransposers[5]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 05'},
+{id:'bulk-transposer-6',key:'OC_TRANS',title:'高速供液转运器 06',p:[116,-7,64],role:'groups[1].bulkTransposers[6]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 06'},
+{id:'bulk-transposer-7',key:'OC_TRANS',title:'高速供液转运器 07',p:[128,-7,64],role:'groups[1].bulkTransposers[7]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 07'},
+{id:'bulk-transposer-8',key:'OC_TRANS',title:'高速供液转运器 08',p:[140,-7,64],role:'groups[1].bulkTransposers[8]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 08'},
+{id:'bulk-transposer-9',key:'OC_TRANS',title:'高速供液转运器 09',p:[152,-7,64],role:'groups[1].bulkTransposers[9]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 09'},
+{id:'bulk-transposer-10',key:'OC_TRANS',title:'高速供液转运器 10',p:[164,-7,64],role:'groups[1].bulkTransposers[10]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 10'},
 {id:'nanite-bank',key:'BANK_BOX',title:'蜂群硬盘箱',p:[6,-7,58],role:null,type:'CELL BANK',icon:'▣',description:'无独立 OC 地址 · 外形示意',related:'nanite-transposer',note:'硬盘箱通过蜂群转运器的箱子方向读取；不是另一个 OC 组件，不需要独立地址。箱体材质暂用示意。'},
 {id:'nanite-transposer',key:'OC_TRANS',title:'蜂群硬盘转运器',p:[36,-7,58],role:'groups[1].nanites.transposer',type:'CELL TRANSPOSER',icon:'⇄',description:'ME-IO 装入 / 回收',sides:[['bankSide','硬盘箱方向',0],['loadSide','装入端口方向',3],['returnSide','回收端口方向',2]]},
 {id:'load-io',key:'AE_IO',title:'ME-IO 装入端口',p:[30,-7,58],role:null,type:'ME IO PORT',icon:'▥',description:'由蜂群转运器访问',related:'nanite-transposer',note:'在蜂群硬盘转运器中设置装入端口方向；此端口无需独立 OC 组件地址。装入信号在装入红石模块中配置。'},
@@ -2904,7 +3268,7 @@ setInterval(function(){flow();if(last&&Date.now()-receivedAt>7000){online=false;
 </script></body></html>
 ]=]}}
 
-print('BEC V2 OCHD integrated studio preview 6; stop the running UI with Q first.')
+print('BEC V2 OCHD integrated studio preview 7 / 10 bulk ports; stop the running UI with Q first.')
 local fs=require('filesystem')
 local function read(p)local f=io.open(p,'r');if not f then return end;local s=f:read('*a');f:close();return s end
 local function normal(s)return s and s:gsub('\r\n','\n')end
@@ -2916,7 +3280,7 @@ for i,row in ipairs(files)do
  originals[i]=read(row.path)
  assert(originals[i]or row.added,'缺少V2程序: '..row.path)
  local current=normal(originals[i])
- assert(row.added and current==nil or current==normal(row.before)or current==normal(row.source)or current and (signature(current)==row.preview4 or signature(current)==row.preview5)or row.preview1~=''and signature(current)==row.preview1 or row.preview2~=''and signature(current)==row.preview2 or row.preview21~=''and signature(current)==row.preview21 or row.preview3~=''and signature(current)==row.preview3,'程序与支持版本不符，保留本地修改: '..row.path)
+ assert(row.added and current==nil or current==normal(row.before)or current==normal(row.source)or current and (signature(current)==row.preview4 or signature(current)==row.preview5 or signature(current)==row.preview6)or row.preview1~=''and signature(current)==row.preview1 or row.preview2~=''and signature(current)==row.preview2 or row.preview21~=''and signature(current)==row.preview21 or row.preview3~=''and signature(current)==row.preview3,'程序与支持版本不符，保留本地修改: '..row.path)
  if current~=normal(row.source)then identical=false end
 end
 if identical then print('读取优化已安装，无需更新。');return end

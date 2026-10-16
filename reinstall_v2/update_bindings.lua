@@ -1,4 +1,5 @@
-local files={{path="/home/bec_v2/lib/ochd_bindings.lua",source=[=[-- Strict data-only binding editor shared by the V1 monitor and V2 setup page.
+local files={{path="/home/bec_v2/lib/ochd_bindings.lua",source=[=[-- BEC_BULK_SLOTS_10
+-- Strict data-only binding editor shared by the V1 monitor and V2 setup page.
 local c=require('component');local fs=require('filesystem');local ser=require('serialization')
 local M={}
 local function uuid(s)return type(s)=='string'and s:match('^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$')end
@@ -79,7 +80,7 @@ function M.v2Fields(cfg)
   field(out,prefix..'mainSide',title..'主网侧方向',g.mainSide or 4,'side');field(out,prefix..'subSide',title..'子网侧方向',g.subSide or 5,'side')
   assert(#g.generators<=16,'本页面最多配置16台纠缠器/组')
   for j=1,math.max(4,#g.generators)do field(out,prefix..'generator'..j,title..'纠缠器'..j..'（多余可空）',g.generators[j])end
-  for j=1,math.max(5,#(g.bulkTransposers or {}))do field(out,prefix..'bulk'..j,title..'高速供液口'..j..'（可空）',(g.bulkTransposers or {})[j])end
+  for j=1,math.max(10,#(g.bulkTransposers or {}))do field(out,prefix..'bulk'..j,title..'高速供液口'..j..'（可空）',(g.bulkTransposers or {})[j])end
   local n=g.nanites or {}
   for _,row in ipairs({{'transposer','转运器'},{'loadRedstone','装入红石'},{'returnRedstone','回收红石'}})do
    field(out,prefix..'bee_'..row[1],title..'蜂群 · '..row[2],n[row[1]])
@@ -97,7 +98,7 @@ function M.v2Fields(cfg)
   field(out,prefix..'group',title..'设备组编号',n.group or 1,'integer')
   field(out,prefix..'gate',title..'独立韦门（空则用组韦门）',n.gate)
  end
- assert(#out<=512,'绑定字段超过页面容量');return out
+ assert(#out<=1024,'绑定字段超过页面容量');return out
 end
 function M.applyV2(cfg,payload,revision)
  local values=M.parse(payload,M.v2Fields(cfg),revision);local next=clone(cfg)
@@ -108,7 +109,7 @@ function M.applyV2(cfg,payload,revision)
   for _,key in ipairs({'storage','gate','subInterface','transposer'})do g[key]=values[p..key]end
   g.mainSide=tonumber(values[p..'mainSide']);g.subSide=tonumber(values[p..'subSide'])
   g.generators={};for j=1,math.max(4,#cfg.groups[i].generators)do local v=values[p..'generator'..j];if v~=''then g.generators[#g.generators+1]=v end end
-  g.bulkTransposers={};for j=1,math.max(5,#(cfg.groups[i].bulkTransposers or {}))do local v=values[p..'bulk'..j];if v~=''then g.bulkTransposers[#g.bulkTransposers+1]=v end end
+  g.bulkTransposers={};for j=1,math.max(10,#(cfg.groups[i].bulkTransposers or {}))do local v=values[p..'bulk'..j];if v~=''then g.bulkTransposers[#g.bulkTransposers+1]=v end end
   local n={mode='cell-io'};g.nanites=n
   for _,key in ipairs({'transposer','loadRedstone','returnRedstone'})do n[key]=values[p..'bee_'..key]~=''and values[p..'bee_'..key]or nil end
   for _,key in ipairs({'bankSide','loadSide','returnSide','loadOutputSide','returnOutputSide'})do n[key]=tonumber(values[p..'bee_'..key])end

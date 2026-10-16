@@ -113,7 +113,7 @@ return function(C,B,W,options)
   actual('field',g.storage);actual('gate',g.gate)
   for j=1,math.max(1,#g.generators)do actual(j==1 and 'generator'or 'generator-'..j,g.generators[j])end
   local supply=out.phase=='supply';out.machines['fluid-transposer']=supply and 'phase'or 'idle'
-  for j=1,5 do out.machines['bulk-transposer-'..j]=supply and 'phase'or 'idle'end
+  for j=1,10 do out.machines['bulk-transposer-'..j]=supply and 'phase'or 'idle'end
   out.machines['nanite-transposer']=out.phase=='nanites'and 'phase'or 'idle'
   for i,n in ipairs(cfg.nodes)do if n.group==H.group then
    local state=read(n.address,'getState')or 'offline';local allowed=read(n.address,'isWorkAllowed')

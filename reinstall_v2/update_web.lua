@@ -223,6 +223,11 @@ public domain. More specicially, see CC0 1.0 Universal:
 {id:'bulk-transposer-3',key:'OC_TRANS',title:'高速供液转运器 03',p:[140,-7,50],role:'groups[1].bulkTransposers[3]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 03'},
 {id:'bulk-transposer-4',key:'OC_TRANS',title:'高速供液转运器 04',p:[152,-7,50],role:'groups[1].bulkTransposers[4]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 04'},
 {id:'bulk-transposer-5',key:'OC_TRANS',title:'高速供液转运器 05',p:[164,-7,50],role:'groups[1].bulkTransposers[5]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 05'},
+{id:'bulk-transposer-6',key:'OC_TRANS',title:'高速供液转运器 06',p:[116,-7,64],role:'groups[1].bulkTransposers[6]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 06'},
+{id:'bulk-transposer-7',key:'OC_TRANS',title:'高速供液转运器 07',p:[128,-7,64],role:'groups[1].bulkTransposers[7]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 07'},
+{id:'bulk-transposer-8',key:'OC_TRANS',title:'高速供液转运器 08',p:[140,-7,64],role:'groups[1].bulkTransposers[8]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 08'},
+{id:'bulk-transposer-9',key:'OC_TRANS',title:'高速供液转运器 09',p:[152,-7,64],role:'groups[1].bulkTransposers[9]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 09'},
+{id:'bulk-transposer-10',key:'OC_TRANS',title:'高速供液转运器 10',p:[164,-7,64],role:'groups[1].bulkTransposers[10]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 10'},
 {id:'nanite-bank',key:'BANK_BOX',title:'蜂群硬盘箱',p:[6,-7,58],role:null,type:'CELL BANK',icon:'▣',description:'无独立 OC 地址 · 外形示意',related:'nanite-transposer',note:'硬盘箱通过蜂群转运器的箱子方向读取；不是另一个 OC 组件，不需要独立地址。箱体材质暂用示意。'},
 {id:'nanite-transposer',key:'OC_TRANS',title:'蜂群硬盘转运器',p:[36,-7,58],role:'groups[1].nanites.transposer',type:'CELL TRANSPOSER',icon:'⇄',description:'ME-IO 装入 / 回收',sides:[['bankSide','硬盘箱方向',0],['loadSide','装入端口方向',3],['returnSide','回收端口方向',2]]},
 {id:'load-io',key:'AE_IO',title:'ME-IO 装入端口',p:[30,-7,58],role:null,type:'ME IO PORT',icon:'▥',description:'由蜂群转运器访问',related:'nanite-transposer',note:'在蜂群硬盘转运器中设置装入端口方向；此端口无需独立 OC 组件地址。装入信号在装入红石模块中配置。'},
@@ -421,13 +426,15 @@ setInterval(function(){flow();if(last&&Date.now()-receivedAt>7000){online=false;
 })();
 </script></body></html>
 ]=]
-local SUPPORTED={['223881:1516270899']=true,['226106:568371390']=true}
+local SUPPORTED={['223881:1516270899']=true,['226106:568371390']=true,['231820:3886138659']=true}
 
 local fs=require('filesystem')
 local target='/home/bec_v2/lib/web_page.html'
 local function read(p)local f=io.open(p,'r');if not f then return end;local s=f:read('*a');f:close();return s end
 local function normal(s)return s and s:gsub('\r\n','\n')end
 local function signature(s)local a,b=1,0;for i=1,#s do a=(a+s:byte(i))%65521;b=(b+a)%65521 end;return string.format('%d:%.0f',#s,b*65536+a)end
+local binding=read('/home/bec_v2/lib/ochd_bindings.lua')
+assert(binding and binding:find('BEC_BULK_SLOTS_10',1,true),'十口网页需要同步升级绑定模块，请运行 update_bulk10.lua；未修改原网页')
 local previous=assert(read(target),'需要已安装V2网页；不要用于V1')
 if normal(previous)==SOURCE then print('网页交互修复已安装。');return end
 assert(SUPPORTED[signature(normal(previous))],'网页有未知本地修改，保留原文件，不覆盖')

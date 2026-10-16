@@ -10,6 +10,7 @@ TARGET='/home/bec_v2/lib/web_page.html'
 def fixture():
  l=LuaRuntime(unpack_returned_tuples=True);l.execute(SETUP)
  l.globals().files[TARGET]=OLD
+ l.globals().files['/home/bec_v2/lib/ochd_bindings.lua']=(HERE/'files/lib/ochd_bindings.lua').read_text(encoding='utf-8')
  l.execute("local fs=require('filesystem');fs.get=function()return {spaceTotal=function()return 4194304 end,spaceUsed=function()return used or 1000000 end}end;files['/home/bec_v2/config.dat']='incomplete-keep';files['/home/bec_v2/bindings.draft.dat']='draft-keep';files['/home/bec_v2/state/node-1/production.journal']='pending-keep'")
  return l
 class WebUpdateTests(unittest.TestCase):

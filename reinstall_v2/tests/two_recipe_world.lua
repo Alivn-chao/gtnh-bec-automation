@@ -65,10 +65,13 @@ c.type=function(a)if a=='node1'then return 'bec_io_node'end;if a=='bee'or a=='fl
 c.methods=function()return setmetatable({},{__index=function()return false end})end
 c.list=function()
  local items={{'gen1','gt_machine'},{'gen2','gt_machine'},{'gate','bec_diode'},{'node1','bec_io_node'},{'rs1-','redstone'},{'bee','transposer'},{'fluid','transposer'}}
- for i=1,5 do items[#items+1]={'bulk'..i,'transposer'}end
+ for i=1,(BULK_COUNT or 5)do items[#items+1]={'bulk'..i,'transposer'}end
  local i=0;return function()i=i+1;if items[i]then return table.unpack(items[i])end end
 end
 local bulkRaw={'molten.chromaticglass','molten.transcendentmetal','molten.infinity','molten.neutronium','dimensionallyshiftedsuperfluid'}
+if BULK_COUNT==10 then
+ bulkRaw[3]='molten.cosmicneutronium';bulkRaw[6]='molten.hypogen';bulkRaw[7]='spatialfluid';bulkRaw[8]='temporalfluid';bulkRaw[9]='molten.eternity';bulkRaw[10]='molten.infinity'
+end
 c.invoke=function(a,m,...)
  local args={...};W.calls[m]=(W.calls[m]or 0)+1
  if a=='node1'then
@@ -143,7 +146,7 @@ c.invoke=function(a,m,...)
   if m=='getTankCount'then return args[1]==4 and 1 or args[1]==5 and 6 or 0 end
   if m=='getTankCapacity'then return args[1]==4 and 2147483647 or 16000 end
   if m=='getFluidInTank'then return args[1]==4 and {name=rawName,amount=W.main[rawName]or 1000000}or {amount=0}end
-  if m=='transferFluid'then assert(args[1]==4 and args[2]==5);assert((W.main[rawName]or 0)>=args[3]);W.main[rawName]=W.main[rawName]-args[3];W.sub[rawName]=(W.sub[rawName]or 0)+args[3];mark('fluid-transfer',rawName..':'..args[3]);return true,args[3]end
+  if m=='transferFluid'then assert(args[1]==4 and args[2]==5);assert((W.main[rawName]or 0)>=args[3]);W.main[rawName]=W.main[rawName]-args[3];W.sub[rawName]=(W.sub[rawName]or 0)+args[3];mark('fluid-transfer',rawName..':'..args[3]);mark('fluid-port',a);return true,args[3]end
  end
  if a=='fluid'then
   if m=='getTankCount'then return 6 end
@@ -155,7 +158,7 @@ local exists=fs.exists
 fs.exists=function(path)return path==cfg.recipeDirectory or exists(path)end
 fs.list=function(path)local names=path==cfg.recipeDirectory and {'a.dat','b.dat'}or {};local i=0;return function()i=i+1;return names[i]end end
 cfg.nodes={cfg.nodes[1]};cfg.nodes[1].address='node1';cfg.nodes[1].redstone='rs1-'
-cfg.groups[1].bulkTransposers={'bulk1','bulk2','bulk3','bulk4','bulk5'}
+cfg.groups[1].bulkTransposers={};for i=1,(BULK_COUNT or 5)do cfg.groups[1].bulkTransposers[i]='bulk'..i end
 cfg.groups[1].nanites={enabled=true,mode='cell-io',transposer='bee',loadRedstone='load',returnRedstone='ret',bankSide=0,loadSide=3,returnSide=2,loadOutputSide=0,returnOutputSide=0}
 local ser=require('serialization')
 for i,r in ipairs(W.recipes)do

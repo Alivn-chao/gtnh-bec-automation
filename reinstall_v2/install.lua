@@ -581,7 +581,8 @@ return function(cfg,C,Bridge,monitor)
  return E
 end
 ]=]},
-{"lib/ochd_bindings.lua",[=[-- Strict data-only binding editor shared by the V1 monitor and V2 setup page.
+{"lib/ochd_bindings.lua",[=[-- BEC_BULK_SLOTS_10
+-- Strict data-only binding editor shared by the V1 monitor and V2 setup page.
 local c=require('component');local fs=require('filesystem');local ser=require('serialization')
 local M={}
 local function uuid(s)return type(s)=='string'and s:match('^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$')end
@@ -662,7 +663,7 @@ function M.v2Fields(cfg)
   field(out,prefix..'mainSide',title..'主网侧方向',g.mainSide or 4,'side');field(out,prefix..'subSide',title..'子网侧方向',g.subSide or 5,'side')
   assert(#g.generators<=16,'本页面最多配置16台纠缠器/组')
   for j=1,math.max(4,#g.generators)do field(out,prefix..'generator'..j,title..'纠缠器'..j..'（多余可空）',g.generators[j])end
-  for j=1,math.max(5,#(g.bulkTransposers or {}))do field(out,prefix..'bulk'..j,title..'高速供液口'..j..'（可空）',(g.bulkTransposers or {})[j])end
+  for j=1,math.max(10,#(g.bulkTransposers or {}))do field(out,prefix..'bulk'..j,title..'高速供液口'..j..'（可空）',(g.bulkTransposers or {})[j])end
   local n=g.nanites or {}
   for _,row in ipairs({{'transposer','转运器'},{'loadRedstone','装入红石'},{'returnRedstone','回收红石'}})do
    field(out,prefix..'bee_'..row[1],title..'蜂群 · '..row[2],n[row[1]])
@@ -680,7 +681,7 @@ function M.v2Fields(cfg)
   field(out,prefix..'group',title..'设备组编号',n.group or 1,'integer')
   field(out,prefix..'gate',title..'独立韦门（空则用组韦门）',n.gate)
  end
- assert(#out<=512,'绑定字段超过页面容量');return out
+ assert(#out<=1024,'绑定字段超过页面容量');return out
 end
 function M.applyV2(cfg,payload,revision)
  local values=M.parse(payload,M.v2Fields(cfg),revision);local next=clone(cfg)
@@ -691,7 +692,7 @@ function M.applyV2(cfg,payload,revision)
   for _,key in ipairs({'storage','gate','subInterface','transposer'})do g[key]=values[p..key]end
   g.mainSide=tonumber(values[p..'mainSide']);g.subSide=tonumber(values[p..'subSide'])
   g.generators={};for j=1,math.max(4,#cfg.groups[i].generators)do local v=values[p..'generator'..j];if v~=''then g.generators[#g.generators+1]=v end end
-  g.bulkTransposers={};for j=1,math.max(5,#(cfg.groups[i].bulkTransposers or {}))do local v=values[p..'bulk'..j];if v~=''then g.bulkTransposers[#g.bulkTransposers+1]=v end end
+  g.bulkTransposers={};for j=1,math.max(10,#(cfg.groups[i].bulkTransposers or {}))do local v=values[p..'bulk'..j];if v~=''then g.bulkTransposers[#g.bulkTransposers+1]=v end end
   local n={mode='cell-io'};g.nanites=n
   for _,key in ipairs({'transposer','loadRedstone','returnRedstone'})do n[key]=values[p..'bee_'..key]~=''and values[p..'bee_'..key]or nil end
   for _,key in ipairs({'bankSide','loadSide','returnSide','loadOutputSide','returnOutputSide'})do n[key]=tonumber(values[p..'bee_'..key])end
@@ -1582,6 +1583,11 @@ public domain. More specicially, see CC0 1.0 Universal:
 {id:'bulk-transposer-3',key:'OC_TRANS',title:'高速供液转运器 03',p:[140,-7,50],role:'groups[1].bulkTransposers[3]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 03'},
 {id:'bulk-transposer-4',key:'OC_TRANS',title:'高速供液转运器 04',p:[152,-7,50],role:'groups[1].bulkTransposers[4]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 04'},
 {id:'bulk-transposer-5',key:'OC_TRANS',title:'高速供液转运器 05',p:[164,-7,50],role:'groups[1].bulkTransposers[5]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 05'},
+{id:'bulk-transposer-6',key:'OC_TRANS',title:'高速供液转运器 06',p:[116,-7,64],role:'groups[1].bulkTransposers[6]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 06'},
+{id:'bulk-transposer-7',key:'OC_TRANS',title:'高速供液转运器 07',p:[128,-7,64],role:'groups[1].bulkTransposers[7]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 07'},
+{id:'bulk-transposer-8',key:'OC_TRANS',title:'高速供液转运器 08',p:[140,-7,64],role:'groups[1].bulkTransposers[8]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 08'},
+{id:'bulk-transposer-9',key:'OC_TRANS',title:'高速供液转运器 09',p:[152,-7,64],role:'groups[1].bulkTransposers[9]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 09'},
+{id:'bulk-transposer-10',key:'OC_TRANS',title:'高速供液转运器 10',p:[164,-7,64],role:'groups[1].bulkTransposers[10]',type:'BULK TRANSPOSER',icon:'⇄',description:'高速供液口 10'},
 {id:'nanite-bank',key:'BANK_BOX',title:'蜂群硬盘箱',p:[6,-7,58],role:null,type:'CELL BANK',icon:'▣',description:'无独立 OC 地址 · 外形示意',related:'nanite-transposer',note:'硬盘箱通过蜂群转运器的箱子方向读取；不是另一个 OC 组件，不需要独立地址。箱体材质暂用示意。'},
 {id:'nanite-transposer',key:'OC_TRANS',title:'蜂群硬盘转运器',p:[36,-7,58],role:'groups[1].nanites.transposer',type:'CELL TRANSPOSER',icon:'⇄',description:'ME-IO 装入 / 回收',sides:[['bankSide','硬盘箱方向',0],['loadSide','装入端口方向',3],['returnSide','回收端口方向',2]]},
 {id:'load-io',key:'AE_IO',title:'ME-IO 装入端口',p:[30,-7,58],role:null,type:'ME IO PORT',icon:'▥',description:'由蜂群转运器访问',related:'nanite-transposer',note:'在蜂群硬盘转运器中设置装入端口方向；此端口无需独立 OC 组件地址。装入信号在装入红石模块中配置。'},
@@ -1895,7 +1901,7 @@ return function(C,B,W,options)
   actual('field',g.storage);actual('gate',g.gate)
   for j=1,math.max(1,#g.generators)do actual(j==1 and 'generator'or 'generator-'..j,g.generators[j])end
   local supply=out.phase=='supply';out.machines['fluid-transposer']=supply and 'phase'or 'idle'
-  for j=1,5 do out.machines['bulk-transposer-'..j]=supply and 'phase'or 'idle'end
+  for j=1,10 do out.machines['bulk-transposer-'..j]=supply and 'phase'or 'idle'end
   out.machines['nanite-transposer']=out.phase=='nanites'and 'phase'or 'idle'
   for i,n in ipairs(cfg.nodes)do if n.group==H.group then
    local state=read(n.address,'getState')or 'offline';local allowed=read(n.address,'isWorkAllowed')
@@ -2917,7 +2923,8 @@ end,debug.traceback)
 pcall(panel.release)
 assert(ok,err)
 ]=]},
-{"START_HERE.txt",[=[OCHD HTML支持alpha7/alpha8；删除与滚轮修复需要alpha8客户端输入补丁，见WEB_INPUT.md。
+{"START_HERE.txt",[=[高速供液转运器每组01–10，未接的留空；已有网页版用update_bulk10.lua升级。
+OCHD HTML支持alpha7/alpha8；删除与滚轮修复需要alpha8客户端输入补丁，见WEB_INPUT.md。
 BEC V2 全新安装 / OpenOS
 
 OCHD 三维绑定与自动化流程（开发预览）：
@@ -2945,7 +2952,7 @@ lua /home/bec_v2/main.lua run
 使用自己的仓库和仅该仓库Contents读写token，不分享凭据。
 
 完整接线和分享说明：
-https://github.com/Alivn-chao/gtnh-bec-automation/tree/bec-v2-web-input-2026-10-17/reinstall_v2
+https://github.com/Alivn-chao/gtnh-bec-automation/tree/bec-v2-bulk10-2026-10-17/reinstall_v2
 
 配置和安装不会开机；pause和run会控制机器。约束场始终保持开启。
 不同时运行V1/V2控制同一设备。全部V2数据保留在/home/bec_v2。
