@@ -286,8 +286,9 @@ end
 local function integer(n,lo,hi) return type(n)=='number' and n==math.floor(n) and n>=lo and n<=hi end
 local function address(a,label) assert(type(a)=='string' and #a>0,label..' 未绑定') end
 local function methods(a,list,label)
- address(a,label);local m=c.methods(a)
- assert(type(m)=='table',label..' 不在线')
+ address(a,label);local ok,m,reason=pcall(c.methods,a)
+ assert(ok,label..' 方法列表读取失败 ['..a..']: '..tostring(m))
+ assert(type(m)=='table',label..' 不在线，OC查不到组件 ['..a..']: '..tostring(reason))
  for _,name in ipairs(list) do assert(m[name]~=nil,label..' 缺少方法 '..name) end
 end
 function M.validate(cfg,live)
@@ -323,13 +324,13 @@ function M.validate(cfg,live)
    for _,name in ipairs(names)do address(n[name],'蜂群 '..name);assert(not resources[n[name]],'蜂群控制设备跨组重复');resources[n[name]]=true end
   end
   if live then
-   methods(g.storage,{'getStoredCondensate','isWorkAllowed'},'约束场')
+   methods(g.storage,{'getStoredCondensate','isWorkAllowed'},'设备组'..i..' 约束场')
    assert(c.invoke(g.storage,'isWorkAllowed')==true,'约束场须保持开启')
-   methods(g.subInterface,{'getFluidsInNetwork'},'原液子网接口')
-   methods(g.transposer,{'transferFluid','getFluidInTank'},'供液转运器')
+   methods(g.subInterface,{'getFluidsInNetwork'},'设备组'..i..' 原液子网接口')
+   methods(g.transposer,{'transferFluid','getFluidInTank'},'设备组'..i..' 供液转运器')
    for _,a in ipairs(g.bulkTransposers or {})do methods(a,{'transferFluid','getFluidInTank'},'高速供液转运器')end
-   for _,a in ipairs(g.generators) do
-    methods(a,{'setWorkAllowed','isWorkAllowed','isMachineActive'},'纠缠器')
+   for j,a in ipairs(g.generators) do
+    methods(a,{'setWorkAllowed','isWorkAllowed','isMachineActive'},'设备组'..i..' 纠缠器'..j)
     assert(c.invoke(a,'getName')=='multi.bec.generator','绑定的设备不是纠缠器')
    end
    if g.nanites and g.nanites.enabled then
@@ -1371,6 +1372,8 @@ input,textarea{caret-color:#236ee8;cursor:text}input:focus,textarea:focus{outlin
 .action-feedback{position:fixed;z-index:4;top:66px;left:0;right:0;min-height:44px;max-height:100px;overflow:auto;padding:11px 20px;background:#edf4ff;border-bottom:1px solid #ccdcf2;color:#315f94;font-size:12px;overflow-wrap:anywhere}.action-feedback.action-error{background:#fff0f0;color:#a52d3c;border-color:#efbdc4}.workspace{padding-top:44px}
 
 #binding-issues-list{display:grid;gap:8px;margin:12px 0 18px}#binding-issues-list button{text-align:left;border:1px solid #efc7cd;background:#fff6f7;color:#a52d3c;padding:10px;border-radius:6px}
+
+.pick-component{border:1px solid #bcd5f4;background:#edf4ff;color:#236ee8;padding:6px 10px;border-radius:5px;margin-top:6px}.component-choice{display:block;width:100%;text-align:left;border:1px solid #d7e3f3;border-radius:6px;padding:10px;margin:8px 0;background:#fff}.component-choice strong,.component-choice code,.component-choice small{display:block}.component-choice code{font-size:12px;user-select:text}.component-choice small{color:#73839a}#component-picker footer{gap:6px;flex-wrap:wrap}#picker-status{color:#315f94}
 </style></head><body>
 <header class="topbar"><a class="brand" href="#"><span class="brand-icon"><i></i><i></i><i></i></span><strong>BEC<span> / STUDIO</span></strong></a><div class="top-divider"></div><span class="project-name">装配线 01 <span class="pill">配置原型</span></span><div class="top-actions"><span id="save-status" class="save-status"><i></i>本地草稿已就绪</span><button class="button quiet" id="import-btn">↥ 导入草稿</button><button class="button primary" id="export-btn">↧ 导出配置</button><input id="import-file" type="file" accept="application/json,.json" hidden></div></header>
 <div class="workspace"><aside class="sidebar"><div class="side-head"><span class="eyebrow">PROJECT EXPLORER</span><h1>装配线结构</h1><p>以实际设备为入口，完成每一处绑定。</p></div><div class="search-box"><span>⌕</span><input id="tree-search" placeholder="查找设备或地址" aria-label="查找设备或地址"><kbd>/</kbd></div><div class="line-header"><span>⌄</span><b>设备组 01</b><span id="binding-count" class="count">0 / 31</span></div><div id="structure-tree" class="tree"></div><div class="side-footer"><div class="source-label"><span class="verified">✓</span><span>GTNH 官方结构数据</span></div><p>GregTech 5.09.54.133<br>方块形状与材质来自原始资源</p><button class="text-button" id="source-button">查看数据来源 ↗</button></div></aside>
@@ -1735,7 +1738,7 @@ document.addEventListener('scroll',function(e){if(open&&!open.menu.contains(e.ta
 new MutationObserver(refresh).observe(document.body,{childList:true,subtree:true});window.BEC_REFRESH_SELECTS=refresh;refresh();
 })();
 </script><script>(function(){'use strict';
-var $=function(id){return document.getElementById(id);},app=window.BEC_APP,last=null,online=false,receivedAt=0,receiving=false,queue={},inflight=false,waiting=null,failed=false,group=1,switching=null,currentSave=null,actionPending=null,actionMessage=null;
+var $=function(id){return document.getElementById(id);},app=window.BEC_APP,last=null,online=false,receivedAt=0,receiving=false,queue={},inflight=false,waiting=null,failed=false,group=1,switching=null,currentSave=null,actionPending=null,actionMessage=null,picking=null,pickerPending=false,pickerSerial=0;
 var order=['detect','nanites','gate','supply','convert','produce','finish'],titles={idle:'等待订单',detect:'读取配方',nanites:'蜂群检查',gate:'韦门确认',supply:'原液备料',convert:'凝聚物转换',produce:'配方运行',finish:'批次收尾',fault:'保护暂停'};
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];});}
 function time(n){n=Math.max(0,Number(n)||0);return n<60?n.toFixed(1)+'s':Math.floor(n/60)+'m '+(n%60).toFixed(1)+'s';}
@@ -1765,7 +1768,7 @@ function syncModels(d){var scene=app.scene,base=scene.modules.find(function(m){r
  for(var j=2;j<=count;j++)if(!scene.modules.some(function(m){return m.id==='generator-'+j;})){var m=Object.assign({},base),dx=Math.floor((j-1)/4)*40,dz=((j-1)%4)*26;m.id='generator-'+j;m.title='纠缠器 '+String(j).padStart(2,'0');m.role='groups['+group+'].generators['+j+']';m.p=[base.p[0]+dx,base.p[1],base.p[2]+dz];m.center=[base.center[0]+dx,base.center[1],base.center[2]+dz];m.marker=[base.marker[0]+dx,base.marker[1],base.marker[2]+dz];scene.modules.push(m);}
  scene.modules.forEach(function(m){if(m.role)m.role=m.role.replace(/^groups\[\d+\]/,'groups['+group+']');if(m.kind==='generator')m.role='groups['+group+'].generators['+(m.id==='generator'?1:m.id.slice(10))+']';});scene.runtimeGroup=group;scene.runtimeValues=d.values||{};scene.request();}
 function markMachines(){if(!last)return;app.scene.liveStates=last.machines||{};document.querySelectorAll('[data-label],[data-module]').forEach(function(el){el.dataset.live=(last.machines||{})[el.dataset.label||el.dataset.module]||'unknown';});}
-var render=app.scene.onRender;app.scene.onRender=function(s){render(s);markMachines();};
+var render=app.scene.onRender;app.scene.onRender=function(s){render(s);markMachines();pickerButtons();};
 function flow(){if(!last)return;var age=online?Math.min(3,(Date.now()-receivedAt)/1000):0,active=last.mode==='running'&&last.phase!=='idle'&&last.phase!=='finish'&&!last.fault;var elapsed=(last.elapsed||0)+(active?age:0);$('flow-elapsed').textContent=time(elapsed);$('flow-current').textContent=titles[last.phase]||last.phase;$('flow-stage-time').textContent='当前步骤 '+time((last.phaseElapsed||0)+(active?age:0));
  $('flow-steps').innerHTML=order.map(function(p,i){var duration=Number((last.flow||{})[p]||0)+(active&&p===last.phase?age:0),current=last.phase===p,done=duration>0&&!current;return '<div class="flow-step '+(current?'current ':done?'done ':'')+(current&&last.fault?'fault':'')+'"><div class="index">'+(done?'✓ ':String(i+1).padStart(2,'0'))+'</div><strong>'+titles[p]+'</strong><time>'+((duration>0||current)?time(duration):'待执行')+'</time></div>';}).join('');
  $('node-status-list').innerHTML=(Array.isArray(last.nodes)?last.nodes:[]).map(function(n){return '<span class="node-chip '+(n.state==='crafting'?'active':'')+'">N'+String(n.slot).padStart(2,'0')+' · '+esc(n.state)+' · '+(n.workAllowed?'允许接单':'关闭接单')+'</span>';}).join('')||'<span class="node-chip">尚未绑定节点</span>';
@@ -1778,7 +1781,37 @@ function data(d){var changed=group!==(d.group||1);last=d;online=d._online!==fals
  document.body.classList.toggle('runtime-running',d.mode==='running');$('flow-panel').hidden=false;refreshActions();$('global-settings').disabled=d.mode==='running';
  if(!online)status('OC 离线 · 未保存操作',true);else if(failed)status('保存未确认 · 点击重试',true);else if(!inflight&&!waiting&&!Object.keys(queue).length)status('OC 已连接 · 草稿已保存');
  if($('group-select').options.length!==d.groupCount){$('group-select').innerHTML=Array.from({length:d.groupCount||1},function(_,i){return '<option value="'+(i+1)+'">设备组 '+String(i+1).padStart(2,'0')+'</option>';}).join('');}$('group-select').value=group;if(window.BEC_REFRESH_SELECTS)window.BEC_REFRESH_SELECTS();
- markMachines();flow();pump();
+ markMachines();flow();pump();renderPicker(d.scan);
+}
+function pickerRole(id,field){if(field==='redstone'||id==='load-redstone'||id==='return-redstone')return 'redstone';if(field==='gate'||id==='gate')return 'gate';if(id.indexOf('node-')===0)return 'node';if(id==='field')return 'storage';if(id.indexOf('generator')===0)return 'generator';if(id==='main-me')return 'mainme';if(id==='sub-me')return 'subme';if(id==='workshop-me')return 'workshop';if(id==='nanite-transposer')return 'items';return 'fluid';}
+function pickerButtons(){
+ ['address','redstone','gate'].forEach(function(field){var input=$('field-'+field);if(!input||!input.parentNode)return;var existing=input.parentNode.querySelector('.pick-component');if(existing){existing.disabled=!online||last&&last.mode==='running';return;}var b=document.createElement('button');b.type='button';b.className='pick-component';b.textContent='从 OC 识别 / 选择';b.disabled=!online||last&&last.mode==='running';b.onclick=function(){openPicker(app.scene.selected,field);};input.parentNode.appendChild(b);});
+}
+function openPicker(id,field){
+ if(pickerPending){showAction('请等待上一次扫描请求返回，再打开选择框。',true);return;}
+ if(!online||last.mode==='running'){showAction('先连接 OC 并暂停自动化，再识别绑定。',true);return;}
+ if(saving()){showAction('请先等待草稿保存完成。',true);return;}
+ picking={id:id,field:field,key:key(id,field),role:pickerRole(id,field)};
+ $('component-picker').showModal();var model=app.scene.modules.find(function(m){return m.id===id;});$('picker-title').textContent='识别 / '+(model?model.title:id)+' · '+({address:'设备地址',redstone:'暂停红石',gate:'独立韦门'}[field]||field);scanPicker();
+}
+function scanPicker(page){
+ if(!picking||pickerPending)return;pickerPending=true;$('picker-status').textContent='读取 OC 组件中…';$('picker-results').innerHTML='';
+ picking.token=++pickerSerial;var args={role:picking.role,token:picking.token};if(page!=null)args.page=page;
+ send('scan_components',args).then(function(){pickerPending=false;}).catch(function(e){pickerPending=false;$('picker-status').textContent='扫描失败：'+e.message;});
+}
+function closePicker(){picking=null;$('component-picker').close();}
+function bindingName(k){var n=k.match(/^n(\d+)\.(.+)$/),g=k.match(/^g(\d+)\.(.+)$/),labels={address:'节点组件',redstone:'暂停红石',gate:'韦门',storage:'约束场',subInterface:'原液子网ME接口',transposer:'供液转运器',bee_transposer:'蜂群转运器',bee_loadRedstone:'装入端口红石',bee_returnRedstone:'回收端口红石',mainInterface:'主网ME接口',workshopInterface:'样板工坊ME接口'};if(n)return '节点'+n[1]+' '+(labels[n[2]]||n[2]);if(g)return '组'+g[1]+' '+(labels[g[2]]||g[2].replace('generator','纠缠器').replace('bulk','高速供液口'));return labels[k]||k;}
+function renderPicker(scan){
+ pickerButtons();if(!picking||!scan||scan.role!==picking.role||scan.token!==picking.token||pickerPending)return;
+ $('picker-status').textContent=scan.status==='scanning'?'扫描中，已检查 '+scan.checked+' 个组件…':scan.status==='failed'?scan.message:'找到 '+scan.total+' 项 · 第 '+(scan.page+1)+' 页'+(scan.baseline?' · 比上次减少 '+scan.removed+' 项':' · 首次扫描作为比较基准')+(scan.message?' · '+scan.message:'');
+ $('picker-results').innerHTML=(scan.rows||[]).map(function(r){return '<button class="component-choice" type="button" data-address="'+esc(r.address)+'"><strong>'+(r.fresh?'新增 / 重新接入 · ':'')+esc(r.kind)+'</strong><code>'+esc(r.address)+'</code><small>'+esc(r.name||'')+(r.used?' · 已填写于 '+esc(r.used.split(', ').map(bindingName).join('、')):' · 尚未填写')+'</small></button>';}).join('')||(scan.status==='done'?'<p>没有匹配设备。当前 OC 组件网络看不到这种设备，检查适配器连接及 P2P。</p>':'');
+ $('picker-results').querySelectorAll('button').forEach(function(b){b.onclick=function(){
+  if(!picking||!online||last.mode==='running'||saving()){showAction('状态已改变，请等待保存完成并保持暂停后重新选择。',true);return;}
+  var selected=picking;app.select(selected.id);var input=$('field-'+selected.field);if(!input){$('picker-status').textContent='当前字段不可用，请关闭后重试';return;}
+  input.value=b.dataset.address;input.dispatchEvent(new Event('input',{bubbles:true}));closePicker();showAction('已选择 OC 实际地址，正在保存草稿；方向和节点配对仍需按实物确认。',false);
+ };});
+ $('picker-prev').disabled=scan.status!=='done'||scan.page===0;$('picker-next').disabled=scan.status!=='done'||(scan.page+1)*6>=scan.total;
+ $('picker-prev').onclick=function(){scanPicker(scan.page-1);};$('picker-next').onclick=function(){scanPicker(scan.page+1);};
 }
 function bindingIssues(){
  var v=last&&last.values||{},p='g'+group+'.',issues=[],uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1819,6 +1852,7 @@ var feedback=document.createElement('div');feedback.id='action-feedback';feedbac
 var tabs=document.createElement('nav');tabs.className='runtime-tabs';tabs.innerHTML='<button class="active" data-tab="structure">结构 / 绑定</button><button data-tab="flow">运行流程</button>';document.querySelector('.topbar').insertBefore(tabs,document.querySelector('.top-actions'));
 var flowPanel=document.createElement('section');flowPanel.className='flow-panel';flowPanel.id='flow-panel';flowPanel.innerHTML='<div class="flow-title"><div><h2>自动化流程 <span id="flow-current">等待 OC</span></h2><p id="flow-stage-time">当前步骤 —</p></div><div><div class="elapsed" id="flow-elapsed">0.0s</div><small>当前 / 最近批次总耗时</small></div></div><div class="flow-path" id="flow-steps"></div><div class="flow-bottom"><div><h4>TRANSFER NODES / 接单控制</h4><div class="node-list" id="node-status-list"></div><div class="runtime-legend"><b>绿色：机器回读运行中</b> · <em>金色：当前步骤使用的外设</em><br>外设阶段占用不等同于硬件正在搬运</div></div><div><h4>EXECUTION / 阶段时间线</h4><div id="runtime-log" class="runtime-log" style="white-space:pre-wrap"></div></div></div>';
 document.querySelector('.main').appendChild(flowPanel);var notice=document.createElement('div');notice.id='runtime-notice';notice.className='runtime-notice';notice.textContent='等待 OC 数据，网页预览不控制机器。';document.querySelector('.main').appendChild(notice);
+var pickerDialog=document.createElement('dialog');pickerDialog.id='component-picker';pickerDialog.className='runtime-settings';pickerDialog.innerHTML='<h2 id="picker-title">从 OC 选择设备</h2><p>只读取组件。点击候选地址填入草稿，不启动机器。</p><p>同类机器位置识别：暂停自动化后，仅断开目标适配器的 OC 信号分支，扫描一次；接回原线再「重新扫描」。新增/重新接入项就是候选。不要拆机器或适配器，也不要断整条共用主线。若出现多项新增，逐项确认，不按 UUID 排列猜位置。</p><div id="picker-status"></div><div id="picker-results"></div><footer><button id="picker-prev" class="button">上一页</button><button id="picker-next" class="button">下一页</button><button id="picker-refresh" class="button">重新扫描</button><button id="picker-close" class="button primary">关闭</button></footer>';document.body.appendChild(pickerDialog);$('picker-refresh').onclick=function(){scanPicker();};$('picker-close').onclick=closePicker;
 var issuesDialog=document.createElement('dialog');issuesDialog.id='binding-issues';issuesDialog.className='runtime-settings binding-issues';issuesDialog.innerHTML='<h2>绑定检查 / 当前设备组</h2><p>点击下列项目跳转填写。这里只检查填写内容；通过后还会由 OC 校验设备是否在线、方法和机器状态。</p><div id="binding-issues-list"></div><p>空传送节点会跳过。额外纠缠器、高速供液口、样板工坊可留空；自动换蜂的三项地址须全部填写或全部留空。每个节点须有独立韦门或使用本组公共韦门。</p><footer><button id="close-issues" class="button primary">返回修改</button></footer>';document.body.appendChild(issuesDialog);$('close-issues').onclick=function(){$('binding-issues').close();};
 var dialog=document.createElement('dialog');dialog.id='runtime-settings';dialog.className='runtime-settings';dialog.innerHTML='<h2>公共配置</h2><p>填写后自动暂存。应用绑定通过设备校验后，才能启动。</p><label>当前模型对应 <select id="group-select"></select></label><div id="extra-fields"></div><footer><button id="close-settings" class="button primary">完成</button></footer>';document.body.appendChild(dialog);
 document.querySelectorAll('[data-tab]').forEach(function(b){b.onclick=function(){document.querySelectorAll('[data-tab]').forEach(function(x){x.classList.toggle('active',x===b);});document.body.classList.toggle('flow-full',b.dataset.tab==='flow');app.scene.request();};});
@@ -1826,7 +1860,7 @@ document.querySelectorAll('[data-tab]').forEach(function(b){b.onclick=function()
  document.querySelector('.inspector-bottom p').textContent='草稿由 OC 自动保存，支持 Ctrl+V。应用绑定前不控制机器。';$('model-callout').querySelector('p').innerHTML='点击机器填写地址，自动暂存到 OC。<br>拖动旋转 · 滚轮缩放 · 右键平移';document.querySelector('.pill').textContent='V2 / OCHD';
 document.querySelector('.stage-title').innerHTML='<span class="live-dot"></span>结构与机器状态<span class="stage-sub">/ 实际回读 + 阶段标记</span>';
 $('save-status').onclick=function(){if(failed){failed=false;pump();}};$('apply-config').onclick=function(){action('apply_bindings');};$('start-run').onclick=function(){action('start');};$('stop-run').onclick=function(){action('pause');};$('global-settings').onclick=settings;$('close-settings').onclick=function(){$('runtime-settings').close();};$('group-select').onchange=function(){if(inflight||waiting||Object.keys(queue).length){this.value=group;return;};switching=Number(this.value);send('select_group',{group:switching}).then(function(){$('runtime-settings').close();}).catch(function(e){switching=null;$('runtime-notice').textContent=e.message;});};
- window.BEC_CONTROL={receive:data,values:toValues,issues:bindingIssues,queue:function(){return queue;}};
+ window.BEC_CONTROL={receive:data,values:toValues,openPicker:openPicker,issues:bindingIssues,queue:function(){return queue;}};
 if(window.OC&&OC.onData)OC.onData(data);else{$('runtime-notice').textContent='浏览器预览：未连接 OC，所有机器操作禁用。';$('start-run').disabled=$('stop-run').disabled=$('apply-config').disabled=true;}
 setInterval(function(){flow();if(last&&Date.now()-receivedAt>7000){online=false;status('OC 数据已过期',true);refreshActions();}},250);
 })();
@@ -1850,6 +1884,49 @@ return function(C,B,W,options)
   for _,f in ipairs(fields())do out[#out+1]=f.key..'='..(change and change.key==f.key and change.value or f.value)end
   return table.concat(out,'\n')
  end
+ -- BEC_COMPONENT_PICKER_1: on-demand, read-only discovery, six rows per snapshot.
+ local scan,scanHistory
+ scanHistory={}
+ local required={storage={'getStoredCondensate','isWorkAllowed'},node={'getState','getRequiredCondensate','getRequiredTier','setWorkAllowed','isWorkAllowed'},
+  generator={'getName','setWorkAllowed','isWorkAllowed','isMachineActive'},gate={'setCondensateFilters','getCondensateFilters','getCondensateFilterCount'},
+  fluid={'transferFluid','getFluidInTank'},items={'transferItem','getInventorySize','getStackInSlot'},redstone={'setOutput','getOutput'},
+  mainme={'getFluidsInNetwork','getCraftables','getCpus','setFluidInterfaceConfiguration'},subme={'getFluidsInNetwork'},workshop={'getItemsInNetwork','setInterfaceConfiguration','getInterfaceConfiguration'}}
+ local function scanStep()
+  if not scan or scan.status~='scanning'then return end
+  for _=1,4 do
+   local ok,a,kind=pcall(scan.iterator)
+   if not ok then scan.status='failed';scan.message='组件枚举失败：'..tostring(a);return end
+   if not a then
+    local previous=scanHistory[scan.role];local current={};scan.baseline=previous~=nil
+    for _,r in ipairs(scan.rows)do current[r.address]=true;r.fresh=previous~=nil and not previous[r.address]end
+    scan.removed=0;if previous then for address in pairs(previous)do if not current[address]then scan.removed=scan.removed+1 end end end
+    scanHistory[scan.role]=current
+    table.sort(scan.rows,function(x,y)if x.fresh~=y.fresh then return x.fresh end;return x.address<y.address end);scan.status='done';return end
+   scan.checked=scan.checked+1
+   if scan.checked>2048 then scan.status='done';scan.message='扫描已达2048组件上限，请缩小OC网络后重扫';return end
+   local success,m=pcall(c.methods,a)
+   local match=success and type(m)=='table'
+   if match then for _,method in ipairs(required[scan.role])do if m[method]==nil then match=false;break end end end
+   local name=''
+   if match and m.getName~=nil then
+    local good,value=pcall(c.invoke,a,'getName');if good and type(value)=='string'then name=value:sub(1,80)end
+   end
+   if match and scan.role=='generator'and name~='multi.bec.generator'then match=false end
+   if match then
+    scan.rows[#scan.rows+1]={address=tostring(a):sub(1,64),kind=tostring(kind):sub(1,64),name=name}
+    if #scan.rows>=512 then scan.status='done';scan.message='匹配已达512项，请缩小OC网络后重扫';return end
+   end
+  end
+ end
+ local function scanSnapshot()
+  if not scan then return nil end
+  local out={role=scan.role,token=scan.token,status=scan.status,page=scan.page,total=#scan.rows,checked=scan.checked,message=scan.message or '',removed=scan.removed or 0,baseline=scan.baseline==true,rows={}}
+  local bound={};for _,f in ipairs(fields())do if f.kind=='uuid'and f.value~=''then bound[f.value]=(bound[f.value]and bound[f.value]..', 'or '')..f.key end end
+  for i=scan.page*6+1,math.min(#scan.rows,scan.page*6+6)do local r=scan.rows[i]
+   out.rows[#out.rows+1]={address=r.address,kind=r.kind,name=r.name,fresh=r.fresh==true,used=(bound[r.address]or ''):sub(1,140)}
+  end
+  return out
+ end
  local function idleEditor()
   assert(not H.running,'先暂停自动化再编辑绑定')
   if E then for _,t in ipairs(E.tasks)do assert(not t.co,'等待工作器退出并保留日志后再编辑')end end
@@ -1861,7 +1938,18 @@ return function(C,B,W,options)
  function H.handle(name,args,request)
   assert(type(args)=='table','页面参数必须为对象')
   assert(type(request)=='number'and request==math.floor(request)and request>0,'请求编号无效')
-  if name=='select_group'then
+  if name=='scan_components'then
+   if args.close==true then scan=nil;return '已关闭组件选择'end
+   assert(type(args.role)=='string'and required[args.role],'未知设备用途')
+   local token=args.token or request;assert(type(token)=='number'and token>0 and token==math.floor(token)and token<=2147483647,'扫描标识无效')
+   if args.page~=nil then
+    assert(scan and scan.role==args.role and scan.status=='done','请先完成组件扫描')
+    assert(type(args.page)=='number'and args.page==math.floor(args.page)and args.page>=0 and args.page<=math.floor(math.max(0,#scan.rows-1)/6),'组件页码无效');scan.page=args.page;scan.token=token
+   else
+    local iterator=c.list();scan={role=args.role,token=token,status='scanning',page=0,rows={},checked=0,iterator=iterator}
+   end
+   return '正在从这台OC的组件网络读取，未操作机器'
+  elseif name=='select_group'then
    assert(type(args.group)=='number'and cfg.groups[args.group],'设备组不存在');H.group=args.group;return '已切换设备组'
   elseif name=='save_field'then
    idleEditor();assert(args.revision==revision(),'草稿已变化，请等最新快照后重试')
@@ -1913,6 +2001,7 @@ return function(C,B,W,options)
   error('不支持的页面事件')
  end
  function H.step()
+  scanStep()
   if not E then return end
   local draining=false;for _,t in ipairs(E.tasks)do if t.co then draining=true end end
   if H.running or draining then E.step()end
@@ -1925,7 +2014,7 @@ return function(C,B,W,options)
    if not g or tonumber(g)==H.group then values[f.key]=f.value end
   end
   local out={mode=H.running and 'running'or 'binding',revision=revision(),values=values,group=H.group,groupCount=#cfg.groups,
-   configured=expected~=nil,notice=H.notice,now=now,machines={},nodes={},flow={},timeline={},logs={},disk=storage.status()}
+   configured=expected~=nil,notice=H.notice,scan=scanSnapshot(),now=now,machines={},nodes={},flow={},timeline={},logs={},disk=storage.status()}
   local g=cfg.groups[H.group];out.groupName=g.name or ('设备组 '..H.group);out.generatorSlots=math.max(4,#g.generators);local selected
   if E then local owner=E.groupOwner[H.group];selected=owner and E.tasks[owner]
    if not selected then for i,n in ipairs(cfg.nodes)do
@@ -3013,7 +3102,7 @@ local methods=c.methods(address)
 assert(methods.setWebApp~=nil and methods.publish~=nil,'需要支持 HTML 页面的 OCHD alpha7 或兼容版 JAR')
 local f=assert(io.open(C.path('lib/web_page.html'),'r'));local page=f:read('*a');f:close()
 local package={id='bec-v2-studio',title='BEC V2 结构绑定与运行',entry='index.html',files={['index.html']=page},
- events={'save_field','apply_bindings','start','pause','select_group','refresh'}}
+ events={'save_field','apply_bindings','start','pause','select_group','refresh','scan_components'}}
 local panel=c.proxy(address);local H=module('web_session')(C,B,W)
 local ok,err=xpcall(function()
  while true do local accepted,reason=panel.setWebApp(package);assert(accepted~=nil,reason);if accepted then break end;event.pull(.6)end

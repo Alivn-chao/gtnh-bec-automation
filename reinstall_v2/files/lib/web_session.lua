@@ -16,6 +16,49 @@ return function(C,B,W,options)
   for _,f in ipairs(fields())do out[#out+1]=f.key..'='..(change and change.key==f.key and change.value or f.value)end
   return table.concat(out,'\n')
  end
+ -- BEC_COMPONENT_PICKER_1: on-demand, read-only discovery, six rows per snapshot.
+ local scan,scanHistory
+ scanHistory={}
+ local required={storage={'getStoredCondensate','isWorkAllowed'},node={'getState','getRequiredCondensate','getRequiredTier','setWorkAllowed','isWorkAllowed'},
+  generator={'getName','setWorkAllowed','isWorkAllowed','isMachineActive'},gate={'setCondensateFilters','getCondensateFilters','getCondensateFilterCount'},
+  fluid={'transferFluid','getFluidInTank'},items={'transferItem','getInventorySize','getStackInSlot'},redstone={'setOutput','getOutput'},
+  mainme={'getFluidsInNetwork','getCraftables','getCpus','setFluidInterfaceConfiguration'},subme={'getFluidsInNetwork'},workshop={'getItemsInNetwork','setInterfaceConfiguration','getInterfaceConfiguration'}}
+ local function scanStep()
+  if not scan or scan.status~='scanning'then return end
+  for _=1,4 do
+   local ok,a,kind=pcall(scan.iterator)
+   if not ok then scan.status='failed';scan.message='组件枚举失败：'..tostring(a);return end
+   if not a then
+    local previous=scanHistory[scan.role];local current={};scan.baseline=previous~=nil
+    for _,r in ipairs(scan.rows)do current[r.address]=true;r.fresh=previous~=nil and not previous[r.address]end
+    scan.removed=0;if previous then for address in pairs(previous)do if not current[address]then scan.removed=scan.removed+1 end end end
+    scanHistory[scan.role]=current
+    table.sort(scan.rows,function(x,y)if x.fresh~=y.fresh then return x.fresh end;return x.address<y.address end);scan.status='done';return end
+   scan.checked=scan.checked+1
+   if scan.checked>2048 then scan.status='done';scan.message='扫描已达2048组件上限，请缩小OC网络后重扫';return end
+   local success,m=pcall(c.methods,a)
+   local match=success and type(m)=='table'
+   if match then for _,method in ipairs(required[scan.role])do if m[method]==nil then match=false;break end end end
+   local name=''
+   if match and m.getName~=nil then
+    local good,value=pcall(c.invoke,a,'getName');if good and type(value)=='string'then name=value:sub(1,80)end
+   end
+   if match and scan.role=='generator'and name~='multi.bec.generator'then match=false end
+   if match then
+    scan.rows[#scan.rows+1]={address=tostring(a):sub(1,64),kind=tostring(kind):sub(1,64),name=name}
+    if #scan.rows>=512 then scan.status='done';scan.message='匹配已达512项，请缩小OC网络后重扫';return end
+   end
+  end
+ end
+ local function scanSnapshot()
+  if not scan then return nil end
+  local out={role=scan.role,token=scan.token,status=scan.status,page=scan.page,total=#scan.rows,checked=scan.checked,message=scan.message or '',removed=scan.removed or 0,baseline=scan.baseline==true,rows={}}
+  local bound={};for _,f in ipairs(fields())do if f.kind=='uuid'and f.value~=''then bound[f.value]=(bound[f.value]and bound[f.value]..', 'or '')..f.key end end
+  for i=scan.page*6+1,math.min(#scan.rows,scan.page*6+6)do local r=scan.rows[i]
+   out.rows[#out.rows+1]={address=r.address,kind=r.kind,name=r.name,fresh=r.fresh==true,used=(bound[r.address]or ''):sub(1,140)}
+  end
+  return out
+ end
  local function idleEditor()
   assert(not H.running,'先暂停自动化再编辑绑定')
   if E then for _,t in ipairs(E.tasks)do assert(not t.co,'等待工作器退出并保留日志后再编辑')end end
@@ -27,7 +70,18 @@ return function(C,B,W,options)
  function H.handle(name,args,request)
   assert(type(args)=='table','页面参数必须为对象')
   assert(type(request)=='number'and request==math.floor(request)and request>0,'请求编号无效')
-  if name=='select_group'then
+  if name=='scan_components'then
+   if args.close==true then scan=nil;return '已关闭组件选择'end
+   assert(type(args.role)=='string'and required[args.role],'未知设备用途')
+   local token=args.token or request;assert(type(token)=='number'and token>0 and token==math.floor(token)and token<=2147483647,'扫描标识无效')
+   if args.page~=nil then
+    assert(scan and scan.role==args.role and scan.status=='done','请先完成组件扫描')
+    assert(type(args.page)=='number'and args.page==math.floor(args.page)and args.page>=0 and args.page<=math.floor(math.max(0,#scan.rows-1)/6),'组件页码无效');scan.page=args.page;scan.token=token
+   else
+    local iterator=c.list();scan={role=args.role,token=token,status='scanning',page=0,rows={},checked=0,iterator=iterator}
+   end
+   return '正在从这台OC的组件网络读取，未操作机器'
+  elseif name=='select_group'then
    assert(type(args.group)=='number'and cfg.groups[args.group],'设备组不存在');H.group=args.group;return '已切换设备组'
   elseif name=='save_field'then
    idleEditor();assert(args.revision==revision(),'草稿已变化，请等最新快照后重试')
@@ -79,6 +133,7 @@ return function(C,B,W,options)
   error('不支持的页面事件')
  end
  function H.step()
+  scanStep()
   if not E then return end
   local draining=false;for _,t in ipairs(E.tasks)do if t.co then draining=true end end
   if H.running or draining then E.step()end
@@ -91,7 +146,7 @@ return function(C,B,W,options)
    if not g or tonumber(g)==H.group then values[f.key]=f.value end
   end
   local out={mode=H.running and 'running'or 'binding',revision=revision(),values=values,group=H.group,groupCount=#cfg.groups,
-   configured=expected~=nil,notice=H.notice,now=now,machines={},nodes={},flow={},timeline={},logs={},disk=storage.status()}
+   configured=expected~=nil,notice=H.notice,scan=scanSnapshot(),now=now,machines={},nodes={},flow={},timeline={},logs={},disk=storage.status()}
   local g=cfg.groups[H.group];out.groupName=g.name or ('设备组 '..H.group);out.generatorSlots=math.max(4,#g.generators);local selected
   if E then local owner=E.groupOwner[H.group];selected=owner and E.tasks[owner]
    if not selected then for i,n in ipairs(cfg.nodes)do

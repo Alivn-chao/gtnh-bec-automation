@@ -4,8 +4,8 @@
     "sha256": "7be047808ab39a2c7056284b47de22b3741de83134818c12f1ab28ef9ae9c0e9"
   },
   "lib/config.lua": {
-    "bytes": 7134,
-    "sha256": "bb81ad5015504c85178f71878d20cfd5a34d1268cc968266814278ac7611381a"
+    "bytes": 7343,
+    "sha256": "2d02b4c124998d5c083fc8cd76cdf2885b6b9a90ec0cfc202112766c04ba494d"
   },
   "lib/engine.lua": {
     "bytes": 11288,
@@ -44,12 +44,12 @@
     "sha256": "6ab7b6a9762c0a9a93a91bf0d724d1710d0009f5ecd19a9cc9b68a1d7631fd3c"
   },
   "lib/web_page.html": {
-    "bytes": 239131,
-    "sha256": "9bb6599568155d3e3766169660eaa6b8a309b48bb931352d99880f49f8a24dbb"
+    "bytes": 245579,
+    "sha256": "3ef6b01c7cd407cc77aae1454b9bd33c6e34417037201ef6b012b0d550c09369"
   },
   "lib/web_session.lua": {
-    "bytes": 8357,
-    "sha256": "123bdfe47942ab637b0b2088ca1afe3d8f66f43b438e1ad37ab0bc9ac54cc709"
+    "bytes": 12354,
+    "sha256": "f8ac4b10e03db5d4dc75479adfc60e4ea41c279bd9dba84d9b5656b6e376e8cd"
   },
   "main.lua": {
     "bytes": 2807,
@@ -84,7 +84,7 @@
     "sha256": "40775376191d0b773395314a8ac7c27ffce4b6c9379da80c513c396c5690feb8"
   },
   "web.lua": {
-    "bytes": 2027,
-    "sha256": "ad0f7286495aaf25756d723b61d930915c3b54546544911b539439bb12eb5278"
+    "bytes": 2045,
+    "sha256": "9ed4589b776c1a2aa19e5391cfd83847d5e56eeb1f5aabca0d2d93bcc6855994"
   }
 }

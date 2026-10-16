@@ -3,7 +3,7 @@ import subprocess,unittest
 from pathlib import Path
 from test_web_update import fixture
 HERE=Path(__file__).resolve().parents[1]
-NAMES=['lib/ochd_bindings.lua','lib/web_session.lua','lib/web_page.html']
+NAMES=['web.lua','lib/ochd_bindings.lua','lib/web_session.lua','lib/web_page.html']
 SCRIPT=(HERE/'update_bulk10.lua').read_text(encoding='utf-8')
 OLD={name:subprocess.check_output(['git','show','f60f785:reinstall_v2/files/'+name],cwd=HERE.parent).decode()for name in NAMES}
 def make():
@@ -22,7 +22,7 @@ class BulkUpdateTests(unittest.TestCase):
   self.assertEqual(l.globals().files['/home/bec_v2/state/node-1/production.journal'],'pending-keep')
   count=l.globals().count;l.execute(SCRIPT);self.assertEqual(l.globals().count,count)
  def test_every_rename_failure_restores_all_three_originals(self):
-  for failed in range(1,7):
+  for failed in range(1,len(NAMES)*2+1):
    with self.subTest(failed=failed):
     l=make();l.execute("local fs=require('filesystem');local rename=fs.rename;local n=0;fs.rename=function(a,b)n=n+1;if n=="+str(failed)+"then return false end;return rename(a,b)end")
     with self.assertRaisesRegex(Exception,'旧程序已恢复'):l.execute(SCRIPT)

@@ -100,6 +100,43 @@ local original=s.files[C.path('config.dat')];diskUsed=4194304-100000
 local ok=pcall(H.handle,'save_field',{revision=H.snapshot().revision,key='n1.address',value='partial'},113)
 assert(not ok and s.files[C.path('config.dat')]==original and not s.files[C.path('bindings.draft.dat')])
 ''')
+ def test_discovery_is_incremental_read_only_filters_false_methods_and_tracks_reconnection(self):
+  l=self.setup();l.execute(r"""
+local c=require('component');local before=s.files[C.path('config.dat')];local invokes={}
+local registry={a='gt_machine',b='gt_machine',bad='gt_machine',field='bec_storage'}
+local shared={getName=false,setWorkAllowed=false,isWorkAllowed=false,isMachineActive=false}
+c.list=function()local keys={};for a in pairs(registry)do keys[#keys+1]=a end;table.sort(keys);local i=0;return function()i=i+1;local a=keys[i];return a,a and registry[a]end end
+c.methods=function(a)if a=='bad'then return nil,'no such component'elseif a=='field'then return {getStoredCondensate=false,isWorkAllowed=false}else return shared end end
+c.invoke=function(a,m)assert(m=='getName','discovery must not mutate or invoke arbitrary methods');invokes[#invokes+1]=a;return a=='a'and 'multi.bec.generator'or 'other.machine'end
+H.handle('scan_components',{role='generator',token=1},120)
+assert(H.snapshot().scan.status=='scanning')
+H.step();H.step();local d=H.snapshot().scan
+assert(d.status=='done'and d.total==1 and d.rows[1].address=='a'and not d.rows[1].fresh)
+registry.a=nil;H.handle('scan_components',{role='generator',token=2},121);H.step();d=H.snapshot().scan;assert(d.total==0 and d.removed==1)
+registry.a='gt_machine';H.handle('scan_components',{role='generator',token=3},122);H.step();H.step();d=H.snapshot().scan;assert(d.rows[1].fresh and d.baseline)
+assert(s.files[C.path('config.dat')]==before and not s.files[C.path('bindings.draft.dat')])
+assert(releaseCount==0 and outputs['rs1-']==15)
+local ok=pcall(H.handle,'scan_components',{role='os.execute'},123);assert(not ok)
+H.handle('scan_components',{close=true},124);assert(H.snapshot().scan==nil)
+""")
+ def test_discovery_pagination_and_snapshot_limits_with_sixteen_nodes(self):
+  l=fixture();l.execute('cfg.nodes={};nodes={};outputs={};configure(16)'+SETUP);l.execute(r"""
+local c=require('component');c.list=function()local i=0;return function()i=i+1;if i<=40 then return string.format('%08d-0000-0000-0000-000000000000',i),'transposer'end end end
+c.methods=function()return {transferFluid=false,getFluidInTank=false}end
+H.handle('scan_components',{role='fluid'},125);for i=1,11 do H.step()end
+local d=H.snapshot().scan;assert(d.total==40 and #d.rows==6 and d.page==0)
+H.handle('scan_components',{role='fluid',page=6},126);d=H.snapshot().scan;assert(#d.rows==4 and d.page==6)
+local ok=pcall(H.handle,'scan_components',{role='fluid',page=7},127);assert(not ok)
+H.handle('scan_components',{role='fluid',page=5},128);assert(#H.snapshot().scan.rows==6)
+""")
+  snapshot=l.eval('H.snapshot()')
+  def convert(v):
+   if hasattr(v,'items'):return {str(k):convert(x)for k,x in v.items()}
+   return v
+  d=convert(snapshot)
+  def count(v):return 1+sum(count(x)for x in v.values())if isinstance(v,dict)else 1
+  self.assertLessEqual(count(d),512)
+  self.assertLess(len(json.dumps(d,ensure_ascii=False).encode()),16384)
  def test_sixteen_node_snapshot_fits_mod_limits(self):
   l=fixture();l.execute('cfg.nodes={};nodes={};outputs={};configure(16)'+SETUP)
   snapshot=l.eval('H.snapshot()')

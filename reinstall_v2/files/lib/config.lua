@@ -23,8 +23,9 @@ end
 local function integer(n,lo,hi) return type(n)=='number' and n==math.floor(n) and n>=lo and n<=hi end
 local function address(a,label) assert(type(a)=='string' and #a>0,label..' 未绑定') end
 local function methods(a,list,label)
- address(a,label);local m=c.methods(a)
- assert(type(m)=='table',label..' 不在线')
+ address(a,label);local ok,m,reason=pcall(c.methods,a)
+ assert(ok,label..' 方法列表读取失败 ['..a..']: '..tostring(m))
+ assert(type(m)=='table',label..' 不在线，OC查不到组件 ['..a..']: '..tostring(reason))
  for _,name in ipairs(list) do assert(m[name]~=nil,label..' 缺少方法 '..name) end
 end
 function M.validate(cfg,live)
@@ -60,13 +61,13 @@ function M.validate(cfg,live)
    for _,name in ipairs(names)do address(n[name],'蜂群 '..name);assert(not resources[n[name]],'蜂群控制设备跨组重复');resources[n[name]]=true end
   end
   if live then
-   methods(g.storage,{'getStoredCondensate','isWorkAllowed'},'约束场')
+   methods(g.storage,{'getStoredCondensate','isWorkAllowed'},'设备组'..i..' 约束场')
    assert(c.invoke(g.storage,'isWorkAllowed')==true,'约束场须保持开启')
-   methods(g.subInterface,{'getFluidsInNetwork'},'原液子网接口')
-   methods(g.transposer,{'transferFluid','getFluidInTank'},'供液转运器')
+   methods(g.subInterface,{'getFluidsInNetwork'},'设备组'..i..' 原液子网接口')
+   methods(g.transposer,{'transferFluid','getFluidInTank'},'设备组'..i..' 供液转运器')
    for _,a in ipairs(g.bulkTransposers or {})do methods(a,{'transferFluid','getFluidInTank'},'高速供液转运器')end
-   for _,a in ipairs(g.generators) do
-    methods(a,{'setWorkAllowed','isWorkAllowed','isMachineActive'},'纠缠器')
+   for j,a in ipairs(g.generators) do
+    methods(a,{'setWorkAllowed','isWorkAllowed','isMachineActive'},'设备组'..i..' 纠缠器'..j)
     assert(c.invoke(a,'getName')=='multi.bec.generator','绑定的设备不是纠缠器')
    end
    if g.nanites and g.nanites.enabled then

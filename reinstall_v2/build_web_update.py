@@ -6,7 +6,7 @@ from build import literal
 HERE=Path(__file__).resolve().parent
 source=(HERE/'files/lib/web_page.html').read_text(encoding='utf-8')
 signatures=[]
-for ref in ['334125a','81b7724','f60f785','933750b','180bf41']:
+for ref in ['334125a','81b7724','f60f785','933750b','180bf41','bccf281']:
  data=subprocess.check_output(['git','show',ref+':reinstall_v2/files/lib/web_page.html'],cwd=HERE.parent)
  signatures.append('['+repr(str(len(data))+':'+str(zlib.adler32(data)&0xffffffff))+']=true')
 body=r'''
@@ -17,6 +17,8 @@ local function normal(s)return s and s:gsub('\r\n','\n')end
 local function signature(s)local a,b=1,0;for i=1,#s do a=(a+s:byte(i))%65521;b=(b+a)%65521 end;return string.format('%d:%.0f',#s,b*65536+a)end
 local binding=read('/home/bec_v2/lib/ochd_bindings.lua')
 assert(binding and binding:find('BEC_BULK_SLOTS_10',1,true),'十口网页需要同步升级绑定模块，请运行 update_bulk10.lua；未修改原网页')
+local session=read('/home/bec_v2/lib/web_session.lua');local entry=read('/home/bec_v2/web.lua')
+assert(session and session:find('BEC_COMPONENT_PICKER_1',1,true)and entry and entry:find('scan_components',1,true),'当前网页需要组件识别后端，请先运行 update_discovery.lua；原网页未改')
 local previous=assert(read(target),'需要已安装V2网页；不要用于V1')
 if normal(previous)==SOURCE then print('网页启动反馈修复已安装。');return end
 assert(SUPPORTED[signature(normal(previous))],'网页有未知本地修改，保留原文件，不覆盖')
