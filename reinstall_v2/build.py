@@ -12,6 +12,8 @@ def literal(s):
     raise ValueError('delimiter collision')
 
 def build():
+    from build_web import build as build_web
+    build_web()
     entries=[]; manifest={}
     for p in sorted((HERE/'files').rglob('*')):
         if not p.is_file():continue

@@ -9,14 +9,14 @@ ROOT=HERE.parents[1]
 TREE=ast.parse((HERE/'test_install.py').read_text(encoding='utf-8'))
 SETUP=next(n.value.value for n in TREE.body if isinstance(n,ast.Assign)and any(isinstance(t,ast.Name)and t.id=='SETUP'for t in n.targets))
 SCRIPT=(HERE.parent/'update_reads.lua').read_text(encoding='utf-8')
-NAMES=['lib/bridge.lua','runtime/controller.lua','lib/engine.lua','runtime/nanites_cell.lua','lib/config.lua']
+NAMES=['lib/bridge.lua','runtime/controller.lua','lib/engine.lua','runtime/nanites_cell.lua','lib/config.lua','main.lua']
 BASE={name:subprocess.check_output(['git','show','549df6e:reinstall_v2/files/'+name],cwd=ROOT).decode('utf-8')for name in NAMES}
 
 def fixture():
  l=LuaRuntime(unpack_returned_tuples=True);l.execute(SETUP)
  for name,raw in BASE.items():l.globals().files['/home/bec_v2/'+name]=raw
  l.execute(r'''
-files['/home/bec_v2/main.lua']='main';files['/home/bec_v2/config.dat']='config-keep';files['/home/bec_v2/state/node-1/production.journal']='pending-keep'
+files['/home/bec_v2/config.dat']='config-keep';files['/home/bec_v2/state/node-1/production.journal']='pending-keep'
 local cfg={nodes={{address='node',redstone='pause',pauseSide=1}},groups={{generators={'gen'},nanites={enabled=true,mode='cell-io',loadRedstone='load',returnRedstone='return',loadOutputSide=0,returnOutputSide=0,loadSide=3,returnSide=2,transposer='bee'}}}}
 function loadfile(p)assert(p=='/home/bec_v2/lib/config.lua');return function()return {load=function()return cfg end,validate=function()return true end,path=function(p)return '/home/bec_v2/'..p end,read=function()return journalBusy and {stage='moving-cell'}or nil end}end end
 local c={invoke=function(a,m,...)

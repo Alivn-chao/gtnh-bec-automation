@@ -2,7 +2,11 @@ local ROOT='/home/bec_v2'
 local function module(name)return assert(loadfile(ROOT..'/lib/'..name..'.lua'))()end
 local C=module('config')
 local mode,option=...
-mode=mode or 'monitor'
+if not mode then
+ for _ in require('component').list('hd_panel',true)do mode='web';break end
+ mode=mode or 'monitor'
+end
+if mode=='web'then assert(loadfile(ROOT..'/web.lua'))();return end
 if mode=='setup-hd'then assert(loadfile(ROOT..'/setup_hd.lua'))();return end
 if mode=='reports'then assert(loadfile(ROOT..'/report_setup.lua'))();return end
 if mode=='scan'then module('scan')();return end

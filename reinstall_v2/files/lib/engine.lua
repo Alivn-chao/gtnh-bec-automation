@@ -20,6 +20,8 @@ return function(cfg,C,Bridge,monitor)
   reports=ok and result or {status="报告初始化失败，生产日志保留",step=function()end,close=function()end,capture=function()end}
  end
  E.reports=reports
+ local storage,nextDiskCheck
+ if not monitor and require('filesystem').get then storage=assert(loadfile(C.path('lib/storage.lua')))()(C);nextDiskCheck=0 end
  function E.reportFault(i,reason)
   if reports then local ok=pcall(reports.capture,i,E,reason);if not ok then reports.status="故障报告保存失败，现场日志保留" end end
  end
@@ -140,6 +142,12 @@ return function(cfg,C,Bridge,monitor)
  end
  function E.step()
   if monitor then return end
+  if storage and clock.uptime()>=(nextDiskCheck or 0)then
+   storage.prune(cfg);E.disk=storage.status();nextDiskCheck=clock.uptime()+10
+   if not E.disk.known or not E.disk.ok then
+    E.diskLow=true;E.pauseAll();E.log(1,'磁盘空间不足或不可读：停止接单，保留当前日志，需腾出至少512KiB')
+   else E.diskLow=false end
+  end
   if reports then
    reports.step()
    if E.reportStatus~=reports.status then E.reportStatus=reports.status;E.log(1,reports.status)end

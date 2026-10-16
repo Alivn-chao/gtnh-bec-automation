@@ -5,17 +5,19 @@ from build import literal
 HERE=Path(__file__).resolve().parent
 ROOT=HERE.parent
 BASE='549df6e'
-NAMES=['lib/bridge.lua','runtime/controller.lua','lib/engine.lua','runtime/nanites_cell.lua','lib/config.lua']
+NAMES=['lib/bridge.lua','runtime/controller.lua','lib/engine.lua','runtime/nanites_cell.lua','lib/config.lua','lib/storage.lua','main.lua','web.lua','lib/web_session.lua','lib/web_json.lua','lib/web_page.html']
+PREVIEW3={'lib/bridge.lua': '14885:2931246636', 'lib/engine.lua': '9855:1405689683', 'lib/config.lua': '7134:2524978389', 'runtime/controller.lua': '36893:1553718572'}
 PREVIEW21={'lib/bridge.lua': '14572:3934966185', 'lib/engine.lua': '8215:3066878477'}
 PREVIEW2={'lib/bridge.lua':'14483:790541300'}
 PREVIEW1={'lib/bridge.lua': '13410:2517241504', 'runtime/controller.lua': '36384:3281062855'}
 rows=[]
 for name in NAMES:
- before=subprocess.check_output(['git','show',BASE+':reinstall_v2/files/'+name],cwd=ROOT).decode('utf-8')
+ result=subprocess.run(['git','show',BASE+':reinstall_v2/files/'+name],cwd=ROOT,capture_output=True)
+ before=result.stdout.decode('utf-8')if result.returncode==0 else None
  source=(HERE/'files'/name).read_text(encoding='utf-8')
- rows.append('{path="/home/bec_v2/'+name+'",preview1="'+PREVIEW1.get(name,'')+'",preview2="'+PREVIEW2.get(name,'')+'",preview21="'+PREVIEW21.get(name,'')+'",before='+literal(before)+',source='+literal(source)+'}')
+ rows.append('{path="/home/bec_v2/'+name+'",preview1="'+PREVIEW1.get(name,'')+'",preview2="'+PREVIEW2.get(name,'')+'",preview21="'+PREVIEW21.get(name,'')+'",preview3="'+PREVIEW3.get(name,'')+'",added='+('true'if before is None else 'false')+',before='+(literal(before)if before is not None else 'nil')+',source='+literal(source)+'}')
 BODY=r'''
-print('BEC V2 batch admission control preview 3; stop the running UI with Q first.')
+print('BEC V2 OCHD integrated studio preview 4; stop the running UI with Q first.')
 local fs=require('filesystem')
 local function read(p)local f=io.open(p,'r');if not f then return end;local s=f:read('*a');f:close();return s end
 local function normal(s)return s and s:gsub('\r\n','\n')end
@@ -23,10 +25,11 @@ local function signature(s)local a,b=1,0;for i=1,#s do a=(a+s:byte(i))%65521;b=(
 assert(fs.exists('/home/bec_v2/main.lua'),'仅支持已安装的V2')
 local originals,identical={},true
 for i,row in ipairs(files)do
- assert(load(row.source,'@'..row.path,'t',_ENV),'更新文件语法错误')
- originals[i]=assert(read(row.path),'缺少V2程序: '..row.path)
+ if row.path:sub(-4)=='.lua'then assert(load(row.source,'@'..row.path,'t',_ENV),'更新文件语法错误')end
+ originals[i]=read(row.path)
+ assert(originals[i]or row.added,'缺少V2程序: '..row.path)
  local current=normal(originals[i])
- assert(current==normal(row.before)or current==normal(row.source)or row.preview1~=''and signature(current)==row.preview1 or row.preview2~=''and signature(current)==row.preview2 or row.preview21~=''and signature(current)==row.preview21,'程序与支持版本不符，保留本地修改: '..row.path)
+ assert(row.added and current==nil or current==normal(row.before)or current==normal(row.source)or row.preview1~=''and signature(current)==row.preview1 or row.preview2~=''and signature(current)==row.preview2 or row.preview21~=''and signature(current)==row.preview21 or row.preview3~=''and signature(current)==row.preview3,'程序与支持版本不符，保留本地修改: '..row.path)
  if current~=normal(row.source)then identical=false end
 end
 if identical then print('读取优化已安装，无需更新。');return end
@@ -74,7 +77,7 @@ for i,row in ipairs(files)do assert(read(row.path)==originals[i],'更新期间�
 local retired,installed={},{}
 local ok,err=pcall(function()
  for i,row in ipairs(files)do
-  assert(fs.rename(row.path,row.path..'.before-read-opt-'..n),'备份失败');retired[i]=true
+  if originals[i]then assert(fs.rename(row.path,row.path..'.before-read-opt-'..n),'备份失败');retired[i]=true end
   assert(fs.rename(row.path..'.read-opt-new-'..n,row.path),'安装失败');installed[i]=true
   assert(read(row.path)==row.source,'安装回读失败')
  end

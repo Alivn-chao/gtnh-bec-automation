@@ -37,13 +37,14 @@ local function field() assert(call(STORAGE, "isWorkAllowed") == true, "约束场
 for _, n in pairs(v) do integer(n) end return v end local function writeVerified(path, contents)
 local f = assert(io.open(path, "w")) local ok, err = f:write(contents) local flushed, flushErr = f:flush() f:close()
 assert(ok and flushed, tostring(err or flushErr or "日志写入失败")) local r = assert(io.open(path, "r")) local actual = r:read("*a"); r:close() assert(actual == contents and type(ser.unserialize(actual)) == "table", "日志回读失败")
-end local function save(stage) record.stage = stage if fs.exists(JOURNAL) then
+end local function save(stage) if BEC_V2_PHASE then BEC_V2_PHASE(stage)end record.stage = stage if fs.exists(JOURNAL) then
 local f = assert(io.open(JOURNAL, "r")) local old = f:read("*a"); f:close() writeVerified(JOURNAL .. ".previous", old) end
 writeVerified(JOURNAL, ser.serialize(record, false)) end local function pause(value) call(RS, "setOutput", sides.top, value)
 assert(call(RS, "getOutput", sides.top) == value, "红石输出回读不符") end local function generator(enabled) call(GEN, "setWorkAllowed", enabled)
 assert(call(GEN, "isWorkAllowed") == enabled, "纠缠装置启停回读不符") end local function switchNanites()
 local needed=call(NODE,"getRequiredTier");needed=type(needed)=="table" and needed.tier or needed
 if type(needed)~="number" then return end
+if BEC_V2_PHASE then BEC_V2_PHASE("nanites")end
 local started=computer.uptime();print("检查蜂群 / 准备换盘")
 NANITES.ensure({tick=tick,stopping=function() return stopping end})
 print(string.format("蜂群检查/换盘完成：%.2f 秒",computer.uptime()-started))
@@ -58,7 +59,7 @@ local actual=call(GATE,"getCondensateFilters") assert(type(actual)=="table" and 
 assert(call(GATE,"isMachineActive")==true,"麦克斯韦门未运行；检查结构和供电，保持暂停") end local function gateNodeState(full)
 if type(BEC_V2_GATE_STATE)=="function" then return BEC_V2_GATE_STATE(full) end
 return call(NODE,"getState") end
-local function configureGate(required) local started=computer.uptime();print("配置韦门 / 三轮回读")
+local function configureGate(required) if BEC_V2_PHASE then BEC_V2_PHASE("gate")end local started=computer.uptime();print("配置韦门 / 三轮回读")
 assert(call(RS,"getOutput",sides.top)==15 and gateNodeState(true)=="paused-immediate",
 "切换门过滤前节点必须立即暂停") local expected=gateFilters(required) assert(integer(call(GATE,"getCondensateFilterCount"))>=#expected,"麦克斯韦门过滤槽不足") local actual=call(GATE,"getCondensateFilters")
 assert(type(actual)=="table","麦克斯韦门过滤不可读") record.gateIntent={address=GATE,filters=expected};save(record.stage) if not same(actual,expected) then call(GATE,"setCondensateFilters",expected) end for i=1,3 do
@@ -159,7 +160,7 @@ if stopping then break end local expected=prepareStreaming(target) if stopping t
 save("converting");generator(true) local conversionLimit=180 for name,need in pairs(target) do conversionLimit=conversionLimit+math.ceil(need/(units[name] or 144))*180 end waitUntil(conversionLimit,function()
 local stock=field() for name,need in pairs(target) do if (stock[name] or 0)<need then return false end end return true end,unchanged)
 unchanged();generator(false) record.plan=nil;record.lastState=nil;save("watching") if not stopping then verifyGate(filters);unchanged()
-pause(0) print("整批流体齐备，已连续放行；本组同配方节点已同时放行。按 Q 停止。") local releasedAt=computer.uptime() local deadline=releasedAt+600
+if BEC_V2_PHASE then BEC_V2_PHASE("producing")end pause(0) print("整批流体齐备，已连续放行；本组同配方节点已同时放行。按 Q 停止。") local releasedAt=computer.uptime() local deadline=releasedAt+600
 local lastStock=field() local lastRequired=record.required local nextQueueCheck=0 while not stopping do
 local v=call(NODE,"getState") local stock=field() local req=call(NODE,"getRequiredCondensate") verifyGate(filters)
 local needed=call(NODE,"getRequiredTier");needed=type(needed)=="table" and needed.tier or needed

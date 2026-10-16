@@ -178,6 +178,7 @@ function M.environment(cfg,index,engine)
  -- Explicit logical read only: always scans every member anew, never memoizes
  -- across a yield, component call, or hardware mutation. This is not an OC API
  -- or an atomic server-side snapshot.
+ env.BEC_V2_PHASE=function(stage)if engine.phase then engine.phase(index,stage)end end
  env.BEC_V2_NODE_SNAPSHOT=nodeSnapshot
  -- Gate setup validates the complete recipe once before writing, then checks
  -- every member's actual pause state/output in each of the three readbacks.

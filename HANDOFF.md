@@ -1,3 +1,5 @@
+2026-10-16 用户要求先上传、晚上再继续。OCHD 一体化开发分支 feat/v2-ochd-studio，详见 reinstall_v2/OCHD_PROGRESS.md。已接网页绑定/草稿/应用/启动/暂停/真实engine状态和阶段耗时、512KiB磁盘保护；104项模拟测试通过，未Minecraft实测，阶段同名保存重置显示仍待修正。保留所有未确认记录，不当完成版。继续前先看进度文档。
+
 2026-10-16 用户要求把 V1 批次启停同步到 V2。engine 新增 nodeWork，pending/confirmed 独立 batch-stop.dat 并回读；同组工作器开始前全部节点暂停并关闭工作许可，bridge 放行前验证整组 workAllowed=false，当前批继续、已完成节点不能提前接单。正常 cohort stopped 收尾后才在 RS15 下允许 idle 节点重新接单；interrupted cohort/旧生产日志未经核对不重开；暂停/故障/退出关闭节点接单。config live 要求绑定节点具备 setWorkAllowed/isWorkAllowed（false 方法标志有效），缺失拒绝放行。新硬件模型尊重节点启停，未实机安装/验证。
 
 2026-10-16 用户要求从节点读入A到不同B产出完整计时。新增tests/two_recipe_world.lua+simulate_two_recipes.py，真实V2 Lua核心+20TPS硬件事件模型，合成A玻璃288金属288/T4加工假设10s、B玻璃576无尽288/T5加工15s，IO2s/转换3s、5高速口、27/243箱、API延迟0/1/5/10ms。零API时两版49.15s；受控外部投料+1ms时旧52.85s/新51.60s。快速后一tick投料+非零延迟两版会因旧组收尾前新单触发保护，无二次产出；受控5/10ms亦有跨getter完成时tier=nil一致性误报，5ms新版B59.65s已产出随后暂停，10ms未到B。没有绕过保护/假装健康完成，也未实现外部投料门控，必须修交接与读数一致性后才可承诺实机连续生产时间。另实际登记文件测试发现bridge只映射配方目录检查未映射打开.dat前缀；已补该路径映射，update_reads支持旧preview2桥接签名14483:790541300，版本2.1；91 unittest+20核心通过。outputs/two_recipe_sim/REPORT.md和results.json保留全部成功/失败时序与假设，未更改用户游戏。

@@ -1,5 +1,12 @@
 BEC V2 全新安装 / OpenOS
 
+OCHD 三维绑定与自动化流程（开发预览）：
+lua /home/bec_v2/main.lua web
+连接 OCHD 时无参数运行 main.lua 也会打开此页。
+点击机器填写地址自动暂存；应用绑定校验后再启动。Q 退出并暂停。
+显示阶段/批次时间、机器回读和磁盘空间；剩余不足512KiB停止接单。
+当前未实机验证，不用于无人值守；原加工样板仍需按下方步骤登记。
+
 普通屏配置：lua /home/bec_v2/main.lua setup
 OCHD配置：lua /home/bec_v2/main.lua setup-hd
 
