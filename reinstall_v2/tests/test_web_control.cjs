@@ -3,7 +3,7 @@ const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('nod
 const source=fs.readFileSync(path.join(__dirname,'../web/control.js'),'utf8');
 function fixture(){
  const elements=new Map(),sent=[];
- function el(id){if(!elements.has(id))elements.set(id,{textContent:'',innerHTML:'',disabled:false,dataset:{},options:[],value:'',classList:{toggle(){}},querySelector:()=>el('child'),querySelectorAll:()=>[],appendChild(){},insertBefore(){},addEventListener(){},showModal(){},close(){}});return elements.get(id);}
+ function el(id){if(!elements.has(id))elements.set(id,{textContent:'',innerHTML:'',disabled:false,dataset:{},options:[],value:'',classList:{toggle(){}},querySelector:()=>el('child'),querySelectorAll:()=>[],appendChild(){},insertBefore(){},addEventListener(){},setAttribute(){},showModal(){},close(){}});return elements.get(id);}
  const imports=[],scene={modules:[{id:'node-1',kind:'node',role:'node'},{id:'generator',kind:'generator',role:'generator',p:[164,6,6],center:[180,15,15],marker:[164,15,15]}],onRender(){},request(){}},app={scene,importDraft(d){imports.push(d);},getDraft(){return{};}};
  const context={window:{BEC_APP:app},document:{getElementById:el,querySelector:el,querySelectorAll:()=>[],createElement:el,body:el('body'),activeElement:{tagName:'INPUT'}},OC:{emit(name,args){return new Promise((resolve,reject)=>sent.push({name,args,resolve,reject}));},onData(){}},setInterval(){},Date,Promise,console};
  context.window.OC=context.OC;vm.createContext(context);vm.runInContext(source,context);
@@ -42,5 +42,20 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
  assert.equal(f.scene.modules.filter(m=>m.kind==='generator').length,4,'another group must not expose unsupported leftover fields');
  f=fixture();f.scene.modules.push({id:'bulk-transposer-10',kind:'peripheral',role:'bulk'});f.snapshot('1');
  f.context.window.BEC_BINDING_DIRTY({modules:{'bulk-transposer-10':{address:'tenth'}}});assert.equal(f.sent[0].args.key,'g1.bulk10');
- console.log('Page save races and model binding: 9 scenarios passed');
+ const valid={'mainInterface':'11111111-1111-1111-1111-111111111111','recipeDirectory':'/home/bec_v2/recipes','g1.storage':'22222222-2222-2222-2222-222222222222','g1.subInterface':'33333333-3333-3333-3333-333333333333','g1.transposer':'44444444-4444-4444-4444-444444444444','g1.generator1':'55555555-5555-5555-5555-555555555555','g1.mainSide':'4','g1.subSide':'5','g1.gate':'66666666-6666-6666-6666-666666666666','n1.address':'77777777-7777-7777-7777-777777777777','n1.redstone':'88888888-8888-8888-8888-888888888888'};
+ f=fixture();f.snapshot('1',valid, {configured:false});
+ assert.equal(f.el('start-run').disabled,false);
+ f.el('start-run').onclick();assert.equal(f.sent.length,0);assert.match(f.el('action-feedback').textContent,/尚未应用绑定/);
+ f.el('apply-config').onclick();assert.equal(f.sent[0].name,'apply_bindings');assert.equal(f.el('apply-config').disabled,true);
+ f.el('apply-config').onclick();assert.equal(f.sent.length,1);
+ f.sent[0].reject(Error('纠缠器地址无效'));await flush();assert.match(f.el('action-feedback').textContent,/应用绑定失败.*纠缠器地址无效/);
+ f.snapshot('2',valid, {configured:false});assert.match(f.el('action-feedback').textContent,/纠缠器地址无效/);
+ f.el('apply-config').onclick();f.sent[1].resolve({message:'绑定校验通过'});await flush();f.snapshot('3',valid);
+ f.el('start-run').onclick();assert.equal(f.sent[2].name,'start');f.sent[2].reject(Error('节点仍在工作'));await flush();assert.match(f.el('action-feedback').textContent,/启动失败.*节点仍在工作/);
+ f=fixture();f.context.document.activeElement.tagName='BODY';f.snapshot('1',{'n1.gate':'12345678-1234-1234-1234-123456789abc'});assert.equal(f.imports.at(-1).modules['node-1'].gate,'12345678-1234-1234-1234-123456789abc');
+ f=fixture();f.snapshot('1');f.el('apply-config').onclick();assert.equal(f.sent.length,0);assert.match(f.el('binding-issues-list').innerHTML,/主网供液.*未填写/);assert.match(f.el('binding-issues-list').innerHTML,/至少填写一组传送节点/);
+ f.snapshot('2',valid);assert.equal(f.context.window.BEC_CONTROL.issues().length,0,'blank optional ports and nodes are allowed');
+ f.snapshot('3',Object.assign({},valid,{'g1.gate':'','n1.gate':'99999999-9999-9999-9999-999999999999'}));assert.equal(f.context.window.BEC_CONTROL.issues().length,0,'independent node gate replaces group gate');
+ f.snapshot('4',Object.assign({},valid,{'g1.bee_transposer':'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','g1.bee_bankSide':'0','g1.bee_loadSide':'3','g1.bee_returnSide':'2'}));assert.equal(f.context.window.BEC_CONTROL.issues().filter(x=>/端口红石/.test(x.label)).length,2);
+ console.log('Page save races, action feedback and binding checklist: 16 scenarios passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

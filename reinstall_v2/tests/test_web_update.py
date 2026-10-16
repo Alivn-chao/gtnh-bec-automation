@@ -20,6 +20,9 @@ class WebUpdateTests(unittest.TestCase):
   self.assertEqual(l.globals().files[TARGET+'.before-input-1'],OLD)
   for name,text in [('config.dat','incomplete-keep'),('bindings.draft.dat','draft-keep'),('state/node-1/production.journal','pending-keep')]:self.assertEqual(l.globals().files['/home/bec_v2/'+name],text)
   count=l.globals().count;l.execute(SCRIPT);self.assertEqual(l.globals().count,count)
+ def test_ten_port_release_can_update(self):
+  l=fixture();l.globals().files[TARGET]=subprocess.check_output(['git','show','933750b:reinstall_v2/files/lib/web_page.html'],cwd=HERE.parent).decode();l.execute(SCRIPT)
+  self.assertEqual(l.globals().files[TARGET],(HERE/'files/lib/web_page.html').read_text(encoding='utf-8'))
  def test_unknown_html_is_not_overwritten(self):
   l=fixture();l.globals().files[TARGET]='custom'
   with self.assertRaisesRegex(Exception,'未知本地修改'):l.execute(SCRIPT)
