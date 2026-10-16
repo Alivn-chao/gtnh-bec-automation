@@ -1,3 +1,5 @@
+2026-10-17 .1 同步解决旧固定文案「连接状态尚未检测」：地址格式通过后明确提示点击顶部应用绑定，由OC校验连接；不把格式通过说成硬件检测成功。更新器新增180bf41精确签名；发布bec-v2-web-start-2026-10-17.1。
+
 2026-10-17 修复网页启动/应用无可见反馈：顶部固定状态条显示未应用/请求中/完整ack失败且快照不覆盖；防重复请求。应用前当前设备组缺项清单（主网/约束场/子网/供液/至少一纠缠器、节点+红石+独立或组韦门、启用蜂群三项完整、方向冲突、UUID），点击跳到模型并聚焦；空节点/可选项允许。节点gate回填保留字符串，避免NaN丢失。HTML-only update_web支持933750b，保留配置草稿日志；全包/其它更新器同步新HTML与933签名。124 Python/Lua+20原核心、16 JS及实际CEF原生点击清单/跳转焦点/Apply拒绝/错误持续/重试/Start事件通过，非Minecraft硬件验证。发布tag bec-v2-web-start-2026-10-17。
 
 2026-10-17 用户纠正高速供液需10个。扩lib/ochd_bindings默认bulk字段/解析至10（大规模16组字段532所以内部catalog上限1024，web快照仍512/16KiB），旧draft缺6–10默认空/前5保留；web_session状态1–10，模型第二排6–10，standalone tools/bec-binding也扩JSON导出10。核心原本遍历all，无需改运行逻辑；真实Lua两配方世界增10口并断言bulk10实际搬无限，旧5口场景保留。新3文件update_bulk10.lua（bindings/session/html）支持334/81/f60精确签名，partial配置可用，无hardware读写，stage/备份/回读/任何rename失败回滚/512KiB guard。HTML-only update_web增加backend10marker检查防只换页面；update_reads包含第12文件bindings并支持f60，full/install/legacybinding包生成。123unittest+20原核心、9JS和实际CEF点第10模型粘贴g1.bulk10且前1保留通过，非实机。新tag bec-v2-bulk10-2026-10-17，命令BULK10.md；OC网页填6–10后应用，不再换客户端patch。

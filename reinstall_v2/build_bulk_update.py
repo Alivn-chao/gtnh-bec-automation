@@ -7,7 +7,7 @@ NAMES=['lib/ochd_bindings.lua','lib/web_session.lua','lib/web_page.html']
 rows=[]
 for name in NAMES:
  signatures=[]
- for ref in ['334125a','81b7724','f60f785','933750b']:
+ for ref in ['334125a','81b7724','f60f785','933750b','180bf41']:
   data=subprocess.check_output(['git','show',ref+':reinstall_v2/files/'+name],cwd=HERE.parent)
   signatures.append('['+repr(str(len(data))+':'+str(zlib.adler32(data)&0xffffffff))+']=true')
  rows.append('{name='+repr(name)+',source='+literal((HERE/'files'/name).read_text(encoding='utf-8'))+',supported={'+','.join(signatures)+'}}')

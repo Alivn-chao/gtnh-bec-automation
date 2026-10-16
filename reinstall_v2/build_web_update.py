@@ -6,7 +6,7 @@ from build import literal
 HERE=Path(__file__).resolve().parent
 source=(HERE/'files/lib/web_page.html').read_text(encoding='utf-8')
 signatures=[]
-for ref in ['334125a','81b7724','f60f785','933750b']:
+for ref in ['334125a','81b7724','f60f785','933750b','180bf41']:
  data=subprocess.check_output(['git','show',ref+':reinstall_v2/files/lib/web_page.html'],cwd=HERE.parent)
  signatures.append('['+repr(str(len(data))+':'+str(zlib.adler32(data)&0xffffffff))+']=true')
 body=r'''

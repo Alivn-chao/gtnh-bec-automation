@@ -7,7 +7,7 @@
 先在 OC 按 Q 退出旧网页，再逐行执行：
 
 ```sh
-wget -f https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/bec-v2-web-start-2026-10-17/reinstall_v2/update_web.lua /home/bec_web_update.lua
+wget -f https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/bec-v2-web-start-2026-10-17.1/reinstall_v2/update_web.lua /home/bec_web_update.lua
 lua /home/bec_web_update.lua
 lua /home/bec_v2/main.lua web
 ```
@@ -15,3 +15,5 @@ lua /home/bec_v2/main.lua web
 只更新网页，备份旧文件；不改地址、草稿、配方或运行记录，不启动机器。需要已安装十口绑定模块；若提示先运行 update_bulk10.lua，用本标签下同名更新器，随后重新打开网页。
 
 124 项 Python/Lua 回归与原核心 20 场景、16 项 JS 场景及实际 CEF 原生点击、缺项清单跳转、失败提示和重试验证通过；尚未 Minecraft 现场验证。
+
+「连接状态尚未检测」是旧页面固定文案；新页面明确提示点击顶部「应用绑定」触发 OC 校验。地址 UUID 格式正确并不代表设备在线。
