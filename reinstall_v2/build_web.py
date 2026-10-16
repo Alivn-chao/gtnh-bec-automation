@@ -6,6 +6,9 @@ def build():
  html=(HERE/'web/structure-base.html').read_text(encoding='utf-8')
  html=html.replace('refreshStatus();}\nfunction refreshStatus','refreshStatus();if(window.BEC_BINDING_DIRTY)window.BEC_BINDING_DIRTY(draft);}\nfunction refreshStatus',1)
  assert 'window.BEC_BINDING_DIRTY(draft)'in html
+ # Notify the OC queue immediately, including direction buttons. A snapshot
+ # arriving during the local 300-ms debounce must not overwrite the edit.
+ html=html.replace('function save(){clearTimeout(timer);','function save(){clearTimeout(timer);if(window.BEC_BINDING_DIRTY)window.BEC_BINDING_DIRTY(draft);',1)
  # Runtime work indication is separate from the selected-module highlight.
  html=html.replace("m.id===self.hovered?.45:0", "m.id===self.hovered?.45:(self.liveStates&&self.liveStates[m.id]==='active'?.7:0)")
  html=html.replace('</head>','<style>'+(HERE/'web/control.css').read_text(encoding='utf-8')+'</style></head>',1)

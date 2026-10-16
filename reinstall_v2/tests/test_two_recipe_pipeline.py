@@ -14,6 +14,13 @@ class PipelineSimulationTests(unittest.TestCase):
   r=run(latency_ms=1);self.assertIsNone(r['error']);self.assertTrue(r['healthy_completion'])
   self.assertEqual(len(r['outputs']),2)
   self.assertTrue(any(e['kind']=='node-work-allowed'for e in r['events']))
+ def test_completion_between_component_getters_preserves_proof_and_runs_next_recipe(self):
+  for bank in [27,243]:
+   for latency in [5,10,20]:
+    with self.subTest(bank=bank,latency=latency):
+     r=run(bank_size=bank,latency_ms=latency)
+     self.assertIsNone(r['error']);self.assertTrue(r['healthy_completion'])
+     self.assertEqual(len(r['outputs']),2)
  def test_original_default_directory_failure_is_recorded(self):
   r=run(baseline=True,force_v2_directory=True);self.assertIsNotNone(r['error']);self.assertFalse(r['second_product_output'])
 if __name__=='__main__':unittest.main()

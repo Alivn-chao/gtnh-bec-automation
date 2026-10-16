@@ -57,6 +57,26 @@ assert(C.read(C.path('state/group-1/cohort.dat')).stage=='stopped')
     return {'node_getter_calls':int(lua.globals().nodeReads),'simulated_seconds':round(float(lua.globals().s.now),2),'releases':int(lua.globals().releaseCount)}
 
 class ReadOptimizationTests(unittest.TestCase):
+    def test_cross_getter_completion_still_requires_consumption_and_closed_admission(self):
+        for closed,consumed,accepted in [(True,True,True),(True,False,False),(False,True,False)]:
+            with self.subTest(closed=closed,consumed=consumed):
+                lua=fixture();lua.execute('configure(1);'+CAPTURE)
+                lua.globals().closed=closed;lua.globals().completeConsumption=consumed
+                lua.execute(r'''
+E.tasks[1].released=true
+local c=require('component');local invoke=c.invoke;local reads=0
+c.invoke=function(a,m,...)
+ if a=='node1'then
+  if m=='getState'then reads=reads+1;return reads==1 and 'crafting'or 'idle'end
+  if m=='getRequiredTier'then return nil end
+  if m=='isWorkAllowed'then return not closed end
+  if m=='getConsumedCondensate'then return completeConsumption and nodes.node1.required or {}end
+ end
+ return invoke(a,m,...)
+end
+accepted=pcall(captured.BEC_V2_NODE_SNAPSHOT)
+''')
+                self.assertEqual(lua.globals().accepted,accepted)
     def test_idle_scan_does_not_read_old_recipe_fields(self):
         lua=fixture();lua.execute('configure(16);for _,n in pairs(nodes)do n.done=true end;'+COUNTER+'E=factory(cfg,C,Bridge,false);E.step()')
         self.assertEqual(lua.globals().reads['getState'],32)

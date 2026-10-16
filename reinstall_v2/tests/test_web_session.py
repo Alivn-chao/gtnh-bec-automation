@@ -64,6 +64,42 @@ assert(outputs['rs1-']==15 and nodes.node1.workAllowed==false)
 H.handle('save_field',{revision=H.snapshot().revision,key='n1.address',value='partial'},109)
 local ok=pcall(H.handle,'start',{revision=H.snapshot().revision},110);assert(not ok and releaseCount==0)
 ''')
+ def test_phase_timing_ignores_same_stage_journal_saves_inside_gate_confirmation(self):
+  l=self.setup();l.execute(r'''
+H.handle('start',{revision=H.snapshot().revision},111)
+for tick=1,200 do
+ H.step();s.now=s.now+.05
+ if releaseCount==2 and not H.engine().groupOwner[1]then break end
+end
+local t=H.engine().tasks[1];assert(t.flow.gate>=.19,'gate confirmation time disappeared')
+local seen=false
+for _,row in ipairs(t.timeline)do
+ if row.phase=='gate'then seen=true
+ elseif seen then assert(row.phase~='detect','journal checkpoint reset gate to recipe detection')end
+end
+assert(seen)
+''')
+ def test_external_formal_change_cannot_start_cached_engine(self):
+  l=self.setup();l.execute(r'''
+local revision=H.snapshot().revision
+cfg.cacheTarget=999;C.write(C.path('config.dat'),cfg)
+local ok=pcall(H.handle,'start',{revision=revision},112)
+assert(not ok and not H.running and releaseCount==0)
+''')
+ def test_recent_batch_display_uses_start_time_not_node_index(self):
+  l=self.setup();l.execute(r'''
+H.handle('start',{revision=H.snapshot().revision},114)
+local e=H.engine();e.groupOwner[1]=nil
+e.tasks[1].startedAt=20;e.tasks[1].endedAt=30;e.tasks[1].phase='finish';e.tasks[1].members={1}
+e.tasks[2].startedAt=1;e.tasks[2].endedAt=4;e.tasks[2].phase='finish';e.tasks[2].members={2}
+local snapshot=H.snapshot();assert(snapshot.elapsed==10 and snapshot.leader==1)
+''')
+ def test_low_disk_draft_failure_keeps_original_draft_and_config(self):
+  l=self.setup();l.execute(r'''
+local original=s.files[C.path('config.dat')];diskUsed=4194304-100000
+local ok=pcall(H.handle,'save_field',{revision=H.snapshot().revision,key='n1.address',value='partial'},113)
+assert(not ok and s.files[C.path('config.dat')]==original and not s.files[C.path('bindings.draft.dat')])
+''')
  def test_sixteen_node_snapshot_fits_mod_limits(self):
   l=fixture();l.execute('cfg.nodes={};nodes={};outputs={};configure(16)'+SETUP)
   snapshot=l.eval('H.snapshot()')

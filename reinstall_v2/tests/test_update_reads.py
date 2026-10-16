@@ -45,6 +45,16 @@ class UpdateReadsTests(unittest.TestCase):
    self.assertEqual(l.globals().files[path+'.before-read-opt-1'],before)
    self.assertEqual(l.globals().files[path],(HERE.parent/'files'/name).read_text(encoding='utf-8'))
   writes=l.globals().count;l.execute(SCRIPT);self.assertEqual(l.globals().count,writes);self.assertPreserved(l)
+ def test_published_studio_checkpoint_upgrades_with_originals_preserved(self):
+  l=fixture()
+  names=['lib/bridge.lua','runtime/controller.lua','lib/engine.lua','runtime/nanites_cell.lua','lib/config.lua','lib/storage.lua','main.lua','web.lua','lib/web_session.lua','lib/web_json.lua','lib/web_page.html']
+  previous={name:subprocess.check_output(['git','show','334125a:reinstall_v2/files/'+name],cwd=ROOT).decode('utf-8')for name in names}
+  for name,text in previous.items():l.globals().files['/home/bec_v2/'+name]=text
+  l.execute(SCRIPT)
+  for name,text in previous.items():
+   self.assertEqual(l.globals().files['/home/bec_v2/'+name+'.before-read-opt-1'],text)
+   self.assertEqual(l.globals().files['/home/bec_v2/'+name],(HERE.parent/'files'/name).read_text(encoding='utf-8'))
+  self.assertPreserved(l)
  def test_previous_read_preview_is_accepted(self):
   l=fixture()
   bridge=BASE['lib/bridge.lua']

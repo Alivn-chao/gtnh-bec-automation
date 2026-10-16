@@ -1,7 +1,7 @@
 {
   "lib/bridge.lua": {
-    "bytes": 14972,
-    "sha256": "883ef8aa7e27f3192aa77d4fb107b05532d58acaebb0686df655d7aab691b661"
+    "bytes": 15577,
+    "sha256": "7be047808ab39a2c7056284b47de22b3741de83134818c12f1ab28ef9ae9c0e9"
   },
   "lib/config.lua": {
     "bytes": 7134,
@@ -44,12 +44,12 @@
     "sha256": "6ab7b6a9762c0a9a93a91bf0d724d1710d0009f5ecd19a9cc9b68a1d7631fd3c"
   },
   "lib/web_page.html": {
-    "bytes": 223881,
-    "sha256": "2ce614021792b7036e7c7e9226ca2994361988bb35568742089631213786344d"
+    "bytes": 226106,
+    "sha256": "21d6b7858914666ef7b55f0bab94d476c3b73b09084d46fb65e599bf89b76a3f"
   },
   "lib/web_session.lua": {
-    "bytes": 7956,
-    "sha256": "52abae080991ef63876a2c582f2116fdfebd24810e0c6734c1c1e0e7f4303083"
+    "bytes": 8356,
+    "sha256": "90b8b3ffd215532903e2de5147365442632baad91396c619181686fdfb63a1d5"
   },
   "main.lua": {
     "bytes": 2807,
@@ -60,8 +60,8 @@
     "sha256": "62af11aaee364f7bfe205ea1f4d1f4ef6ba1e6c6813e641d7733f49f6b088a23"
   },
   "runtime/controller.lua": {
-    "bytes": 37080,
-    "sha256": "9bd85a140d0e698af484de6e322c7a15db5c0feaaf120dc7479b910767c15ace"
+    "bytes": 37104,
+    "sha256": "2f8525d9a15881739adc7a771ee3a83d445653b5c8aca63813f43d9740dc20fa"
   },
   "runtime/nanites.lua": {
     "bytes": 9966,
@@ -80,8 +80,8 @@
     "sha256": "cfe5260ceff367d46ca14a911424280c24792da46aa56a97d75625a327b8b05d"
   },
   "START_HERE.txt": {
-    "bytes": 1448,
-    "sha256": "a7394648b77975360a327411a60d8e31a2ecd22c8d7340ec58d3a3b7c064178b"
+    "bytes": 1550,
+    "sha256": "039fc824a664c0aa0fa4edc4350502543aba7a7f94d0fa23a0c60fd01328af5b"
   },
   "web.lua": {
     "bytes": 2027,

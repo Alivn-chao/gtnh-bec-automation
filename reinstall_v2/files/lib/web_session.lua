@@ -31,6 +31,7 @@ return function(C,B,W,options)
    assert(type(args.group)=='number'and cfg.groups[args.group],'设备组不存在');H.group=args.group;return '已切换设备组'
   elseif name=='save_field'then
    idleEditor();assert(args.revision==revision(),'草稿已变化，请等最新快照后重试')
+   local disk=storage.status();assert(disk.known and disk.ok,'磁盘剩余空间不足或不可读，草稿未保存：至少保留512KiB')
    assert(type(args.value)=='string'and #args.value<=160 and not args.value:find('[\r\n=]'),'字段格式无效')
    local known=false;for _,f in ipairs(fields())do if f.key==args.key then known=true;break end end
    assert(known,'未知绑定字段')
@@ -44,6 +45,7 @@ return function(C,B,W,options)
    E=nil;H.started=false;H.notice='绑定已校验并应用，点击启动自动化。';return H.notice
   elseif name=='start'then
    assert(not H.running,'自动化已经运行')
+   assert(B.read(path)==expected,'正式配置已被其他程序修改，请退出页面后重新打开')
    storage.prune(cfg);local disk=storage.status()
    assert(disk.known and disk.ok,'磁盘剩余空间不足或不可读：至少保留512KiB，暂停启动并保留恢复记录')
    assert(args.revision==revision(),'绑定已变化，请等最新快照后启动')
@@ -71,7 +73,7 @@ return function(C,B,W,options)
    local seen={};for i,n in ipairs(cfg.nodes)do if not seen[n.group]then E.resumeNode(i);seen[n.group]=true end end
    H.running=true;H.notice='自动化运行中；节点按批次关闭接单，整组完成后再接下一单。';return H.notice
   elseif name=='pause'then
-   if E then E.pauseAll()end;H.running=false;H.notice='已请求暂停；工作器收尾，未确认记录保留。';return H.notice
+   H.running=false;if E then E.pauseAll()end;H.notice='已请求暂停；工作器收尾，未确认记录保留。';return H.notice
   elseif name=='refresh'then return '页面在线'
   end
   error('不支持的页面事件')
@@ -90,9 +92,11 @@ return function(C,B,W,options)
   end
   local out={mode=H.running and 'running'or 'binding',revision=revision(),values=values,group=H.group,groupCount=#cfg.groups,
    configured=expected~=nil,notice=H.notice,now=now,machines={},nodes={},flow={},timeline={},logs={},disk=storage.status()}
-  local g=cfg.groups[H.group];local selected
+  local g=cfg.groups[H.group];out.groupName=g.name or ('设备组 '..H.group);out.generatorSlots=math.max(4,#g.generators);local selected
   if E then local owner=E.groupOwner[H.group];selected=owner and E.tasks[owner]
-   if not selected then for i,n in ipairs(cfg.nodes)do if n.group==H.group and E.tasks[i].startedAt then selected=E.tasks[i]end end end
+   if not selected then for i,n in ipairs(cfg.nodes)do
+    local t=E.tasks[i];if n.group==H.group and t.startedAt and (not selected or t.startedAt>selected.startedAt)then selected=t end
+   end end
    for i=math.max(1,#E.logs-3),#E.logs do out.logs[#out.logs+1]=E.logs[i]:sub(1,300)end
   end
   if selected then

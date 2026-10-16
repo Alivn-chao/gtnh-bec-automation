@@ -27,9 +27,20 @@ function M.environment(cfg,index,engine)
    local current=c.invoke(address,'getRequiredCondensate')
    local entry=entries[i]
    assert(entry,'生产组缺少节点快照')
+   local p=type(current)=='table'and next(current)and c.invoke(address,'getParallelRecipesInProgress')or nil
+   local consumed=c.invoke(address,'getConsumedCondensate')or {}
+   local needed=c.invoke(address,'getRequiredTier');needed=type(needed)=='table'and needed.tier or needed
+   -- A batch can finish between these separate OC getters. Accept that edge
+   -- only after reading idle AND closed next-batch permission. Keep the old
+   -- requirement and consumption proof; never infer completion from nil tier.
+   if state~='idle'and(type(needed)~='number'or type(current)=='table'and next(current)and(type(p)~='number'or p<=0))then
+    if c.invoke(address,'getState')=='idle'and c.invoke(address,'isWorkAllowed')==false then
+     state='idle';current=nil;consumed=c.invoke(address,'getConsumedCondensate')or consumed
+    end
+   end
    assert(not entry.finished or state=='idle','已完成节点提前接到新订单，保持整组暂停')
    if type(current)=='table' and next(current) then
-    local p=c.invoke(address,'getParallelRecipesInProgress');assert(type(p)=='number' and p>0,'节点并行不可读')
+    assert(type(p)=='number' and p>0,'节点并行不可读')
     local normalized={};for key,value in pairs(current)do normalized[key]=value/p end
     for key,value in pairs(task.normalized)do assert(normalized[key]==value,'生产组出现不同配方，保持暂停')end
     for key,value in pairs(normalized)do assert(task.normalized[key]==value,'生产组配方类型变化')end
@@ -38,10 +49,8 @@ function M.environment(cfg,index,engine)
      entry.required=current;entry.parallel=p
     end
    end
-   local consumed=c.invoke(address,'getConsumedCondensate') or {}
    entry.consumed=entry.consumed or {}
    for key,value in pairs(consumed)do entry.consumed[key]=math.max(entry.consumed[key] or 0,value)end
-   local needed=c.invoke(address,'getRequiredTier');needed=type(needed)=='table' and needed.tier or needed
    if state~='idle' then
     snapshot.allIdle=false
     assert(type(needed)=='number'and needed==entry.tier,'组内配方蜂群等级变化，保持整组暂停')
@@ -1617,7 +1626,7 @@ Scene.prototype.cameraMatrices=function(){var c=this.camera,eye=add(c.target,[Ma
 Scene.prototype.project=function(p){var v=sub(p,this.camera.target);return{x:(dot(v,this.right)/this.halfW+1)*this.canvas.clientWidth/2,y:(1-dot(v,this.up)/this.halfH)*this.canvas.clientHeight/2,depth:dot(v,this.back)};};
 Scene.prototype.meshFor=function(m){return m.kind==='node'&&!this.fullNodes&&!(this.isolate&&this.selected===m.id)?this.markerMesh:this.meshes[m.key];};
 Scene.prototype.matrixFor=function(m){return this.meshFor(m)===this.markerMesh?modelMatrix(I,sub(m.marker,[1,1,1])):modelMatrix(m.r,m.p);};
-Scene.prototype.list=function(){var self=this;return this.modules.filter(function(m){return(!self.isolate||m.id===self.selected)&&(m.kind!=='peripheral'||self.showPeripherals||m.id===self.selected)&&(!self.onlyMissing||!self.statuses[m.id])&&(m.kind!=='node'||self.showNodes||m.id===self.selected);});};
+Scene.prototype.list=function(){var self=this;return this.modules.filter(function(m){var values=self.runtimeValues||{},assigned=Number(values['n'+m.id.slice(5)+'.group']||1);if(m.kind==='node'&&values['n'+m.id.slice(5)+'.address']&&self.runtimeGroup&&assigned!==self.runtimeGroup)return false;return(!self.isolate||m.id===self.selected)&&(m.kind!=='peripheral'||self.showPeripherals||m.id===self.selected)&&(!self.onlyMissing||!self.statuses[m.id])&&(m.kind!=='node'||self.showNodes||m.id===self.selected);});};
 Scene.prototype.draw=function(){var ratio=Math.min(window.devicePixelRatio||1,1.6),w=Math.max(1,Math.round(this.canvas.clientWidth*ratio)),h=Math.max(1,Math.round(this.canvas.clientHeight*ratio));if(this.canvas.width!==w||this.canvas.height!==h){this.canvas.width=w;this.canvas.height=h;}this.cameraMatrices();this.visibleModules=this.list();if(this.gl)this.drawGL();else this.drawCanvas(ratio);this.drawCount++;if(this.onRender)this.onRender(this);};
 Scene.prototype.pick=function(clientX,clientY){if(!this.right)return null;var rect=this.canvas.getBoundingClientRect(),x=((clientX-rect.left)/rect.width*2-1)*this.halfW,y=(1-(clientY-rect.top)/rect.height*2)*this.halfH,origin=add(this.eye,add(this.right.map(function(v){return v*x;}),this.up.map(function(v){return v*y;}))),direction=this.back.map(function(v){return-v;}),best=Infinity,hit=null,self=this;
  this.visibleModules.forEach(function(m){var matrix=self.matrixFor(m),position=[matrix[12],matrix[13],matrix[14]],delta=sub(origin,position),r=[matrix[0],matrix[4],matrix[8],matrix[1],matrix[5],matrix[9],matrix[2],matrix[6],matrix[10]],inv=[r[0],r[3],r[6],r[1],r[4],r[7],r[2],r[5],r[8]],o=transform(inv,delta),d=transform(inv,direction),size=self.meshFor(m).size,near=-Infinity,far=Infinity;
@@ -1648,13 +1657,13 @@ var $=function(id){return document.getElementById(id);},KEY='bec-structure-studi
 var uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];});}
 function toast(s){$('toast').textContent=s;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(function(){$('toast').hidden=true;},2600);}
-function safeDraft(value){if(!value||value.version!==1||!value.modules||typeof value.modules!=='object')throw Error('不是此配置台的草稿文件');var out={version:1,modules:{}};['field','generator','gate'].concat((window.BEC_PERIPHERALS||[]).map(function(m){return m.id;})).concat(Array.from({length:16},function(_,i){return'node-'+(i+1);})).forEach(function(id){var item=value.modules[id];if(!item||typeof item!=='object')return;var v={};['address','redstone'].forEach(function(k){if(typeof item[k]==='string')v[k]=item[k].slice(0,160);});if(Number.isInteger(item.group)&&item.group>=1&&item.group<=16)v.group=item.group;['pauseSide','mainSide','subSide','bankSide','loadSide','returnSide','loadOutputSide','returnOutputSide'].forEach(function(k){if(Number.isInteger(item[k])&&item[k]>=0&&item[k]<=5)v[k]=item[k];});out.modules[id]=v;});return out;}
+function safeDraft(value){if(!value||value.version!==1||!value.modules||typeof value.modules!=='object')throw Error('不是此配置台的草稿文件');var out={version:1,modules:{}};['field','generator','gate'].concat(Array.from({length:15},function(_,i){return 'generator-'+(i+2);})).concat((window.BEC_PERIPHERALS||[]).map(function(m){return m.id;})).concat(Array.from({length:16},function(_,i){return'node-'+(i+1);})).forEach(function(id){var item=value.modules[id];if(!item||typeof item!=='object')return;var v={};['address','redstone','gate'].forEach(function(k){if(typeof item[k]==='string')v[k]=item[k].slice(0,160);});if(Number.isInteger(item.group)&&item.group>=1&&item.group<=16)v.group=item.group;['pauseSide','mainSide','subSide','bankSide','loadSide','returnSide','loadOutputSide','returnOutputSide'].forEach(function(k){if(Number.isInteger(item[k])&&item[k]>=0&&item[k]<=5)v[k]=item[k];});out.modules[id]=v;});return out;}
 try{var stored=localStorage.getItem(KEY);if(stored)draft=safeDraft(JSON.parse(stored));}catch(e){/* Local draft remains usable in memory when storage is unavailable. */}
 function data(m){return draft.modules[m.id]||{};}
 function sideFields(m){return m.kind==='node'?[['pauseSide','暂停信号方向',1]]:(m.sides||[]);}
 function sideIssues(m){var v=data(m),keys=m.id==='fluid-transposer'?['mainSide','subSide']:m.id==='nanite-transposer'?['bankSide','loadSide','returnSide']:[];var values=keys.map(function(k){var f=sideFields(m).find(function(f){return f[0]===k;});return v[k]==null?f[2]:v[k];});return new Set(values).size!==values.length;}
 function complete(m){var v=data(m);return !!m.role&&uuid.test(v.address||'')&&(m.kind!=='node'||uuid.test(v.redstone||''))&&!sideIssues(m);}
-function save(){clearTimeout(timer);$('save-status').innerHTML='<i></i>正在保存草稿…';timer=setTimeout(flush,300);}
+function save(){clearTimeout(timer);if(window.BEC_BINDING_DIRTY)window.BEC_BINDING_DIRTY(draft);$('save-status').innerHTML='<i></i>正在保存草稿…';timer=setTimeout(flush,300);}
 function flush(){clearTimeout(timer);draft.updatedAt=new Date().toISOString();try{localStorage.setItem(KEY,JSON.stringify(draft));$('save-status').innerHTML='<i></i>草稿已自动保存';}catch(e){$('save-status').textContent='仅保留在本页 · 请导出草稿';}refreshStatus();if(window.BEC_BINDING_DIRTY)window.BEC_BINDING_DIRTY(draft);}
 function refreshStatus(){var n=0;scene.modules.forEach(function(m){scene.statuses[m.id]=complete(m);if(complete(m))n++;});$('binding-count').textContent=n+' / '+scene.modules.filter(function(m){return !!m.role;}).length;renderTree();scene.request();}
 function row(m){return '<button class="tree-row '+(m.id===scene.selected?'active':'')+'" data-module="'+m.id+'"><span class="module-icon">'+(m.icon||({assembler:'▤',field:'◎',generator:'◈',gate:'◇',node:'▣'})[m.kind])+'</span><span><span class="tree-title">'+esc(m.title)+'</span><span class="tree-role">'+(m.description||({assembler:'主体结构 · 16 个接入口',field:'凝聚物库存',generator:'凝聚物生成',gate:'阶段切换',node:'传送与暂停控制'})[m.kind])+'</span></span><i class="state-dot '+(complete(m)?'filled':'')+'"></i></button>';}
@@ -1669,7 +1678,7 @@ function ioGuide(m){
  }).join('')+'<p class="io-wiring-note">两端只连接蜂群收容子网，由该子网的存储总线访问蜂群仓。不要把它接到主网或备用大库。<br><br>转运器方向以转运器为准；红石输出方向以各自红石 I/O 为准，选择实际通向对应 ME-IO 的那一面。示意模型的位置不代表真实接线面。</p><button class="related-button" data-jump="nanite-transposer">配置硬盘箱 / 两端连接方向 →</button></section>';
 }
 function refreshGuide(m){var old=$('inspector-content').querySelector('.io-guide');if(old)old.outerHTML=ioGuide(m);$('inspector-content').querySelectorAll('[data-jump]').forEach(function(b){b.onclick=function(){select(b.dataset.jump);};});}
-function renderInspector(){var m=scene.modules.find(function(v){return v.id===scene.selected;}),v=data(m);$('inspector-content').innerHTML='<div class="module-summary"><span class="summary-icon">'+esc(m.icon||({assembler:'▤',field:'◎',generator:'◈',gate:'◇',node:'▣'})[m.kind])+'</span><h3>'+esc(m.title)+'</h3><p>'+esc(m.type||({assembler:'OBSERVATION ARRAY',field:'CONTAINMENT FIELD',generator:'ENTANGLEMENT GENERATOR',gate:'MAXWELL GATE',node:'TRANSFER NODE'})[m.kind])+'</p><span id="module-state" class="module-state">'+(m.role?'未填写':m.kind==='peripheral'?'转运器关联设备':'主体结构')+'</span></div>'+(m.role?'':ioGuide(m))+'<div class="properties"><div class="properties-title">'+(m.role?'地址绑定':'接入方式')+'</div>'+(m.role?addressField('设备组件地址','address',v.address)+(m.kind==='node'?addressField('暂停控制 · 红石组件','redstone',v.redstone):'')+directionFields(m,v)+(m.kind==='node'?'<div class="field"><label for="field-group">所属设备组</label><select id="field-group">'+Array.from({length:16},function(_,i){return '<option value="'+(i+1)+'" '+((v.group||1)===i+1?'selected':'')+'>设备组 '+String(i+1).padStart(2,'0')+'</option>';}).join('')+'</select></div>':'')+'<div id="validation-state" class="validation-state">草稿允许留空，填写时自动保存。</div>':'<p class="section-note">'+esc(m.note||'观测阵列提供 16 个传送节点接入口。V2 通过节点地址配置，主体没有独立地址字段。')+'</p><button id="related-node" class="related-button">'+(m.related?'配置蜂群硬盘转运器':'配置传送节点 01')+' →</button>')+'</div>'+(m.role?ioGuide(m):'')+'<div class="module-metadata"><div class="properties-title">'+(m.kind==='peripheral'?'外设信息':'模型信息')+'</div><div class="metadata-row"><span>显示方式</span><b>'+(m.kind==='peripheral'?'放大方块示意':'官方主体结构')+'</b></div><div class="metadata-row"><span>结构方块</span><b>'+scene.meshes[m.key].blocks.toLocaleString()+'</b></div><div class="metadata-row"><span>转运方案</span><b>ME-IO</b></div>'+(m.role?'<div class="metadata-row role"><span>V2 字段</span><code>'+esc(m.role)+'</code></div>':'')+'</div><p class="section-note">'+(m.kind==='peripheral'?'外设位置为便于点选的配置示意；接线方向以游戏内实际设备为准。':'模型间距和节点位置用于界面展示。实际搭建与端口方向以游戏内机器为准。')+'</p>';
+function renderInspector(){var m=scene.modules.find(function(v){return v.id===scene.selected;}),v=data(m);$('inspector-content').innerHTML='<div class="module-summary"><span class="summary-icon">'+esc(m.icon||({assembler:'▤',field:'◎',generator:'◈',gate:'◇',node:'▣'})[m.kind])+'</span><h3>'+esc(m.title)+'</h3><p>'+esc(m.type||({assembler:'OBSERVATION ARRAY',field:'CONTAINMENT FIELD',generator:'ENTANGLEMENT GENERATOR',gate:'MAXWELL GATE',node:'TRANSFER NODE'})[m.kind])+'</p><span id="module-state" class="module-state">'+(m.role?'未填写':m.kind==='peripheral'?'转运器关联设备':'主体结构')+'</span></div>'+(m.role?'':ioGuide(m))+'<div class="properties"><div class="properties-title">'+(m.role?'地址绑定':'接入方式')+'</div>'+(m.role?addressField('设备组件地址','address',v.address)+(m.kind==='node'?addressField('暂停控制 · 红石组件','redstone',v.redstone)+addressField('独立韦门 · 可空，使用组韦门','gate',v.gate):'')+directionFields(m,v)+(m.kind==='node'?'<div class="field"><label for="field-group">所属设备组</label><select id="field-group">'+Array.from({length:16},function(_,i){return '<option value="'+(i+1)+'" '+((v.group||1)===i+1?'selected':'')+'>设备组 '+String(i+1).padStart(2,'0')+'</option>';}).join('')+'</select></div>':'')+'<div id="validation-state" class="validation-state">草稿允许留空，填写时自动保存。</div>':'<p class="section-note">'+esc(m.note||'观测阵列提供 16 个传送节点接入口。V2 通过节点地址配置，主体没有独立地址字段。')+'</p><button id="related-node" class="related-button">'+(m.related?'配置蜂群硬盘转运器':'配置传送节点 01')+' →</button>')+'</div>'+(m.role?ioGuide(m):'')+'<div class="module-metadata"><div class="properties-title">'+(m.kind==='peripheral'?'外设信息':'模型信息')+'</div><div class="metadata-row"><span>显示方式</span><b>'+(m.kind==='peripheral'?'放大方块示意':'官方主体结构')+'</b></div><div class="metadata-row"><span>结构方块</span><b>'+scene.meshes[m.key].blocks.toLocaleString()+'</b></div><div class="metadata-row"><span>转运方案</span><b>ME-IO</b></div>'+(m.role?'<div class="metadata-row role"><span>V2 字段</span><code>'+esc(m.role)+'</code></div>':'')+'</div><p class="section-note">'+(m.kind==='peripheral'?'外设位置为便于点选的配置示意；接线方向以游戏内实际设备为准。':'模型间距和节点位置用于界面展示。实际搭建与端口方向以游戏内机器为准。')+'</p>';
 $('inspector-content').querySelectorAll('[data-field]').forEach(function(input){input.oninput=function(){var item=draft.modules[m.id]||(draft.modules[m.id]={});item[input.dataset.field]=input.value;validateInputs(m);refreshGuide(m);save();};});$('inspector-content').querySelectorAll('[data-side]').forEach(function(b){b.onclick=function(){var item=draft.modules[m.id]||(draft.modules[m.id]={}),key=b.dataset.sideKey;item[key]=Number(b.dataset.side);$('inspector-content').querySelectorAll('[data-side-key="'+key+'"]').forEach(function(x){x.classList.toggle('active',x===b);});validateInputs(m);refreshGuide(m);save();};});var group=$('field-group');if(group)group.onchange=function(){var item=draft.modules[m.id]||(draft.modules[m.id]={});item.group=Number(group.value);save();};var related=$('related-node');if(related)related.onclick=function(){select(m.related||'node-1');};$('inspector-content').querySelectorAll('[data-jump]').forEach(function(b){b.onclick=function(){select(b.dataset.jump);};});validateInputs(m);}
 
 function validateInputs(m){if(!m.role)return;var v=data(m),has=false;['address','redstone'].forEach(function(key){var input=$('field-'+key);if(!input)return;var value=v[key]||'',bad=!!value&&!uuid.test(value),hint=$('inspector-content').querySelector('[data-hint="'+key+'"]');has=has||!!value;input.classList.toggle('invalid',bad);hint.classList.toggle('error',bad);hint.textContent=bad?'已保留草稿；完整地址应为 8-4-4-4-12 格式。':value?'地址格式正确 · 连接状态尚未检测':'支持 Ctrl + V，可先填一部分，稍后继续。';});var done=complete(m);$('module-state').className='module-state'+(done?' filled':'');$('module-state').textContent=done?'地址完整':has?'草稿':'未填写';$('validation-state').className='validation-state'+(done?' valid':'');$('validation-state').textContent=sideIssues(m)?'方向有冲突：同一转运器的不同容器必须选择不同方向。草稿仍已保留。':done?'✓ 地址格式完整，已就绪供后续接入 OC。':'草稿允许留空，填写时自动保存。';}
@@ -1689,7 +1698,7 @@ window.addEventListener('pagehide',flush);document.addEventListener('keydown',fu
 window.BEC_APP={scene:scene,select:select,getDraft:function(){return JSON.parse(JSON.stringify(draft));},flush:flush,setLayer:setLayer,importDraft:function(v){draft=safeDraft(v);flush();renderInspector();}};
 })();
 </script><script>(function(){'use strict';
-var $=function(id){return document.getElementById(id);},app=window.BEC_APP,last=null,online=false,receivedAt=0,receiving=false,queue={},inflight=false,waiting=null,failed=false,group=1;
+var $=function(id){return document.getElementById(id);},app=window.BEC_APP,last=null,online=false,receivedAt=0,receiving=false,queue={},inflight=false,waiting=null,failed=false,group=1,switching=null,currentSave=null;
 var order=['detect','nanites','gate','supply','convert','produce','finish'],titles={idle:'等待订单',detect:'读取配方',nanites:'蜂群检查',gate:'韦门确认',supply:'原液备料',convert:'凝聚物转换',produce:'配方运行',finish:'批次收尾',fault:'保护暂停'};
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];});}
 function time(n){n=Math.max(0,Number(n)||0);return n<60?n.toFixed(1)+'s':Math.floor(n/60)+'m '+(n%60).toFixed(1)+'s';}
@@ -1697,15 +1706,18 @@ function status(s,bad){$('save-status').textContent=s;$('save-status').classList
 function send(name,args){if(!online)return Promise.reject(Error('OC 未连接，未执行操作'));return OC.emit(name,args||{});}
 function key(id,k){var m={'field':'g'+group+'.storage','generator':'g'+group+'.generator1','gate':'g'+group+'.gate','main-me':'mainInterface','workshop-me':'workshopInterface','sub-me':'g'+group+'.subInterface','fluid-transposer':'g'+group+'.transposer','nanite-transposer':'g'+group+'.bee_transposer','load-redstone':'g'+group+'.bee_loadRedstone','return-redstone':'g'+group+'.bee_returnRedstone'};
  if(id.indexOf('node-')===0)return 'n'+id.slice(5)+'.'+(k==='address'?'address':k==='redstone'?'redstone':k);
- if(k==='address')return m[id]||(id.indexOf('bulk-transposer-')===0?'g'+group+'.bulk'+id.slice(16):null);
+ if(k==='address')return m[id]||(id.indexOf('generator-')===0?'g'+group+'.generator'+id.slice(10):id.indexOf('bulk-transposer-')===0?'g'+group+'.bulk'+id.slice(16):null);
  return 'g'+group+'.'+(['bankSide','loadSide','returnSide','loadOutputSide','returnOutputSide'].indexOf(k)>=0?'bee_':'')+k;
 }
-function fieldKeys(m){return ['address'].concat(m.kind==='node'?['redstone','group','pauseSide']:(m.sides||[]).map(function(f){return f[0];}));}
+function fieldKeys(m){return ['address'].concat(m.kind==='node'?['redstone','group','pauseSide','gate']:(m.sides||[]).map(function(f){return f[0];}));}
 function toValues(draft){var out={};app.scene.modules.forEach(function(m){var v=draft.modules[m.id];if(!v||!m.role)return;fieldKeys(m).forEach(function(k){if(v[k]!=null){var name=key(m.id,k);if(name)out[name]=String(v[k]);}});});return out;}
 function importValues(values){var draft={version:1,modules:{}};app.scene.modules.forEach(function(m){if(!m.role)return;var v={};fieldKeys(m).forEach(function(k){var value=values[key(m.id,k)];if(value!=null)v[k]=k==='address'||k==='redstone'?value:Number(value);});draft.modules[m.id]=v;});receiving=true;app.importDraft(draft);receiving=false;}
-function dirty(draft){if(receiving||!last||last.mode==='running')return;var values=toValues(draft);Object.keys(values).forEach(function(k){if(values[k]!==last.values[k])queue[k]=values[k];});status('正在保存到 OC…');pump();}
+function dirty(draft){if(receiving||switching||!last||last.mode==='running')return;var values=toValues(draft);Object.keys(values).forEach(function(k){if(values[k]!==last.values[k]||(currentSave&&currentSave.key===k&&currentSave.value!==values[k])||(waiting&&waiting.key===k&&waiting.value!==values[k]))queue[k]=values[k];});status('正在保存到 OC…');pump();}
 window.BEC_BINDING_DIRTY=dirty;
-function pump(){if(inflight||waiting||failed||!online||!last)return;var keys=Object.keys(queue);if(!keys.length){status('草稿已保存到 OC');return;}var k=keys[0],v=queue[k],revision=last.revision;delete queue[k];inflight=true;status('正在保存到 OC…');send('save_field',{key:k,value:v,revision:revision}).then(function(){inflight=false;waiting=revision;}).catch(function(e){inflight=false;queue[k]=v;failed=true;status('保存未确认 · 点击重试',true);$('runtime-notice').textContent=e.message;});}
+function pump(){if(inflight||waiting||failed||switching||!online||!last)return;var keys=Object.keys(queue);if(!keys.length){status('草稿已保存到 OC');return;}var k=keys[0],v=queue[k],revision=last.revision;delete queue[k];inflight=true;currentSave={key:k,value:v};status('正在保存到 OC…');send('save_field',{key:k,value:v,revision:revision}).then(function(){inflight=false;currentSave=null;waiting={revision:revision,key:k,value:v};if(last&&(last.revision!==revision||last.values[k]===v)){waiting=null;pump();}}).catch(function(e){inflight=false;currentSave=null;if(!Object.prototype.hasOwnProperty.call(queue,k))queue[k]=v;failed=true;status('保存未确认 · 点击重试',true);$('runtime-notice').textContent=e.message;});}
+function syncModels(d){var scene=app.scene,base=scene.modules.find(function(m){return m.id==='generator';});if(!base)return;var count=Math.min(16,Math.max(4,d.generatorSlots||4));scene.modules=scene.modules.filter(function(m){return m.id.indexOf('generator-')!==0||Number(m.id.slice(10))<=count;});if(!scene.modules.some(function(m){return m.id===scene.selected;}))scene.selected='assembler';
+ for(var j=2;j<=count;j++)if(!scene.modules.some(function(m){return m.id==='generator-'+j;})){var m=Object.assign({},base),dx=Math.floor((j-1)/4)*40,dz=((j-1)%4)*26;m.id='generator-'+j;m.title='纠缠器 '+String(j).padStart(2,'0');m.role='groups['+group+'].generators['+j+']';m.p=[base.p[0]+dx,base.p[1],base.p[2]+dz];m.center=[base.center[0]+dx,base.center[1],base.center[2]+dz];m.marker=[base.marker[0]+dx,base.marker[1],base.marker[2]+dz];scene.modules.push(m);}
+ scene.modules.forEach(function(m){if(m.role)m.role=m.role.replace(/^groups\[\d+\]/,'groups['+group+']');if(m.kind==='generator')m.role='groups['+group+'].generators['+(m.id==='generator'?1:m.id.slice(10))+']';});scene.runtimeGroup=group;scene.runtimeValues=d.values||{};scene.request();}
 function markMachines(){if(!last)return;app.scene.liveStates=last.machines||{};document.querySelectorAll('[data-label],[data-module]').forEach(function(el){el.dataset.live=(last.machines||{})[el.dataset.label||el.dataset.module]||'unknown';});}
 var render=app.scene.onRender;app.scene.onRender=function(s){render(s);markMachines();};
 function flow(){if(!last)return;var age=online?Math.min(3,(Date.now()-receivedAt)/1000):0,active=last.mode==='running'&&last.phase!=='idle'&&last.phase!=='finish'&&!last.fault;var elapsed=(last.elapsed||0)+(active?age:0);$('flow-elapsed').textContent=time(elapsed);$('flow-current').textContent=titles[last.phase]||last.phase;$('flow-stage-time').textContent='当前步骤 '+time((last.phaseElapsed||0)+(active?age:0));
@@ -1714,27 +1726,27 @@ function flow(){if(!last)return;var age=online?Math.min(3,(Date.now()-receivedAt
  var machines=Object.keys(last.machines||{}).filter(function(id){return id==='field'||id==='gate'||id.indexOf('generator')===0;}).map(function(id){var active=last.machines[id]==='active';return '<span class="node-chip '+(active?'active':'')+'">'+(id==='field'?'约束场':id==='gate'?'韦门':id==='generator'?'纠缠器 1':'纠缠器 '+id.split('-')[1])+' · '+(active?'运行中':last.machines[id]==='unknown'?'不可读':'未运行')+'</span>';}).join('');$('node-status-list').innerHTML=machines+$('node-status-list').innerHTML;
  var events=(Array.isArray(last.timeline)?last.timeline:[]).map(function(e){return '+'+time(e.offset)+'  '+(titles[e.phase]||e.phase);});$('runtime-log').textContent=events.concat(Array.isArray(last.logs)?last.logs:[]).join('\n');
 }
-function data(d){last=d;online=d._online!==false;receivedAt=Date.now();group=d.group||1;if(waiting&&waiting!==d.revision)waiting=null;
- if(!inflight&&!waiting&&!Object.keys(queue).length&&!/INPUT|TEXTAREA/.test(document.activeElement.tagName))importValues(d.values||{});
+function data(d){var changed=group!==(d.group||1);last=d;online=d._online!==false;receivedAt=Date.now();group=d.group||1;if(switching===group)switching=null;if(waiting&&(waiting.revision!==d.revision||(d.values||{})[waiting.key]===waiting.value))waiting=null;
+ syncModels(d);if(!switching&&!inflight&&!waiting&&!Object.keys(queue).length&&(changed||!/INPUT|TEXTAREA/.test(document.activeElement.tagName)))importValues(d.values||{});
  $('runtime-notice').textContent=(online?'': 'OC 离线，显示最后快照。')+(d.notice||'')+(d.disk&&d.disk.known?' · 磁盘剩余 '+(d.disk.free/1024).toFixed(0)+' KiB / 保留 '+(d.disk.reserve/1024).toFixed(0)+' KiB':' · 磁盘容量不可读');$('runtime-notice').classList.toggle('offline-alert',!online);
  document.body.classList.toggle('runtime-running',d.mode==='running');$('flow-panel').hidden=false;$('start-run').textContent=d.mode==='running'?'运行中':'启动自动化';$('start-run').disabled=!online||d.mode==='running'||!d.configured||inflight||!!waiting||!!Object.keys(queue).length;
  $('apply-config').disabled=!online||d.mode==='running'||inflight||!!waiting||!!Object.keys(queue).length;$('stop-run').disabled=!online||d.mode!=='running';$('global-settings').disabled=d.mode==='running';
- if(!online)status('OC 离线 · 未保存操作',true);else if(!inflight&&!waiting&&!Object.keys(queue).length)status('OC 已连接 · 草稿已保存');
+ if(!online)status('OC 离线 · 未保存操作',true);else if(failed)status('保存未确认 · 点击重试',true);else if(!inflight&&!waiting&&!Object.keys(queue).length)status('OC 已连接 · 草稿已保存');
  if($('group-select').options.length!==d.groupCount){$('group-select').innerHTML=Array.from({length:d.groupCount||1},function(_,i){return '<option value="'+(i+1)+'">设备组 '+String(i+1).padStart(2,'0')+'</option>';}).join('');}$('group-select').value=group;
  markMachines();flow();pump();
 }
 function action(name){if(inflight||waiting||Object.keys(queue).length){$('runtime-notice').textContent='请先等待草稿保存完成。';return;}send(name,{revision:last&&last.revision}).then(function(r){$('runtime-notice').textContent=r.message||'请求已确认';}).catch(function(e){$('runtime-notice').textContent=e.message;});}
-function settings(){if(!last)return;var specs=[['recipeDirectory','配方目录'],['cacheTarget','库存参考目标']];for(var i=1;i<=4;i++)specs.push(['g'+group+'.generator'+i,'纠缠器 '+i+'（多余可空）']);$('extra-fields').innerHTML=specs.map(function(f){return '<label>'+f[1]+'<input data-config="'+f[0]+'" value="'+esc(last.values[f[0]]||'')+'" maxlength="160" spellcheck="false"></label>';}).join('');$('extra-fields').querySelectorAll('input').forEach(function(input){input.onchange=function(){queue[input.dataset.config]=input.value;pump();};});$('runtime-settings').showModal();}
+function settings(){if(!last)return;var specs=[['recipeDirectory','配方目录'],['cacheTarget','库存参考目标']];for(var i=1;i<=Math.max(4,last.generatorSlots||4);i++)specs.push(['g'+group+'.generator'+i,'纠缠器 '+i+'（多余可空）']);$('extra-fields').innerHTML=specs.map(function(f){return '<label>'+f[1]+'<input data-config="'+f[0]+'" value="'+esc(last.values[f[0]]||'')+'" maxlength="160" spellcheck="false"></label>';}).join('');$('extra-fields').querySelectorAll('input').forEach(function(input){input.onchange=function(){queue[input.dataset.config]=input.value;pump();};});$('runtime-settings').showModal();}
 document.querySelector('.top-actions').innerHTML='<span id="save-status" class="save-status">等待 OC 连接</span><button class="button quiet" id="global-settings">公共设置</button><button class="button quiet" id="apply-config">应用绑定</button><button class="button primary run-button" id="start-run">启动自动化</button><button class="button quiet stop-button" id="stop-run">暂停</button>';
 var tabs=document.createElement('nav');tabs.className='runtime-tabs';tabs.innerHTML='<button class="active" data-tab="structure">结构 / 绑定</button><button data-tab="flow">运行流程</button>';document.querySelector('.topbar').insertBefore(tabs,document.querySelector('.top-actions'));
 var flowPanel=document.createElement('section');flowPanel.className='flow-panel';flowPanel.id='flow-panel';flowPanel.innerHTML='<div class="flow-title"><div><h2>自动化流程 <span id="flow-current">等待 OC</span></h2><p id="flow-stage-time">当前步骤 —</p></div><div><div class="elapsed" id="flow-elapsed">0.0s</div><small>当前 / 最近批次总耗时</small></div></div><div class="flow-path" id="flow-steps"></div><div class="flow-bottom"><div><h4>TRANSFER NODES / 接单控制</h4><div class="node-list" id="node-status-list"></div><div class="runtime-legend"><b>绿色：机器回读运行中</b> · <em>金色：当前步骤使用的外设</em><br>外设阶段占用不等同于硬件正在搬运</div></div><div><h4>EXECUTION / 阶段时间线</h4><div id="runtime-log" class="runtime-log" style="white-space:pre-wrap"></div></div></div>';
 document.querySelector('.main').appendChild(flowPanel);var notice=document.createElement('div');notice.id='runtime-notice';notice.className='runtime-notice';notice.textContent='等待 OC 数据，网页预览不控制机器。';document.querySelector('.main').appendChild(notice);
 var dialog=document.createElement('dialog');dialog.id='runtime-settings';dialog.className='runtime-settings';dialog.innerHTML='<h2>公共配置</h2><p>填写后自动暂存。应用绑定通过设备校验后，才能启动。</p><label>当前模型对应 <select id="group-select"></select></label><div id="extra-fields"></div><footer><button id="close-settings" class="button primary">完成</button></footer>';document.body.appendChild(dialog);
 document.querySelectorAll('[data-tab]').forEach(function(b){b.onclick=function(){document.querySelectorAll('[data-tab]').forEach(function(x){x.classList.toggle('active',x===b);});document.body.classList.toggle('flow-full',b.dataset.tab==='flow');app.scene.request();};});
- document.querySelector('.inspector').addEventListener('input',function(){dirty(app.getDraft());});
+
  document.querySelector('.inspector-bottom p').textContent='草稿由 OC 自动保存，支持 Ctrl+V。应用绑定前不控制机器。';$('model-callout').querySelector('p').innerHTML='点击机器填写地址，自动暂存到 OC。<br>拖动旋转 · 滚轮缩放 · 右键平移';document.querySelector('.pill').textContent='V2 / OCHD';
 document.querySelector('.stage-title').innerHTML='<span class="live-dot"></span>结构与机器状态<span class="stage-sub">/ 实际回读 + 阶段标记</span>';
-$('save-status').onclick=function(){if(failed){failed=false;pump();}};$('apply-config').onclick=function(){action('apply_bindings');};$('start-run').onclick=function(){action('start');};$('stop-run').onclick=function(){send('pause',{}).catch(function(e){$('runtime-notice').textContent=e.message;});};$('global-settings').onclick=settings;$('close-settings').onclick=function(){$('runtime-settings').close();};$('group-select').onchange=function(){if(inflight||waiting||Object.keys(queue).length){this.value=group;return;};send('select_group',{group:Number(this.value)}).then(function(){$('runtime-settings').close();}).catch(function(e){$('runtime-notice').textContent=e.message;});};
+$('save-status').onclick=function(){if(failed){failed=false;pump();}};$('apply-config').onclick=function(){action('apply_bindings');};$('start-run').onclick=function(){action('start');};$('stop-run').onclick=function(){send('pause',{}).catch(function(e){$('runtime-notice').textContent=e.message;});};$('global-settings').onclick=settings;$('close-settings').onclick=function(){$('runtime-settings').close();};$('group-select').onchange=function(){if(inflight||waiting||Object.keys(queue).length){this.value=group;return;};switching=Number(this.value);send('select_group',{group:switching}).then(function(){$('runtime-settings').close();}).catch(function(e){switching=null;$('runtime-notice').textContent=e.message;});};
  window.BEC_CONTROL={receive:data,values:toValues,queue:function(){return queue;}};
 if(window.OC&&OC.onData)OC.onData(data);else{$('runtime-notice').textContent='浏览器预览：未连接 OC，所有机器操作禁用。';$('start-run').disabled=$('stop-run').disabled=$('apply-config').disabled=true;}
 setInterval(function(){flow();if(last&&Date.now()-receivedAt>7000){online=false;status('OC 数据已过期',true);$('start-run').disabled=$('apply-config').disabled=true;}},250);
@@ -1774,6 +1786,7 @@ return function(C,B,W,options)
    assert(type(args.group)=='number'and cfg.groups[args.group],'设备组不存在');H.group=args.group;return '已切换设备组'
   elseif name=='save_field'then
    idleEditor();assert(args.revision==revision(),'草稿已变化，请等最新快照后重试')
+   local disk=storage.status();assert(disk.known and disk.ok,'磁盘剩余空间不足或不可读，草稿未保存：至少保留512KiB')
    assert(type(args.value)=='string'and #args.value<=160 and not args.value:find('[\r\n=]'),'字段格式无效')
    local known=false;for _,f in ipairs(fields())do if f.key==args.key then known=true;break end end
    assert(known,'未知绑定字段')
@@ -1787,6 +1800,7 @@ return function(C,B,W,options)
    E=nil;H.started=false;H.notice='绑定已校验并应用，点击启动自动化。';return H.notice
   elseif name=='start'then
    assert(not H.running,'自动化已经运行')
+   assert(B.read(path)==expected,'正式配置已被其他程序修改，请退出页面后重新打开')
    storage.prune(cfg);local disk=storage.status()
    assert(disk.known and disk.ok,'磁盘剩余空间不足或不可读：至少保留512KiB，暂停启动并保留恢复记录')
    assert(args.revision==revision(),'绑定已变化，请等最新快照后启动')
@@ -1814,7 +1828,7 @@ return function(C,B,W,options)
    local seen={};for i,n in ipairs(cfg.nodes)do if not seen[n.group]then E.resumeNode(i);seen[n.group]=true end end
    H.running=true;H.notice='自动化运行中；节点按批次关闭接单，整组完成后再接下一单。';return H.notice
   elseif name=='pause'then
-   if E then E.pauseAll()end;H.running=false;H.notice='已请求暂停；工作器收尾，未确认记录保留。';return H.notice
+   H.running=false;if E then E.pauseAll()end;H.notice='已请求暂停；工作器收尾，未确认记录保留。';return H.notice
   elseif name=='refresh'then return '页面在线'
   end
   error('不支持的页面事件')
@@ -1833,9 +1847,11 @@ return function(C,B,W,options)
   end
   local out={mode=H.running and 'running'or 'binding',revision=revision(),values=values,group=H.group,groupCount=#cfg.groups,
    configured=expected~=nil,notice=H.notice,now=now,machines={},nodes={},flow={},timeline={},logs={},disk=storage.status()}
-  local g=cfg.groups[H.group];local selected
+  local g=cfg.groups[H.group];out.groupName=g.name or ('设备组 '..H.group);out.generatorSlots=math.max(4,#g.generators);local selected
   if E then local owner=E.groupOwner[H.group];selected=owner and E.tasks[owner]
-   if not selected then for i,n in ipairs(cfg.nodes)do if n.group==H.group and E.tasks[i].startedAt then selected=E.tasks[i]end end end
+   if not selected then for i,n in ipairs(cfg.nodes)do
+    local t=E.tasks[i];if n.group==H.group and t.startedAt and (not selected or t.startedAt>selected.startedAt)then selected=t end
+   end end
    for i=math.max(1,#E.logs-3),#E.logs do out.logs[#out.logs+1]=E.logs[i]:sub(1,300)end
   end
   if selected then
@@ -1988,7 +2004,7 @@ local function field() assert(call(STORAGE, "isWorkAllowed") == true, "约束场
 for _, n in pairs(v) do integer(n) end return v end local function writeVerified(path, contents)
 local f = assert(io.open(path, "w")) local ok, err = f:write(contents) local flushed, flushErr = f:flush() f:close()
 assert(ok and flushed, tostring(err or flushErr or "日志写入失败")) local r = assert(io.open(path, "r")) local actual = r:read("*a"); r:close() assert(actual == contents and type(ser.unserialize(actual)) == "table", "日志回读失败")
-end local function save(stage) if BEC_V2_PHASE then BEC_V2_PHASE(stage)end record.stage = stage if fs.exists(JOURNAL) then
+end local function save(stage) if BEC_V2_PHASE and stage~=record.stage then BEC_V2_PHASE(stage)end record.stage = stage if fs.exists(JOURNAL) then
 local f = assert(io.open(JOURNAL, "r")) local old = f:read("*a"); f:close() writeVerified(JOURNAL .. ".previous", old) end
 writeVerified(JOURNAL, ser.serialize(record, false)) end local function pause(value) call(RS, "setOutput", sides.top, value)
 assert(call(RS, "getOutput", sides.top) == value, "红石输出回读不符") end local function generator(enabled) call(GEN, "setWorkAllowed", enabled)
@@ -2874,7 +2890,8 @@ end,debug.traceback)
 pcall(panel.release)
 assert(ok,err)
 ]=]},
-{"START_HERE.txt",[=[BEC V2 全新安装 / OpenOS
+{"START_HERE.txt",[=[OCHD HTML预览5需要alpha7及配套客户端网页运行时；尚待Minecraft实机验收。
+BEC V2 全新安装 / OpenOS
 
 OCHD 三维绑定与自动化流程（开发预览）：
 lua /home/bec_v2/main.lua web
@@ -2901,7 +2918,7 @@ lua /home/bec_v2/main.lua run
 使用自己的仓库和仅该仓库Contents读写token，不分享凭据。
 
 完整接线和分享说明：
-https://github.com/Alivn-chao/gtnh-bec-automation/tree/bec-v2-clean-2026-10-15.1/reinstall_v2
+https://github.com/Alivn-chao/gtnh-bec-automation/tree/bec-v2-ochd-preview-2026-10-16.1/reinstall_v2
 
 配置和安装不会开机；pause和run会控制机器。约束场始终保持开启。
 不同时运行V1/V2控制同一设备。全部V2数据保留在/home/bec_v2。

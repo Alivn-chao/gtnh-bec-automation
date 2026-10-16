@@ -25,9 +25,20 @@ function M.environment(cfg,index,engine)
    local current=c.invoke(address,'getRequiredCondensate')
    local entry=entries[i]
    assert(entry,'生产组缺少节点快照')
+   local p=type(current)=='table'and next(current)and c.invoke(address,'getParallelRecipesInProgress')or nil
+   local consumed=c.invoke(address,'getConsumedCondensate')or {}
+   local needed=c.invoke(address,'getRequiredTier');needed=type(needed)=='table'and needed.tier or needed
+   -- A batch can finish between these separate OC getters. Accept that edge
+   -- only after reading idle AND closed next-batch permission. Keep the old
+   -- requirement and consumption proof; never infer completion from nil tier.
+   if state~='idle'and(type(needed)~='number'or type(current)=='table'and next(current)and(type(p)~='number'or p<=0))then
+    if c.invoke(address,'getState')=='idle'and c.invoke(address,'isWorkAllowed')==false then
+     state='idle';current=nil;consumed=c.invoke(address,'getConsumedCondensate')or consumed
+    end
+   end
    assert(not entry.finished or state=='idle','已完成节点提前接到新订单，保持整组暂停')
    if type(current)=='table' and next(current) then
-    local p=c.invoke(address,'getParallelRecipesInProgress');assert(type(p)=='number' and p>0,'节点并行不可读')
+    assert(type(p)=='number' and p>0,'节点并行不可读')
     local normalized={};for key,value in pairs(current)do normalized[key]=value/p end
     for key,value in pairs(task.normalized)do assert(normalized[key]==value,'生产组出现不同配方，保持暂停')end
     for key,value in pairs(normalized)do assert(task.normalized[key]==value,'生产组配方类型变化')end
@@ -36,10 +47,8 @@ function M.environment(cfg,index,engine)
      entry.required=current;entry.parallel=p
     end
    end
-   local consumed=c.invoke(address,'getConsumedCondensate') or {}
    entry.consumed=entry.consumed or {}
    for key,value in pairs(consumed)do entry.consumed[key]=math.max(entry.consumed[key] or 0,value)end
-   local needed=c.invoke(address,'getRequiredTier');needed=type(needed)=='table' and needed.tier or needed
    if state~='idle' then
     snapshot.allIdle=false
     assert(type(needed)=='number'and needed==entry.tier,'组内配方蜂群等级变化，保持整组暂停')

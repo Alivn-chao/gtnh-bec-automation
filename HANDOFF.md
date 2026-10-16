@@ -1,3 +1,5 @@
+2026-10-16 接续GitHub feat/v2-ochd-studio 334125a，工作分支codex/v2-ochd-complete：修同阶段save打断gate计时、snapshot按startedAt选最近批次；bridge跨getter结束仅idle+workAllowedfalse+全量consumed证明接受，保留未知/配方变化保护。JS失败旧请求不覆盖新输入/改回原值保留/相同revision和先snapshot后ack解锁，方向即时入队，切组重载；模型按组过滤节点并补4–16台纠缠器点选、独立gate字段。草稿保存512KiB保护、外部config变更拒启动旧E。更新器11文件兼容334125a精确签名，原包生成。111 unittest+20原核心、8 Node队列/模型、20两配方矩阵通过（非游戏时长），尚未GTNH alpha7实测；浏览器file://预览被策略拒绝，未绕过。未修改其它仓库dirty内容或outputs旧快照。详情OCHD_PROGRESS.md，预览tag bec-v2-ochd-preview-2026-10-16.1。
+
 2026-10-16 用户要求先上传、晚上再继续。OCHD 一体化开发分支 feat/v2-ochd-studio，详见 reinstall_v2/OCHD_PROGRESS.md。已接网页绑定/草稿/应用/启动/暂停/真实engine状态和阶段耗时、512KiB磁盘保护；104项模拟测试通过，未Minecraft实测，阶段同名保存重置显示仍待修正。保留所有未确认记录，不当完成版。继续前先看进度文档。
 
 2026-10-16 用户要求把 V1 批次启停同步到 V2。engine 新增 nodeWork，pending/confirmed 独立 batch-stop.dat 并回读；同组工作器开始前全部节点暂停并关闭工作许可，bridge 放行前验证整组 workAllowed=false，当前批继续、已完成节点不能提前接单。正常 cohort stopped 收尾后才在 RS15 下允许 idle 节点重新接单；interrupted cohort/旧生产日志未经核对不重开；暂停/故障/退出关闭节点接单。config live 要求绑定节点具备 setWorkAllowed/isWorkAllowed（false 方法标志有效），缺失拒绝放行。新硬件模型尊重节点启停，未实机安装/验证。

@@ -1,3 +1,23 @@
+# V2 OCHD 一体化预览 preview 5
+
+本分支接续10月16日未完成检查点，已修正阶段计时、草稿保存并发和配方完成时的跨读取误暂停。支持从结构模型绑定、保存草稿、校验应用、启动/暂停及查看当前批次流程。代码和模拟通过，**GTNH实机验收仍待进行**；完整边界见 [OCHD_PROGRESS.md](OCHD_PROGRESS.md)。
+
+需要 [OCHD alpha7](https://github.com/Alivn-chao/oc-hd-panel/releases/tag/v0.4.0-alpha7-html)：客户端同时使用匹配的JAR与网页运行时，服务器使用匹配JAR。此项目只安装OC脚本，不替换模组。多组先通过普通 setup 创建，网页切组编辑；未绑定的节点空位会跳过。
+
+已有V2：先在原控制器按Q退出，待纠缠器停稳、两端ME IO无留盘，再运行（不覆盖配置、配方或运行日志）：
+
+```sh
+wget -f https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/bec-v2-ochd-preview-2026-10-16.1/reinstall_v2/update_reads.lua /home/bec_v2_update.lua
+lua /home/bec_v2_update.lua
+lua /home/bec_v2/main.lua web
+```
+
+空盘OpenOS完整安装用同一标签的 `reinstall_v2/install.lua`；已有 `/home/bec_v2` 时完整安装器拒绝覆盖。网页不会自动创建登记配方，仍需迁入有效V2配方记录或从原样板登记。V1不能运行V2更新器。
+
+以下10月15日说明保留为稳定旧版的安装历史；其固定标签不会自动升级到本预览。预览已包含前10格/IO1与7、读取优化、批次接单关闭、HTML流程和容量保护；V2后台固定库存预缓存仍未迁入。
+
+---
+
 > 2026-10-16：已同步 V1 批次接单启停，见 [BATCH_STOP.md](BATCH_STOP.md)。
 
 # BEC V2 从零安装与分享包

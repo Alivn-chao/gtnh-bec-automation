@@ -10,14 +10,20 @@ PREVIEW3={'lib/bridge.lua': '14885:2931246636', 'lib/engine.lua': '9855:14056896
 PREVIEW21={'lib/bridge.lua': '14572:3934966185', 'lib/engine.lua': '8215:3066878477'}
 PREVIEW2={'lib/bridge.lua':'14483:790541300'}
 PREVIEW1={'lib/bridge.lua': '13410:2517241504', 'runtime/controller.lua': '36384:3281062855'}
+import zlib
+PREVIEW4={}
+for name in NAMES:
+    previous=subprocess.check_output(['git','show','334125a:reinstall_v2/files/'+name],cwd=ROOT)
+    PREVIEW4[name]=str(len(previous))+':'+str(zlib.adler32(previous)&0xffffffff)
 rows=[]
 for name in NAMES:
  result=subprocess.run(['git','show',BASE+':reinstall_v2/files/'+name],cwd=ROOT,capture_output=True)
  before=result.stdout.decode('utf-8')if result.returncode==0 else None
  source=(HERE/'files'/name).read_text(encoding='utf-8')
  rows.append('{path="/home/bec_v2/'+name+'",preview1="'+PREVIEW1.get(name,'')+'",preview2="'+PREVIEW2.get(name,'')+'",preview21="'+PREVIEW21.get(name,'')+'",preview3="'+PREVIEW3.get(name,'')+'",added='+('true'if before is None else 'false')+',before='+(literal(before)if before is not None else 'nil')+',source='+literal(source)+'}')
+ rows[-1]=rows[-1].replace(',preview1=',',preview4="'+PREVIEW4[name]+'",preview1=',1)
 BODY=r'''
-print('BEC V2 OCHD integrated studio preview 4; stop the running UI with Q first.')
+print('BEC V2 OCHD integrated studio preview 5; stop the running UI with Q first.')
 local fs=require('filesystem')
 local function read(p)local f=io.open(p,'r');if not f then return end;local s=f:read('*a');f:close();return s end
 local function normal(s)return s and s:gsub('\r\n','\n')end
@@ -29,7 +35,7 @@ for i,row in ipairs(files)do
  originals[i]=read(row.path)
  assert(originals[i]or row.added,'缺少V2程序: '..row.path)
  local current=normal(originals[i])
- assert(row.added and current==nil or current==normal(row.before)or current==normal(row.source)or row.preview1~=''and signature(current)==row.preview1 or row.preview2~=''and signature(current)==row.preview2 or row.preview21~=''and signature(current)==row.preview21 or row.preview3~=''and signature(current)==row.preview3,'程序与支持版本不符，保留本地修改: '..row.path)
+ assert(row.added and current==nil or current==normal(row.before)or current==normal(row.source)or current and signature(current)==row.preview4 or row.preview1~=''and signature(current)==row.preview1 or row.preview2~=''and signature(current)==row.preview2 or row.preview21~=''and signature(current)==row.preview21 or row.preview3~=''and signature(current)==row.preview3,'程序与支持版本不符，保留本地修改: '..row.path)
  if current~=normal(row.source)then identical=false end
 end
 if identical then print('读取优化已安装，无需更新。');return end
