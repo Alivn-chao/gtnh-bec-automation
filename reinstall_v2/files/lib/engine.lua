@@ -2,6 +2,17 @@ local c=require('component')
 local clock=require('computer')
 return function(cfg,C,Bridge,monitor)
  local E={tasks={},groupOwner={},fluidOwner=nil,logs={},monitor=monitor,roundRobin={}}
+ local phases={starting='detect',waiting='detect',nanites='nanites',gate='gate',converting='convert',watching='produce',producing='produce',stopped='finish',fault='fault'}
+ function E.phase(i,stage)
+  local t=E.tasks[i];local phase=phases[stage]or(stage:find('craft',1,true)and 'supply')or(stage:find('stream',1,true)and 'supply')or(stage:find('transfer',1,true)and 'supply')
+  if not phase then return end
+  local now=clock.uptime();t.flow=t.flow or {};t.timeline=t.timeline or {}
+  if t.phase==phase then return end
+  if t.phase then t.flow[t.phase]=(t.flow[t.phase]or 0)+now-(t.phaseAt or now)end
+  t.phase=phase;t.phaseAt=now
+  t.timeline[#t.timeline+1]={phase=phase,at=now}
+  if #t.timeline>12 then table.remove(t.timeline,1)end
+ end
  -- BEC_V2_GITHUB_REPORTS_V1
  local reports
  if not monitor then
@@ -30,6 +41,19 @@ return function(cfg,C,Bridge,monitor)
   local n=cfg.nodes[i];c.invoke(n.redstone,'setOutput',n.pauseSide,15)
   assert(c.invoke(n.redstone,'getOutput',n.pauseSide)==15,'节点暂停回读失败')
  end
+ -- BEC_V2_BATCH_STOP_V1: workAllowed gates NEXT recipe acquisition;
+ -- the active batch still runs when its immediate-pause signal is released.
+ function E.nodeWork(i,enabled)
+  local n=cfg.nodes[i];local methods=c.methods(n.address)
+  assert(methods and methods.setWorkAllowed~=nil and methods.isWorkAllowed~=nil,'传送节点缺少启停接口: '..n.name)
+  if c.invoke(n.address,'isWorkAllowed')==enabled then return end
+  local path=C.path('state/node-'..i..'/batch-stop.dat')
+  local intent={version=2,node=n.address,enabled=enabled,stage='pending'}
+  C.write(path,intent)
+  c.invoke(n.address,'setWorkAllowed',enabled)
+  assert(c.invoke(n.address,'isWorkAllowed')==enabled,'传送节点启停回读不符: '..n.name)
+  intent.stage='confirmed';C.write(path,intent)
+ end
  function E.pauseNode(i)
   assert(not monitor,'只读监控不能修改机器')
   local group=cfg.nodes[i].group
@@ -37,6 +61,7 @@ return function(cfg,C,Bridge,monitor)
   for j,n in ipairs(cfg.nodes)do if n.group==group then
    local t=E.tasks[j];t.disabled=true;t.cancel=true
    local ok,reason=pcall(pause,j);if not ok then errors[#errors+1]=tostring(reason)end
+   ok,reason=pcall(E.nodeWork,j,false);if not ok then errors[#errors+1]=tostring(reason)end
    if not t.co then t.status='整组暂停'end
   end end
   assert(#errors==0,table.concat(errors,' / '))
@@ -62,6 +87,7 @@ return function(cfg,C,Bridge,monitor)
   for i,t in ipairs(E.tasks)do
    t.cancel=true;t.disabled=true
    local ok,e=pcall(pause,i);if not ok then errors[#errors+1]=tostring(e)end
+   ok,e=pcall(E.nodeWork,i,false);if not ok then errors[#errors+1]=tostring(e)end
   end
   for _,g in ipairs(cfg.groups)do for _,a in ipairs(g.generators)do
    local ok,e=pcall(function()c.invoke(a,'setWorkAllowed',false);assert(c.invoke(a,'isWorkAllowed')==false)end)
@@ -81,10 +107,11 @@ return function(cfg,C,Bridge,monitor)
   if not ok then t.fault=true;E.log(i,tostring(kind))end
   if ok and coroutine.status(t.co)~='dead' then t.waitKind=kind;t.deadline=time or clock.uptime();return end
   local group=cfg.nodes[i].group
+  t.endedAt=clock.uptime();E.phase(i,(t.fault or t.cancel)and 'fault'or 'stopped')
   if t.fault or t.cancel then
    for _,a in ipairs(cfg.groups[group].generators)do pcall(c.invoke,a,'setWorkAllowed',false)end
    for j,n in ipairs(cfg.nodes)do if n.group==group then
-    E.tasks[j].disabled=true;E.tasks[j].status=t.fault and '同组故障，需核对' or '整组暂停';pcall(pause,j)
+    E.tasks[j].disabled=true;E.tasks[j].status=t.fault and '同组故障，需核对' or '整组暂停';pcall(pause,j);pcall(E.nodeWork,j,false)
    end end
   else for _,j in ipairs(t.members)do E.tasks[j].status='等待订单'end end
   C.write(cohortPath(group),{version=2,stage=(t.fault or t.cancel)and 'interrupted'or 'stopped',
@@ -97,8 +124,10 @@ return function(cfg,C,Bridge,monitor)
  end
  local function pending(i)
   local n=cfg.nodes[i];local state=c.invoke(n.address,'getState')
-  local req=c.invoke(n.address,'getRequiredCondensate');local p=c.invoke(n.address,'getParallelRecipesInProgress')
-  if (state~='paused-immediate' and state~='nanite-tier-too-low')or type(req)~='table'or not next(req)then return end
+  if state~='paused-immediate' and state~='nanite-tier-too-low'then return end
+  local req=c.invoke(n.address,'getRequiredCondensate')
+  if type(req)~='table'or not next(req)then return end
+  local p=c.invoke(n.address,'getParallelRecipesInProgress')
   assert(type(p)=='number'and p>=1,'节点并行不可读')
   local normalized={};for key,value in pairs(req)do normalized[key]=value/p end
   local tier=c.invoke(n.address,'getRequiredTier');tier=type(tier)=='table'and tier.tier or tier
@@ -118,6 +147,16 @@ return function(cfg,C,Bridge,monitor)
   for i,t in ipairs(E.tasks)do if t.co and (t.cancel or t.waitKind=='lock'and(not E.fluidOwner or E.fluidOwner==i)or t.waitKind~='lock'and clock.uptime()>=(t.deadline or 0))then advance(i)end end
   for group in ipairs(cfg.groups)do if not E.groupOwner[group]then
    local saved=C.read(cohortPath(group));local unfinished=saved and saved.stage~='stopped'
+   -- Reopen only after the previous cohort has finished its cleanup. Never
+   -- reopen on restart with an interrupted cohort awaiting manual review.
+   if not unfinished then
+    for j,n in ipairs(cfg.nodes)do if n.group==group and not E.tasks[j].disabled and not E.tasks[j].fault then
+     pause(j)
+     local journal=C.read(C.path('state/node-'..j..'/production.journal'))
+     local reviewed=not journal or journal.stage=='stopped' or E.tasks[j].reviewed
+     E.nodeWork(j,reviewed and c.invoke(n.address,'getState')=='idle')
+    end end
+   end
    local first=unfinished and saved.leader or (E.roundRobin[group]or 0)%#cfg.nodes+1
    for offset=0,#cfg.nodes-1 do
     local i=(first+offset-1)%#cfg.nodes+1;local t,n=E.tasks[i],cfg.nodes[i]
@@ -140,11 +179,15 @@ return function(cfg,C,Bridge,monitor)
        end end
       end
       t.status='整组备料 / '..#t.members..'台';t.cancel=false;t.reviewed=false;t.fault=false
+      t.startedAt=clock.uptime();t.endedAt=nil;t.phase=nil;t.flow={};t.timeline={};E.phase(i,'starting')
       for _,j in ipairs(t.members)do if j~=i then E.tasks[j].status='同配方物理并行'end end
       E.groupOwner[group]=i
       require('filesystem').makeDirectory(C.path('state/node-'..i))
       C.write(cohortPath(group),{version=2,stage='working',leader=i,members=t.members,entries=t.entries,normalized=t.normalized})
-      t.co=coroutine.create(function()E.acquire(i);Bridge.environment(cfg,i,E)(journal and 'resume'or 'run')end)
+      t.co=coroutine.create(function()
+       for j,v in ipairs(cfg.nodes)do if v.group==group then pause(j);E.nodeWork(j,false)end end
+       E.acquire(i);Bridge.environment(cfg,i,E)(journal and 'resume'or 'run')
+      end)
       advance(i);break
      end
     end

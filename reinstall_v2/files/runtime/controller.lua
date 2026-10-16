@@ -44,7 +44,9 @@ assert(call(RS, "getOutput", sides.top) == value, "红石输出回读不符") en
 assert(call(GEN, "isWorkAllowed") == enabled, "纠缠装置启停回读不符") end local function switchNanites()
 local needed=call(NODE,"getRequiredTier");needed=type(needed)=="table" and needed.tier or needed
 if type(needed)~="number" then return end
+local started=computer.uptime();print("检查蜂群 / 准备换盘")
 NANITES.ensure({tick=tick,stopping=function() return stopping end})
+print(string.format("蜂群检查/换盘完成：%.2f 秒",computer.uptime()-started))
 local provided=call(NODE,"getProvidedTier")
 assert(type(provided)=="table" and provided.tier>=needed and integer(call(NODE,"getAvailableNanites"))>=64,"蜂群等级或数量不足，保持暂停")
 lastNaniteTier=needed
@@ -53,18 +55,27 @@ local result={} for name,n in pairs(required) do assert(mapping[name] and intege
 end table.sort(result) assert(#result>0,"禁止写入全空过滤；全空会放行全部凝聚物") return result
 end local function verifyGate(expected) local count=integer(call(GATE,"getCondensateFilterCount")) assert(count>=#expected,"麦克斯韦门过滤槽不足")
 local actual=call(GATE,"getCondensateFilters") assert(type(actual)=="table" and same(actual,expected), "麦克斯韦门过滤回读不符；检查门的流体输入仓是否自动覆盖 OC 过滤") assert(call(GATE,"isWorkAllowed")==true,"麦克斯韦门未启用，保持暂停")
-assert(call(GATE,"isMachineActive")==true,"麦克斯韦门未运行；检查结构和供电，保持暂停") end local function configureGate(required) assert(call(RS,"getOutput",sides.top)==15 and call(NODE,"getState")=="paused-immediate",
+assert(call(GATE,"isMachineActive")==true,"麦克斯韦门未运行；检查结构和供电，保持暂停") end local function gateNodeState(full)
+if type(BEC_V2_GATE_STATE)=="function" then return BEC_V2_GATE_STATE(full) end
+return call(NODE,"getState") end
+local function configureGate(required) local started=computer.uptime();print("配置韦门 / 三轮回读")
+assert(call(RS,"getOutput",sides.top)==15 and gateNodeState(true)=="paused-immediate",
 "切换门过滤前节点必须立即暂停") local expected=gateFilters(required) assert(integer(call(GATE,"getCondensateFilterCount"))>=#expected,"麦克斯韦门过滤槽不足") local actual=call(GATE,"getCondensateFilters")
 assert(type(actual)=="table","麦克斯韦门过滤不可读") record.gateIntent={address=GATE,filters=expected};save(record.stage) if not same(actual,expected) then call(GATE,"setCondensateFilters",expected) end for i=1,3 do
-verifyGate(expected) assert(call(NODE,"getState")=="paused-immediate","设置过滤时订单状态变化") if i<3 then tick(0.1) end end
-print("麦克斯韦门过滤: "..table.concat(expected,", ")) return expected end local function tanks(side, name)
+verifyGate(expected) assert(gateNodeState(false)=="paused-immediate","设置过滤时订单状态变化") if i<3 then tick(0.1) end end
+print("麦克斯韦门过滤: "..table.concat(expected,", ")..string.format(" / 确认 %.2f 秒",computer.uptime()-started)) return expected end local function tanks(side, name)
 local count, amount = integer(call(TRANS, "getTankCount", side)), 0 assert(count > 0, "接口没有流体槽") for i = 1, count do local f = call(TRANS, "getFluidInTank", side, i)
 assert(type(f) == "table", "接口缓存不可读") if type(f[1]) == "table" then f = f[i] or f[1] end local n = integer(f.amount or 0) if n > 0 then
 assert(name and f.name == name, "接口有未处理流体缓存") amount = amount + n end end
 return amount end local function emptyConfig() for slot = 0, 5 do
 assert(call(MAIN, "getFluidInterfaceConfiguration", slot) == nil, "供液接口已有配置") end end local function current(recovering)
-local state=call(NODE,"getState") local unavailable=state=="assembler-offline" or state=="unpowered" or state=="nanite-tier-too-low" assert(state=="paused-immediate" or (recovering and unavailable and call(RS,"getOutput",sides.top)==15),"订单未处于立即暂停状态")
-local parallel=integer(call(NODE, "getParallelRecipesInProgress")) assert(parallel>=1,"暂停节点没有正在处理的配方") local required, consumed = call(NODE, "getRequiredCondensate"), call(NODE, "getConsumedCondensate") assert(type(required) == "table" and type(consumed) == "table", "订单需求不可读")
+-- V2 bridge can read all four adjacent fields in one fresh group scan.
+-- Outside that bridge, retain the original component getter path.
+local snapshot=type(BEC_V2_NODE_SNAPSHOT)=="function" and BEC_V2_NODE_SNAPSHOT() or nil
+local state=snapshot and snapshot.state or call(NODE,"getState") local unavailable=state=="assembler-offline" or state=="unpowered" or state=="nanite-tier-too-low" assert(state=="paused-immediate" or (recovering and unavailable and call(RS,"getOutput",sides.top)==15),"订单未处于立即暂停状态")
+local parallel=integer(snapshot and snapshot.parallel or call(NODE, "getParallelRecipesInProgress")) assert(parallel>=1,"暂停节点没有正在处理的配方") local required, consumed
+if snapshot then required,consumed=snapshot.required,snapshot.consumed else required,consumed=call(NODE,"getRequiredCondensate"),call(NODE,"getConsumedCondensate")end
+assert(type(required) == "table" and type(consumed) == "table", "订单需求不可读")
 local remaining, total = {}, 0 for name, amount in pairs(required) do assert(mapping[name], "不支持的凝聚物: " .. tostring(name)) amount = integer(amount)
 local used = integer(consumed[name] or 0) assert(used <= amount, "已消耗数量超过需求") remaining[name] = amount - used; total = total + amount end
 assert(total > 0, "订单没有有效需求") for name, amount in pairs(consumed) do assert(integer(amount) == 0 or required[name], "消耗记录与当前订单不符") end
@@ -134,12 +145,12 @@ tick(0.1) end if inletOpen then assert(call(MAIN,"setFluidInterfaceConfiguration
 record.configOwned=false;save("stream-inlet-cleared") end waitUntil(20,function() return tanks(4,raw)==0 end,unchanged) if stopping then return expected end
 end end assert(same(network(SUB),expected),"整批子网原液不符") record.plan=nil;save("stream-prepared")
 return expected end local function serve() local waiting={idle=true,["assembler-offline"]=true,unpowered=true,["nanite-tier-too-low"]=true}
-local round=0 while not stopping do pause(15); generator(false) local state=call(NODE,"getState")
-if stopping then break end state=call(NODE,"getState") if state=="paused-immediate" or state=="nanite-tier-too-low" then switchNanites();state=call(NODE,"getState") end if waiting[state] then
+local round=0 while not stopping do local nanitesChecked=false;pause(15); generator(false) local state=call(NODE,"getState")
+if stopping then break end state=call(NODE,"getState") if state=="paused-immediate" or state=="nanite-tier-too-low" then switchNanites();nanitesChecked=true;state=call(NODE,"getState") end if waiting[state] then
 if state~=record.lastState then print("等待订单/机器就绪: "..state.."；任意数量同配方订单均可，按 Q 停止。") record.lastState=state;save("waiting") end
 field();tick(0.1) else waitUntil(10,function() local v=call(NODE,"getState")
 return v=="paused-immediate",v end,function(v) assert(v=="crafting" or waiting[v],"无法暂停，实际状态: "..tostring(v)) field()
-end) switchNanites();if stopping then break end record.required,record.remaining=current() local target,count=batchTarget(record.required,record.remaining) local stable=false
+end) if not nanitesChecked then switchNanites()end;if stopping then break end record.required,record.remaining=current() local target,count=batchTarget(record.required,record.remaining) local stable=false
 for i=1,20 do tick(0.25);unchanged() local nextTarget,nextCount=batchTarget(record.required,record.remaining) if same(target,nextTarget) then stable=true;break end
 target,count=nextTarget,nextCount end assert(stable,"主网任务清单持续变化，保持暂停") if stopping then break end
 record.batchCount=count print("本组当前配方 "..count.." 份；当前实际并行 "..checkRecipe(record.required) .."；一次准备整批所需流体。") round=round+1;record.round=round;record.transfers={};record.target=target;record.plan=nil;record.topups={}

@@ -118,6 +118,12 @@ function M.environment(cfg,index,engine)
   end
   if a==n.redstone and (m=='getOutput' or m=='setOutput') then
    if m=='setOutput' then
+    if args[2]==0 then
+     -- Close every member's next-order admission before releasing ANY member.
+     for j,member in ipairs(cfg.nodes)do if member.group==n.group then
+      assert(c.invoke(member.address,'isWorkAllowed')==false,'放行前传送节点必须关闭接单: '..member.name)
+     end end
+    end
     for _,i in ipairs(members)do
      local member=cfg.nodes[i]
      local finished=entries[i].finished or task.released and c.invoke(member.address,'getState')=='idle'
@@ -169,6 +175,27 @@ function M.environment(cfg,index,engine)
   return c.invoke(a,m,table.unpack(args))
  end
  local env=setmetatable({}, {__index=_G});env._ENV=env
+ -- Explicit logical read only: always scans every member anew, never memoizes
+ -- across a yield, component call, or hardware mutation. This is not an OC API
+ -- or an atomic server-side snapshot.
+ env.BEC_V2_NODE_SNAPSHOT=nodeSnapshot
+ -- Gate setup validates the complete recipe once before writing, then checks
+ -- every member's actual pause state/output in each of the three readbacks.
+ -- The controller performs a fresh full current() check immediately afterward,
+ -- before any fluid transfer, generator start, or production release.
+ env.BEC_V2_GATE_STATE=function(full)
+  if full then return nodeSnapshot().state end
+  assert(not task.cancel,'用户暂停节点，保留进度')
+  local allIdle,allPaused=true,true
+  for _,i in ipairs(members)do
+   local member=cfg.nodes[i];local state=c.invoke(member.address,'getState')
+   assert(entries[i]and(not entries[i].finished or state=='idle'),'已完成节点提前接到新订单，保持整组暂停')
+   assert(c.invoke(member.redstone,'getOutput',member.pauseSide)==15,'过滤回读期间节点暂停信号变化')
+   if state~='idle'then allIdle=false end
+   if state~='idle'and state~='paused-immediate'and state~='nanite-tier-too-low'then allPaused=false end
+  end
+  return allIdle and 'idle'or allPaused and 'paused-immediate'or 'crafting'
+ end
  local sleeping={};for k,v in pairs(os) do sleeping[k]=v end
  sleeping.sleep=function(seconds)
   if task.cancel then error('用户暂停节点，保留进度') end
@@ -206,6 +233,7 @@ function M.environment(cfg,index,engine)
   text=replace(text,'"/home/bec_auto.journal"',string.format('%q',C.path('state/node-'..index..'/production.journal')))
   text=replace(text,"'/home/bec_nanites.journal'",string.format('%q',C.path('state/group-'..n.group..'/nanites.journal')))
   text=replace(text,'"/home/bec/recipes"',string.format('%q',cfg.recipeDirectory))
+  text=replace(text,'"/home/bec/recipes/"',string.format('%q',cfg.recipeDirectory..'/'))
   return assert(load(text,path,'t',env))
  end
  env.loadfile=function(path)

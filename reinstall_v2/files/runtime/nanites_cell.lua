@@ -21,6 +21,7 @@ local tiers={Carbon={1,'Carbon'},Glowstone={1,'Glowstone'},Silver={2,'Silver'},
  SixPhasedCopper={5,'SixPhasedCopper'},WhiteDwarfMatter={6,'WhiteDwarf'},
  BlackDwarfMatter={7,'BlackDwarf'},Universium={8,'Universium'},Eternity={9,'Eternity'},MagMatter={10,'MagMatter'}}
 local record,context
+local prepStarted,firstMoveStarted
 local function call(a,m,...)
  local args={...}
  if a==T and type(args[1])=='number' then
@@ -132,24 +133,11 @@ local function emptyPorts()
   assert(stack(side,slot)==nil,'蜂群IO已有硬盘，保留未完成操作')
  end end
 end
+-- BEC_V2_STAGE_LATENCY_V2: only the first ten physical bank slots are managed.
 local function bank(size)
  local cells={}
- local ok,rows=pcall(function()
-  if c.methods(T).getAllStacks==nil then return end
-  local reader=call(T,'getAllStacks',0)
-  assert(reader.count()==size,'批量槽数不符')
-  local values=reader.getAll();assert(type(values)=='table')
-  for index in pairs(values) do assert(whole(index) and index>=1 and index<=size,'批量槽号不符') end
-  return values
- end)
- if not ok then rows=nil end
- for slot=1,size do
-  local item
-  if rows then
-   item=rows[slot]
-   if type(item)=='table' and item.name==nil then item=nil end
-   if item and (item.storedItemCount==nil or type(item.getAvailableItems)~='table') then item=stack(0,slot) end
-  else item=stack(0,slot) end
+ for slot=1,math.min(size,10)do
+  local item=stack(0,slot)
   if item then
    local n,row=describe(item)
    cells[#cells+1]={slot=slot,count=n,item=row,
@@ -158,6 +146,7 @@ local function bank(size)
  end
  return cells
 end
+
 local function pack(cells,key)
  local candidates={}
  for _,disk in ipairs(cells) do
@@ -185,6 +174,10 @@ local function move(from,to,source,dest,expected,key)
  assert(n==expected and (not key or row and row.key==key) and stack(to,dest)==nil,'搬盘前槽位/内容变化')
  record.pending={from=from,to=to,source=source,dest=dest,count=expected,key=key}
  save('moving-cell')
+ if not firstMoveStarted then
+  print(string.format('开始首次搬盘 / 检查准备 %.2f 秒',clock.uptime()-(prepStarted or clock.uptime())))
+  firstMoveStarted=true
+ end
  assert(call(T,'transferItem',from,to,1,source,dest)==1,'搬盘返回值未确认，不重试')
  local actual,result=describe(stack(to,dest))
  assert(stack(from,source)==nil and actual==expected and (not key or result and result.key==key),'搬盘后槽位/内容不符，不重试')
@@ -197,9 +190,10 @@ local function runPort(side,rs,endDisk,endHive,kind,key)
   guard()
   local at,n,row
   -- Read stationary output first; input/output readings can straddle an AE tick.
-  for slot=7,12 do local item=stack(side,slot);if item then
-   assert(not at,'IO输出口出现多张盘');at=slot;n,row=describe(item)
-  end end
+  -- Both ports are fully checked empty before starting, then only one cell
+  -- is inserted into input 1. Output 7 is that operation's first free output.
+  local item=stack(side,7)
+  if item then at=7;n,row=describe(item)end
   if not at then local item=stack(side,1);if item then n,row=describe(item) end end
   local h,p=hive()
   if record.operationTotal then
@@ -253,7 +247,7 @@ end
 local M={}
 function M.preview()
  local size=discover();local h,p=hive();local cells=bank(size)
- print('蜂群IO：装入侧'..cfg.loadSide..'，回收侧'..cfg.returnSide..'，硬盘盒侧'..cfg.bankSide..' / '..size..'槽；整盘搬运')
+ print('蜂群IO：装入侧'..cfg.loadSide..'，回收侧'..cfg.returnSide..'，硬盘盒侧'..cfg.bankSide..' / '..size..'槽（仅管理前10格）；IO输入1/输出7，整盘搬运')
  print('仓内：'..h..' 个 / T'..tostring(p and p.tier)..'；需求T'..tostring(needed()))
  for _,disk in ipairs(cells) do if disk.item then
   print('盘槽 '..disk.slot..'：T'..disk.item.tier..' / '..disk.count..' 个 / '..disk.item.label)
@@ -262,6 +256,7 @@ function M.preview()
  emptyPorts()
 end
 function M.ensure(ctx)
+ prepStarted=clock.uptime();firstMoveStarted=false
  local need=needed();if not whole(need) or need<1 then return false end
  if cfg.checkSharedHive then cfg.checkSharedHive()end
  context=ctx;local size=discover()

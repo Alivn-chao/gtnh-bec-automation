@@ -43,6 +43,8 @@ end
 function c.invoke(a,m,...)
  local args={...};local node=nodes[a]
  if node then
+  if m=='isWorkAllowed'then return node.workAllowed~=false end
+  if m=='setWorkAllowed'then node.workAllowed=args[1];return true end
   if m=='getState'then
    if node.started and s.now-node.started>=node.duration then node.done=true end
    if node.done then return 'idle'end

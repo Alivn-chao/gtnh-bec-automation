@@ -30,9 +30,9 @@ class ModuleTests(unittest.TestCase):
   self.assertEqual(self.lua.eval('rs[N]'),0)
   self.assertEqual(self.lua.eval("files['/home/bec_nanites.journal']"),'old-filling-record')
 
- def test_preview_and_bulk_read_false_method_flag(self):
+ def test_preview_reads_bounded_bank_without_bulk_export(self):
   self.module.preview()
-  self.assertEqual(self.lua.globals().bulkReads,1)
+  self.assertEqual(self.lua.globals().bulkReads,0)
   self.assertEqual(self.lua.globals().moves,0)
   self.assertEqual(self.lua.globals().writes,0)
 

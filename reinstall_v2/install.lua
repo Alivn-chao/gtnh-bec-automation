@@ -120,6 +120,12 @@ function M.environment(cfg,index,engine)
   end
   if a==n.redstone and (m=='getOutput' or m=='setOutput') then
    if m=='setOutput' then
+    if args[2]==0 then
+     -- Close every member's next-order admission before releasing ANY member.
+     for j,member in ipairs(cfg.nodes)do if member.group==n.group then
+      assert(c.invoke(member.address,'isWorkAllowed')==false,'放行前传送节点必须关闭接单: '..member.name)
+     end end
+    end
     for _,i in ipairs(members)do
      local member=cfg.nodes[i]
      local finished=entries[i].finished or task.released and c.invoke(member.address,'getState')=='idle'
@@ -171,6 +177,27 @@ function M.environment(cfg,index,engine)
   return c.invoke(a,m,table.unpack(args))
  end
  local env=setmetatable({}, {__index=_G});env._ENV=env
+ -- Explicit logical read only: always scans every member anew, never memoizes
+ -- across a yield, component call, or hardware mutation. This is not an OC API
+ -- or an atomic server-side snapshot.
+ env.BEC_V2_NODE_SNAPSHOT=nodeSnapshot
+ -- Gate setup validates the complete recipe once before writing, then checks
+ -- every member's actual pause state/output in each of the three readbacks.
+ -- The controller performs a fresh full current() check immediately afterward,
+ -- before any fluid transfer, generator start, or production release.
+ env.BEC_V2_GATE_STATE=function(full)
+  if full then return nodeSnapshot().state end
+  assert(not task.cancel,'用户暂停节点，保留进度')
+  local allIdle,allPaused=true,true
+  for _,i in ipairs(members)do
+   local member=cfg.nodes[i];local state=c.invoke(member.address,'getState')
+   assert(entries[i]and(not entries[i].finished or state=='idle'),'已完成节点提前接到新订单，保持整组暂停')
+   assert(c.invoke(member.redstone,'getOutput',member.pauseSide)==15,'过滤回读期间节点暂停信号变化')
+   if state~='idle'then allIdle=false end
+   if state~='idle'and state~='paused-immediate'and state~='nanite-tier-too-low'then allPaused=false end
+  end
+  return allIdle and 'idle'or allPaused and 'paused-immediate'or 'crafting'
+ end
  local sleeping={};for k,v in pairs(os) do sleeping[k]=v end
  sleeping.sleep=function(seconds)
   if task.cancel then error('用户暂停节点，保留进度') end
@@ -208,6 +235,7 @@ function M.environment(cfg,index,engine)
   text=replace(text,'"/home/bec_auto.journal"',string.format('%q',C.path('state/node-'..index..'/production.journal')))
   text=replace(text,"'/home/bec_nanites.journal'",string.format('%q',C.path('state/group-'..n.group..'/nanites.journal')))
   text=replace(text,'"/home/bec/recipes"',string.format('%q',cfg.recipeDirectory))
+  text=replace(text,'"/home/bec/recipes/"',string.format('%q',cfg.recipeDirectory..'/'))
   return assert(load(text,path,'t',env))
  end
  env.loadfile=function(path)
@@ -323,7 +351,7 @@ function M.validate(cfg,live)
   local key=n.redstone..':'..n.pauseSide;assert(not redstones[key],'红石输出线路重复');redstones[key]=true
   assert(not gates[n.gate] or gates[n.gate]==n.group,'不同生产组不能共享韦门');gates[n.gate]=n.group
   if live then
-   methods(n.address,{'getState','getRequiredTier','getRequiredCondensate','getParallelRecipesInProgress'},'传送节点')
+   methods(n.address,{'getState','getRequiredTier','getRequiredCondensate','getParallelRecipesInProgress','setWorkAllowed','isWorkAllowed'},'传送节点（需要可启停的机器组件）')
    if cfg.groups[n.group].nanites and cfg.groups[n.group].nanites.enabled and cfg.groups[n.group].nanites.mode=='cell-io'then methods(n.address,{'getAvailableNanites','getProvidedTier'},'蜂群读数节点')end
    methods(n.redstone,{'setOutput','getOutput'},'暂停红石')
    methods(n.gate,{'setCondensateFilters','getCondensateFilters','getCondensateFilterCount'},'韦门')
@@ -367,6 +395,19 @@ return function(cfg,C,Bridge,monitor)
   local n=cfg.nodes[i];c.invoke(n.redstone,'setOutput',n.pauseSide,15)
   assert(c.invoke(n.redstone,'getOutput',n.pauseSide)==15,'节点暂停回读失败')
  end
+ -- BEC_V2_BATCH_STOP_V1: workAllowed gates NEXT recipe acquisition;
+ -- the active batch still runs when its immediate-pause signal is released.
+ function E.nodeWork(i,enabled)
+  local n=cfg.nodes[i];local methods=c.methods(n.address)
+  assert(methods and methods.setWorkAllowed~=nil and methods.isWorkAllowed~=nil,'传送节点缺少启停接口: '..n.name)
+  if c.invoke(n.address,'isWorkAllowed')==enabled then return end
+  local path=C.path('state/node-'..i..'/batch-stop.dat')
+  local intent={version=2,node=n.address,enabled=enabled,stage='pending'}
+  C.write(path,intent)
+  c.invoke(n.address,'setWorkAllowed',enabled)
+  assert(c.invoke(n.address,'isWorkAllowed')==enabled,'传送节点启停回读不符: '..n.name)
+  intent.stage='confirmed';C.write(path,intent)
+ end
  function E.pauseNode(i)
   assert(not monitor,'只读监控不能修改机器')
   local group=cfg.nodes[i].group
@@ -374,6 +415,7 @@ return function(cfg,C,Bridge,monitor)
   for j,n in ipairs(cfg.nodes)do if n.group==group then
    local t=E.tasks[j];t.disabled=true;t.cancel=true
    local ok,reason=pcall(pause,j);if not ok then errors[#errors+1]=tostring(reason)end
+   ok,reason=pcall(E.nodeWork,j,false);if not ok then errors[#errors+1]=tostring(reason)end
    if not t.co then t.status='整组暂停'end
   end end
   assert(#errors==0,table.concat(errors,' / '))
@@ -399,6 +441,7 @@ return function(cfg,C,Bridge,monitor)
   for i,t in ipairs(E.tasks)do
    t.cancel=true;t.disabled=true
    local ok,e=pcall(pause,i);if not ok then errors[#errors+1]=tostring(e)end
+   ok,e=pcall(E.nodeWork,i,false);if not ok then errors[#errors+1]=tostring(e)end
   end
   for _,g in ipairs(cfg.groups)do for _,a in ipairs(g.generators)do
    local ok,e=pcall(function()c.invoke(a,'setWorkAllowed',false);assert(c.invoke(a,'isWorkAllowed')==false)end)
@@ -421,7 +464,7 @@ return function(cfg,C,Bridge,monitor)
   if t.fault or t.cancel then
    for _,a in ipairs(cfg.groups[group].generators)do pcall(c.invoke,a,'setWorkAllowed',false)end
    for j,n in ipairs(cfg.nodes)do if n.group==group then
-    E.tasks[j].disabled=true;E.tasks[j].status=t.fault and '同组故障，需核对' or '整组暂停';pcall(pause,j)
+    E.tasks[j].disabled=true;E.tasks[j].status=t.fault and '同组故障，需核对' or '整组暂停';pcall(pause,j);pcall(E.nodeWork,j,false)
    end end
   else for _,j in ipairs(t.members)do E.tasks[j].status='等待订单'end end
   C.write(cohortPath(group),{version=2,stage=(t.fault or t.cancel)and 'interrupted'or 'stopped',
@@ -434,8 +477,10 @@ return function(cfg,C,Bridge,monitor)
  end
  local function pending(i)
   local n=cfg.nodes[i];local state=c.invoke(n.address,'getState')
-  local req=c.invoke(n.address,'getRequiredCondensate');local p=c.invoke(n.address,'getParallelRecipesInProgress')
-  if (state~='paused-immediate' and state~='nanite-tier-too-low')or type(req)~='table'or not next(req)then return end
+  if state~='paused-immediate' and state~='nanite-tier-too-low'then return end
+  local req=c.invoke(n.address,'getRequiredCondensate')
+  if type(req)~='table'or not next(req)then return end
+  local p=c.invoke(n.address,'getParallelRecipesInProgress')
   assert(type(p)=='number'and p>=1,'节点并行不可读')
   local normalized={};for key,value in pairs(req)do normalized[key]=value/p end
   local tier=c.invoke(n.address,'getRequiredTier');tier=type(tier)=='table'and tier.tier or tier
@@ -455,6 +500,16 @@ return function(cfg,C,Bridge,monitor)
   for i,t in ipairs(E.tasks)do if t.co and (t.cancel or t.waitKind=='lock'and(not E.fluidOwner or E.fluidOwner==i)or t.waitKind~='lock'and clock.uptime()>=(t.deadline or 0))then advance(i)end end
   for group in ipairs(cfg.groups)do if not E.groupOwner[group]then
    local saved=C.read(cohortPath(group));local unfinished=saved and saved.stage~='stopped'
+   -- Reopen only after the previous cohort has finished its cleanup. Never
+   -- reopen on restart with an interrupted cohort awaiting manual review.
+   if not unfinished then
+    for j,n in ipairs(cfg.nodes)do if n.group==group and not E.tasks[j].disabled and not E.tasks[j].fault then
+     pause(j)
+     local journal=C.read(C.path('state/node-'..j..'/production.journal'))
+     local reviewed=not journal or journal.stage=='stopped' or E.tasks[j].reviewed
+     E.nodeWork(j,reviewed and c.invoke(n.address,'getState')=='idle')
+    end end
+   end
    local first=unfinished and saved.leader or (E.roundRobin[group]or 0)%#cfg.nodes+1
    for offset=0,#cfg.nodes-1 do
     local i=(first+offset-1)%#cfg.nodes+1;local t,n=E.tasks[i],cfg.nodes[i]
@@ -481,7 +536,10 @@ return function(cfg,C,Bridge,monitor)
       E.groupOwner[group]=i
       require('filesystem').makeDirectory(C.path('state/node-'..i))
       C.write(cohortPath(group),{version=2,stage='working',leader=i,members=t.members,entries=t.entries,normalized=t.normalized})
-      t.co=coroutine.create(function()E.acquire(i);Bridge.environment(cfg,i,E)(journal and 'resume'or 'run')end)
+      t.co=coroutine.create(function()
+       for j,v in ipairs(cfg.nodes)do if v.group==group then pause(j);E.nodeWork(j,false)end end
+       E.acquire(i);Bridge.environment(cfg,i,E)(journal and 'resume'or 'run')
+      end)
       advance(i);break
      end
     end
@@ -1283,7 +1341,9 @@ assert(call(RS, "getOutput", sides.top) == value, "红石输出回读不符") en
 assert(call(GEN, "isWorkAllowed") == enabled, "纠缠装置启停回读不符") end local function switchNanites()
 local needed=call(NODE,"getRequiredTier");needed=type(needed)=="table" and needed.tier or needed
 if type(needed)~="number" then return end
+local started=computer.uptime();print("检查蜂群 / 准备换盘")
 NANITES.ensure({tick=tick,stopping=function() return stopping end})
+print(string.format("蜂群检查/换盘完成：%.2f 秒",computer.uptime()-started))
 local provided=call(NODE,"getProvidedTier")
 assert(type(provided)=="table" and provided.tier>=needed and integer(call(NODE,"getAvailableNanites"))>=64,"蜂群等级或数量不足，保持暂停")
 lastNaniteTier=needed
@@ -1292,18 +1352,27 @@ local result={} for name,n in pairs(required) do assert(mapping[name] and intege
 end table.sort(result) assert(#result>0,"禁止写入全空过滤；全空会放行全部凝聚物") return result
 end local function verifyGate(expected) local count=integer(call(GATE,"getCondensateFilterCount")) assert(count>=#expected,"麦克斯韦门过滤槽不足")
 local actual=call(GATE,"getCondensateFilters") assert(type(actual)=="table" and same(actual,expected), "麦克斯韦门过滤回读不符；检查门的流体输入仓是否自动覆盖 OC 过滤") assert(call(GATE,"isWorkAllowed")==true,"麦克斯韦门未启用，保持暂停")
-assert(call(GATE,"isMachineActive")==true,"麦克斯韦门未运行；检查结构和供电，保持暂停") end local function configureGate(required) assert(call(RS,"getOutput",sides.top)==15 and call(NODE,"getState")=="paused-immediate",
+assert(call(GATE,"isMachineActive")==true,"麦克斯韦门未运行；检查结构和供电，保持暂停") end local function gateNodeState(full)
+if type(BEC_V2_GATE_STATE)=="function" then return BEC_V2_GATE_STATE(full) end
+return call(NODE,"getState") end
+local function configureGate(required) local started=computer.uptime();print("配置韦门 / 三轮回读")
+assert(call(RS,"getOutput",sides.top)==15 and gateNodeState(true)=="paused-immediate",
 "切换门过滤前节点必须立即暂停") local expected=gateFilters(required) assert(integer(call(GATE,"getCondensateFilterCount"))>=#expected,"麦克斯韦门过滤槽不足") local actual=call(GATE,"getCondensateFilters")
 assert(type(actual)=="table","麦克斯韦门过滤不可读") record.gateIntent={address=GATE,filters=expected};save(record.stage) if not same(actual,expected) then call(GATE,"setCondensateFilters",expected) end for i=1,3 do
-verifyGate(expected) assert(call(NODE,"getState")=="paused-immediate","设置过滤时订单状态变化") if i<3 then tick(0.1) end end
-print("麦克斯韦门过滤: "..table.concat(expected,", ")) return expected end local function tanks(side, name)
+verifyGate(expected) assert(gateNodeState(false)=="paused-immediate","设置过滤时订单状态变化") if i<3 then tick(0.1) end end
+print("麦克斯韦门过滤: "..table.concat(expected,", ")..string.format(" / 确认 %.2f 秒",computer.uptime()-started)) return expected end local function tanks(side, name)
 local count, amount = integer(call(TRANS, "getTankCount", side)), 0 assert(count > 0, "接口没有流体槽") for i = 1, count do local f = call(TRANS, "getFluidInTank", side, i)
 assert(type(f) == "table", "接口缓存不可读") if type(f[1]) == "table" then f = f[i] or f[1] end local n = integer(f.amount or 0) if n > 0 then
 assert(name and f.name == name, "接口有未处理流体缓存") amount = amount + n end end
 return amount end local function emptyConfig() for slot = 0, 5 do
 assert(call(MAIN, "getFluidInterfaceConfiguration", slot) == nil, "供液接口已有配置") end end local function current(recovering)
-local state=call(NODE,"getState") local unavailable=state=="assembler-offline" or state=="unpowered" or state=="nanite-tier-too-low" assert(state=="paused-immediate" or (recovering and unavailable and call(RS,"getOutput",sides.top)==15),"订单未处于立即暂停状态")
-local parallel=integer(call(NODE, "getParallelRecipesInProgress")) assert(parallel>=1,"暂停节点没有正在处理的配方") local required, consumed = call(NODE, "getRequiredCondensate"), call(NODE, "getConsumedCondensate") assert(type(required) == "table" and type(consumed) == "table", "订单需求不可读")
+-- V2 bridge can read all four adjacent fields in one fresh group scan.
+-- Outside that bridge, retain the original component getter path.
+local snapshot=type(BEC_V2_NODE_SNAPSHOT)=="function" and BEC_V2_NODE_SNAPSHOT() or nil
+local state=snapshot and snapshot.state or call(NODE,"getState") local unavailable=state=="assembler-offline" or state=="unpowered" or state=="nanite-tier-too-low" assert(state=="paused-immediate" or (recovering and unavailable and call(RS,"getOutput",sides.top)==15),"订单未处于立即暂停状态")
+local parallel=integer(snapshot and snapshot.parallel or call(NODE, "getParallelRecipesInProgress")) assert(parallel>=1,"暂停节点没有正在处理的配方") local required, consumed
+if snapshot then required,consumed=snapshot.required,snapshot.consumed else required,consumed=call(NODE,"getRequiredCondensate"),call(NODE,"getConsumedCondensate")end
+assert(type(required) == "table" and type(consumed) == "table", "订单需求不可读")
 local remaining, total = {}, 0 for name, amount in pairs(required) do assert(mapping[name], "不支持的凝聚物: " .. tostring(name)) amount = integer(amount)
 local used = integer(consumed[name] or 0) assert(used <= amount, "已消耗数量超过需求") remaining[name] = amount - used; total = total + amount end
 assert(total > 0, "订单没有有效需求") for name, amount in pairs(consumed) do assert(integer(amount) == 0 or required[name], "消耗记录与当前订单不符") end
@@ -1373,12 +1442,12 @@ tick(0.1) end if inletOpen then assert(call(MAIN,"setFluidInterfaceConfiguration
 record.configOwned=false;save("stream-inlet-cleared") end waitUntil(20,function() return tanks(4,raw)==0 end,unchanged) if stopping then return expected end
 end end assert(same(network(SUB),expected),"整批子网原液不符") record.plan=nil;save("stream-prepared")
 return expected end local function serve() local waiting={idle=true,["assembler-offline"]=true,unpowered=true,["nanite-tier-too-low"]=true}
-local round=0 while not stopping do pause(15); generator(false) local state=call(NODE,"getState")
-if stopping then break end state=call(NODE,"getState") if state=="paused-immediate" or state=="nanite-tier-too-low" then switchNanites();state=call(NODE,"getState") end if waiting[state] then
+local round=0 while not stopping do local nanitesChecked=false;pause(15); generator(false) local state=call(NODE,"getState")
+if stopping then break end state=call(NODE,"getState") if state=="paused-immediate" or state=="nanite-tier-too-low" then switchNanites();nanitesChecked=true;state=call(NODE,"getState") end if waiting[state] then
 if state~=record.lastState then print("等待订单/机器就绪: "..state.."；任意数量同配方订单均可，按 Q 停止。") record.lastState=state;save("waiting") end
 field();tick(0.1) else waitUntil(10,function() local v=call(NODE,"getState")
 return v=="paused-immediate",v end,function(v) assert(v=="crafting" or waiting[v],"无法暂停，实际状态: "..tostring(v)) field()
-end) switchNanites();if stopping then break end record.required,record.remaining=current() local target,count=batchTarget(record.required,record.remaining) local stable=false
+end) if not nanitesChecked then switchNanites()end;if stopping then break end record.required,record.remaining=current() local target,count=batchTarget(record.required,record.remaining) local stable=false
 for i=1,20 do tick(0.25);unchanged() local nextTarget,nextCount=batchTarget(record.required,record.remaining) if same(target,nextTarget) then stable=true;break end
 target,count=nextTarget,nextCount end assert(stable,"主网任务清单持续变化，保持暂停") if stopping then break end
 record.batchCount=count print("本组当前配方 "..count.." 份；当前实际并行 "..checkRecipe(record.required) .."；一次准备整批所需流体。") round=round+1;record.round=round;record.transfers={};record.target=target;record.plan=nil;record.topups={}
@@ -1670,6 +1739,7 @@ local tiers={Carbon={1,'Carbon'},Glowstone={1,'Glowstone'},Silver={2,'Silver'},
  SixPhasedCopper={5,'SixPhasedCopper'},WhiteDwarfMatter={6,'WhiteDwarf'},
  BlackDwarfMatter={7,'BlackDwarf'},Universium={8,'Universium'},Eternity={9,'Eternity'},MagMatter={10,'MagMatter'}}
 local record,context
+local prepStarted,firstMoveStarted
 local function call(a,m,...)
  local args={...}
  if a==T and type(args[1])=='number' then
@@ -1781,24 +1851,11 @@ local function emptyPorts()
   assert(stack(side,slot)==nil,'蜂群IO已有硬盘，保留未完成操作')
  end end
 end
+-- BEC_V2_STAGE_LATENCY_V2: only the first ten physical bank slots are managed.
 local function bank(size)
  local cells={}
- local ok,rows=pcall(function()
-  if c.methods(T).getAllStacks==nil then return end
-  local reader=call(T,'getAllStacks',0)
-  assert(reader.count()==size,'批量槽数不符')
-  local values=reader.getAll();assert(type(values)=='table')
-  for index in pairs(values) do assert(whole(index) and index>=1 and index<=size,'批量槽号不符') end
-  return values
- end)
- if not ok then rows=nil end
- for slot=1,size do
-  local item
-  if rows then
-   item=rows[slot]
-   if type(item)=='table' and item.name==nil then item=nil end
-   if item and (item.storedItemCount==nil or type(item.getAvailableItems)~='table') then item=stack(0,slot) end
-  else item=stack(0,slot) end
+ for slot=1,math.min(size,10)do
+  local item=stack(0,slot)
   if item then
    local n,row=describe(item)
    cells[#cells+1]={slot=slot,count=n,item=row,
@@ -1807,6 +1864,7 @@ local function bank(size)
  end
  return cells
 end
+
 local function pack(cells,key)
  local candidates={}
  for _,disk in ipairs(cells) do
@@ -1834,6 +1892,10 @@ local function move(from,to,source,dest,expected,key)
  assert(n==expected and (not key or row and row.key==key) and stack(to,dest)==nil,'搬盘前槽位/内容变化')
  record.pending={from=from,to=to,source=source,dest=dest,count=expected,key=key}
  save('moving-cell')
+ if not firstMoveStarted then
+  print(string.format('开始首次搬盘 / 检查准备 %.2f 秒',clock.uptime()-(prepStarted or clock.uptime())))
+  firstMoveStarted=true
+ end
  assert(call(T,'transferItem',from,to,1,source,dest)==1,'搬盘返回值未确认，不重试')
  local actual,result=describe(stack(to,dest))
  assert(stack(from,source)==nil and actual==expected and (not key or result and result.key==key),'搬盘后槽位/内容不符，不重试')
@@ -1846,9 +1908,10 @@ local function runPort(side,rs,endDisk,endHive,kind,key)
   guard()
   local at,n,row
   -- Read stationary output first; input/output readings can straddle an AE tick.
-  for slot=7,12 do local item=stack(side,slot);if item then
-   assert(not at,'IO输出口出现多张盘');at=slot;n,row=describe(item)
-  end end
+  -- Both ports are fully checked empty before starting, then only one cell
+  -- is inserted into input 1. Output 7 is that operation's first free output.
+  local item=stack(side,7)
+  if item then at=7;n,row=describe(item)end
   if not at then local item=stack(side,1);if item then n,row=describe(item) end end
   local h,p=hive()
   if record.operationTotal then
@@ -1902,7 +1965,7 @@ end
 local M={}
 function M.preview()
  local size=discover();local h,p=hive();local cells=bank(size)
- print('蜂群IO：装入侧'..cfg.loadSide..'，回收侧'..cfg.returnSide..'，硬盘盒侧'..cfg.bankSide..' / '..size..'槽；整盘搬运')
+ print('蜂群IO：装入侧'..cfg.loadSide..'，回收侧'..cfg.returnSide..'，硬盘盒侧'..cfg.bankSide..' / '..size..'槽（仅管理前10格）；IO输入1/输出7，整盘搬运')
  print('仓内：'..h..' 个 / T'..tostring(p and p.tier)..'；需求T'..tostring(needed()))
  for _,disk in ipairs(cells) do if disk.item then
   print('盘槽 '..disk.slot..'：T'..disk.item.tier..' / '..disk.count..' 个 / '..disk.item.label)
@@ -1911,6 +1974,7 @@ function M.preview()
  emptyPorts()
 end
 function M.ensure(ctx)
+ prepStarted=clock.uptime();firstMoveStarted=false
  local need=needed();if not whole(need) or need<1 then return false end
  if cfg.checkSharedHive then cfg.checkSharedHive()end
  context=ctx;local size=discover()

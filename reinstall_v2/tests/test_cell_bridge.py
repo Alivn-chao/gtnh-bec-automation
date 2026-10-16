@@ -8,6 +8,8 @@ from cell_fixture import SETUP, EXT
 V2 = Path(__file__).resolve().parents[1]/'files'
 BRIDGE_FIXTURE = r'''
 local c=require('component');local old=c.invoke;local oldType=c.type
+local oldMethods=c.methods
+c.methods=function(a)if a==NODE or a:match('^member')then return {setWorkAllowed=false,isWorkAllowed=false}end;return oldMethods(a)end
 function c.type(a)if a:match('^member')then return 'bec_io_node'end;return oldType(a)end
 function c.invoke(a,m,...)
  local args={...}
@@ -15,6 +17,7 @@ function c.invoke(a,m,...)
  if a=='gen'then if m=='isWorkAllowed'or m=='isMachineActive'then return generatorBusy or false end;if m=='setWorkAllowed'then generatorBusy=args[1];return true end end
  if a:match('^pause')then if m=='getOutput'then return unpaused and a=='pause2'and 0 or 15 end;if m=='setOutput'then return true end end
  if a==NODE or a:match('^member')then
+  if m=='setWorkAllowed'then allowed=args[1];return true end
   if m=='getRequiredCondensate'then return {entangled_transcendentmetal=144}end
   if m=='getConsumedCondensate'then return {}end
   if m=='getParallelRecipesInProgress'then return 1 end

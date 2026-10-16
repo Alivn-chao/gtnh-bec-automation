@@ -1,3 +1,5 @@
+> 2026-10-16：已同步 V1 批次接单启停，见 [BATCH_STOP.md](BATCH_STOP.md)。
+
 # BEC V2 从零安装与分享包
 
 适用 GTNH 2.9.0 Beta 3、OpenComputers + OpenOS。这里的“空硬盘”指已安装 OpenOS、没有 V1/V2 文件的硬盘；完全未格式化的盘须先用 OpenOS 安装盘执行 `install`，重启取出安装盘。准备联网卡、`wget`、普通 OC 屏幕/键盘、足够内存和磁盘、组件容量。
@@ -96,3 +98,11 @@ lua /home/bec_v2/main.lua setup-hd
 ```
 
 此更新器仅备份替换绑定模块和配置页面，不写生产配置、配方或现场日志。草稿保存在 `/home/bec_v2/bindings.draft.dat`，与生效配置分开。
+
+## 读取优化预览（2026-10-16）
+
+当前本地源码包含减少整组重复读取的 preview 1，详见 [READ_OPTIMIZATION.md](READ_OPTIMIZATION.md)。原有 GitHub 发布标签保持原样；本次尚未游戏验收。已有 V2 可使用独立 `update_reads.lua`，不需要从空盘重装。
+
+## 阶段切换提速 preview 2
+
+针对换蜂前检查和下一配方韦门确认的延迟，已收窄硬盘箱到前10格、IO等待到1/7格，避免同轮重复换蜂检查，并精简三轮韦门确认中的重复组数据读取。仍全槽检查IO留盘，保留三轮过滤回读和供液前完整配方检查。更新器现为4文件并兼容preview1。使用和模拟数据见 [STAGE_LATENCY.md](STAGE_LATENCY.md)。尚未游戏验收。
