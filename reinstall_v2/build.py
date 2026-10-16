@@ -26,7 +26,7 @@ def build():
     (HERE/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8',newline='\n')
     output=HERE/'dist';output.mkdir(exist_ok=True)
     with zipfile.ZipFile(output/'bec-v2-clean-install.zip','w',zipfile.ZIP_DEFLATED)as z:
-        for p in [HERE/'install.lua',HERE/'README.md',HERE/'manifest.json',HERE/'OCHD_PROGRESS.md',HERE/'READ_OPTIMIZATION.md',HERE/'STAGE_LATENCY.md',HERE/'BATCH_STOP.md',HERE/'update_reads.lua',*(HERE/'files').rglob('*')]:
+        for p in [HERE/'install.lua',HERE/'README.md',HERE/'manifest.json',HERE/'OCHD_PROGRESS.md',HERE/'WEB_INPUT.md',HERE/'READ_OPTIMIZATION.md',HERE/'STAGE_LATENCY.md',HERE/'BATCH_STOP.md',HERE/'update_reads.lua',HERE/'update_web.lua',*(HERE/'files').rglob('*')]:
             if p.is_file():z.writestr(p.relative_to(HERE).as_posix(),p.read_bytes().replace(b'\r\n',b'\n'))
     print('Bundled',len(entries),'files;',len(text.encode('utf-8')),'installer bytes')
 

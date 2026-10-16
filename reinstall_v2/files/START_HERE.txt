@@ -1,4 +1,4 @@
-OCHD HTML预览5需要alpha7及配套客户端网页运行时；尚待Minecraft实机验收。
+OCHD HTML支持alpha7/alpha8；删除与滚轮修复需要alpha8客户端输入补丁，见WEB_INPUT.md。
 BEC V2 全新安装 / OpenOS
 
 OCHD 三维绑定与自动化流程（开发预览）：
@@ -26,7 +26,7 @@ lua /home/bec_v2/main.lua run
 使用自己的仓库和仅该仓库Contents读写token，不分享凭据。
 
 完整接线和分享说明：
-https://github.com/Alivn-chao/gtnh-bec-automation/tree/bec-v2-ochd-preview-2026-10-16.1/reinstall_v2
+https://github.com/Alivn-chao/gtnh-bec-automation/tree/bec-v2-web-input-2026-10-17/reinstall_v2
 
 配置和安装不会开机；pause和run会控制机器。约束场始终保持开启。
 不同时运行V1/V2控制同一设备。全部V2数据保留在/home/bec_v2。

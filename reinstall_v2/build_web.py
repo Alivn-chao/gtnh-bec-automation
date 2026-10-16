@@ -12,7 +12,7 @@ def build():
  # Runtime work indication is separate from the selected-module highlight.
  html=html.replace("m.id===self.hovered?.45:0", "m.id===self.hovered?.45:(self.liveStates&&self.liveStates[m.id]==='active'?.7:0)")
  html=html.replace('</head>','<style>'+(HERE/'web/control.css').read_text(encoding='utf-8')+'</style></head>',1)
- html=html.replace('</body>','<script>'+(HERE/'web/control.js').read_text(encoding='utf-8')+'</script></body>',1)
+ html=html.replace('</body>','<script>'+(HERE/'web/input-controls.js').read_text(encoding='utf-8')+'</script><script>'+(HERE/'web/control.js').read_text(encoding='utf-8')+'</script></body>',1)
  html=html.replace('BEC 结构配置台 · 交互原型','BEC V2 · 结构绑定与自动化流程')
  package={'id':'bec-v2-studio','title':'BEC V2 结构绑定与运行','entry':'index.html','files':{'index.html':html},'events':['save_field','apply_bindings','start','pause','select_group','refresh']}
  encoded=json.dumps(package,ensure_ascii=False,separators=(',',':')).encode()

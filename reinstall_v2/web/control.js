@@ -33,7 +33,7 @@ function data(d){var changed=group!==(d.group||1);last=d;online=d._online!==fals
  document.body.classList.toggle('runtime-running',d.mode==='running');$('flow-panel').hidden=false;$('start-run').textContent=d.mode==='running'?'运行中':'启动自动化';$('start-run').disabled=!online||d.mode==='running'||!d.configured||inflight||!!waiting||!!Object.keys(queue).length;
  $('apply-config').disabled=!online||d.mode==='running'||inflight||!!waiting||!!Object.keys(queue).length;$('stop-run').disabled=!online||d.mode!=='running';$('global-settings').disabled=d.mode==='running';
  if(!online)status('OC 离线 · 未保存操作',true);else if(failed)status('保存未确认 · 点击重试',true);else if(!inflight&&!waiting&&!Object.keys(queue).length)status('OC 已连接 · 草稿已保存');
- if($('group-select').options.length!==d.groupCount){$('group-select').innerHTML=Array.from({length:d.groupCount||1},function(_,i){return '<option value="'+(i+1)+'">设备组 '+String(i+1).padStart(2,'0')+'</option>';}).join('');}$('group-select').value=group;
+ if($('group-select').options.length!==d.groupCount){$('group-select').innerHTML=Array.from({length:d.groupCount||1},function(_,i){return '<option value="'+(i+1)+'">设备组 '+String(i+1).padStart(2,'0')+'</option>';}).join('');}$('group-select').value=group;if(window.BEC_REFRESH_SELECTS)window.BEC_REFRESH_SELECTS();
  markMachines();flow();pump();
 }
 function action(name){if(inflight||waiting||Object.keys(queue).length){$('runtime-notice').textContent='请先等待草稿保存完成。';return;}send(name,{revision:last&&last.revision}).then(function(r){$('runtime-notice').textContent=r.message||'请求已确认';}).catch(function(e){$('runtime-notice').textContent=e.message;});}

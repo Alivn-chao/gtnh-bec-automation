@@ -44,8 +44,8 @@
     "sha256": "6ab7b6a9762c0a9a93a91bf0d724d1710d0009f5ecd19a9cc9b68a1d7631fd3c"
   },
   "lib/web_page.html": {
-    "bytes": 226106,
-    "sha256": "21d6b7858914666ef7b55f0bab94d476c3b73b09084d46fb65e599bf89b76a3f"
+    "bytes": 231820,
+    "sha256": "a78f1f71aa1eafafea7c4edcf53626134ddec059392e7a57b026d0037413b57f"
   },
   "lib/web_session.lua": {
     "bytes": 8356,
@@ -80,8 +80,8 @@
     "sha256": "cfe5260ceff367d46ca14a911424280c24792da46aa56a97d75625a327b8b05d"
   },
   "START_HERE.txt": {
-    "bytes": 1550,
-    "sha256": "039fc824a664c0aa0fa4edc4350502543aba7a7f94d0fa23a0c60fd01328af5b"
+    "bytes": 1557,
+    "sha256": "8c237fb05dbcca32493ec5ffcc9f8d31fb4062f9e9ee25d7b7da557d786b8e95"
   },
   "web.lua": {
     "bytes": 2027,
