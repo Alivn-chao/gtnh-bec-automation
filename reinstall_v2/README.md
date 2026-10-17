@@ -1,3 +1,5 @@
+缓存部分搬运返回引发保护暂停：实际回执记账修复，以及本次空间流体补96收尾工具，见 [CACHE_PARTIAL.md](CACHE_PARTIAL.md)。保留原日志，不重下AE申请。
+
 重启后读取配方一直等idle：已修复旧批次占用设备组不退出的路径，小更新见 [IDLE_COHORT.md](IDLE_COHORT.md)。
 
 蜂群检查优化：16节点同一轮组件读取292→100，保留整组核对；小更新见 [HIVE_INSPECTION.md](HIVE_INSPECTION.md)。

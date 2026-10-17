@@ -1,4 +1,8 @@
 {
+  "cache_recover.lua": {
+    "bytes": 11033,
+    "sha256": "673aa00cf1f041785dace744101434e4fa0d793d57272310fe5728297b7d7f77"
+  },
   "lib/bridge.lua": {
     "bytes": 17823,
     "sha256": "92020f15438574a6a2e42b54c50254197e39e439ba4b3f19af571cf093a114d2"
@@ -68,8 +72,8 @@
     "sha256": "62af11aaee364f7bfe205ea1f4d1f4ef6ba1e6c6813e641d7733f49f6b088a23"
   },
   "runtime/cache.lua": {
-    "bytes": 28595,
-    "sha256": "97c1228156aa540e951f13c6c80b208af0b976f9620227758d3acc78faae0008"
+    "bytes": 28964,
+    "sha256": "b7e4c89013c9f2b879078d387e4ef7f8f5560d6979f4661f5d6caa42c0821f68"
   },
   "runtime/controller.lua": {
     "bytes": 37578,

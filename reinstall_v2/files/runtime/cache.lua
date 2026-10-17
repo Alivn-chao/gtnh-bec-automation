@@ -151,12 +151,15 @@ print(raw.." 整批目标 "..need.." mB；到账即搬入子网。") local job,s
 local attempts=0 local inletOpen=false local deadline=computer.uptime()+1800
 while not stopping do unchanged();assert(same(field(),stock),"备料时约束场库存变化") assert(same(network(SUB),previous),"备料时子网库存变化")
 priority=priority or productionWaiting()
-local remaining=need-(previous[raw] or 0) local buffered=network(MAIN)[raw] or 0 local amount=priority and 0 or math.floor(math.min(remaining,buffered,chunk)/batch)*batch
+local remaining=need-(previous[raw] or 0) local settling=(batch-(previous[raw]or 0)%batch)%batch
+local buffered=network(MAIN)[raw] or 0 local amount=math.floor(math.min(priority and settling or remaining,buffered,chunk))
 if amount>0 then verifyBulk(route,raw);local address,from,to=route.address,route.from,route.to
 record.pending={raw=raw,amount=amount,address=address,from=from,to=to};save("transfer-pending") local ok,moved=call(address,"transferFluid",from,to,amount) record.transfers[#record.transfers+1]={raw=raw,ok=ok,amount=moved,requested=amount,address=address,from=from,to=to}
-save("transfer-returned") assert(ok==true and moved==amount,"未完整确认搬运，停止且不重试") previous[raw]=(previous[raw] or 0)+amount
-waitUntil(10,function() return same(network(SUB),previous) end,unchanged) record.pending=nil;record.secured=previous;save("stream-transfer-confirmed") print(raw.." 已入子网 "..previous[raw].." / "..need.." mB")
-deadline=computer.uptime()+1800 end remaining=need-(previous[raw] or 0)
+save("transfer-returned") assert(ok==true and type(moved)=="number" and moved>=0 and moved<=amount and moved==math.floor(moved),"搬运返回值未确认，停止且不重试") if moved>0 then previous[raw]=(previous[raw] or 0)+moved end
+waitUntil(10,function() return same(network(SUB),previous) end,unchanged)
+if moved==0 then table.remove(record.transfers);record.zeroTransfers=(record.zeroTransfers or 0)+1 else deadline=computer.uptime()+1800 end
+record.pending=nil;record.secured=previous;save("stream-transfer-confirmed") print(raw.." 已入子网 "..(previous[raw]or 0).." / "..need.." mB；本次 "..moved.." / "..amount)
+end remaining=need-(previous[raw] or 0);settling=(batch-(previous[raw]or 0)%batch)%batch
 if remaining==0 and inletOpen then assert(call(MAIN,"setFluidInterfaceConfiguration",0)==true,"清供液配置失败") record.configOwned=false;inletOpen=false;save("stream-inlet-cleared")
 waitUntil(20,function() return tanks(4,raw)==0 end,unchanged) end -- BEC_V1_SEQUENTIAL_CPU_WAIT_V1: keep both production fallback and cache alive while CPUs are occupied.
 local supplyWaiting=false
@@ -183,10 +186,10 @@ if status and job.state=='submitted' then
   else supplyWait('AE 合成进行中，继续收料')end
  end
 end
-if priority and (not job or job.state=='done' or job.state=='rejected')then return handoff()end
+if priority and settling==0 and (not job or job.state=='done' or job.state=='rejected')then return handoff()end
 if remaining==0 and (not job or job.state=='done' or job.state=='rejected')then record.supplyWait=nil;break end
-if not priority and remaining>0 and (not job or job.state=='done' or job.state=='rejected')then
- local function deficit()return math.max(0,need-(previous[raw]or 0)-bufferedInlet()-(network(MAIN)[raw]or 0))end
+if (not priority or settling>0) and remaining>0 and (not job or job.state=='done' or job.state=='rejected')then
+ local function deficit()return math.max(0,(priority and settling or remaining)-bufferedInlet()-(network(MAIN)[raw]or 0))end
  local missing=deficit()
  if missing>0 and (not doneAt or computer.uptime()-doneAt>=3)then
   if job and job.state=='done'then assert((previous[raw]or 0)>job.securedBefore,'原液合成已结束但没有收获，核对竞争设备')end
@@ -292,5 +295,5 @@ for name,need in pairs(target) do if (final[name] or 0)<need then record.incompl
 end end save("stopped") print(stopping and "预缓存已暂停，已有原液/凝聚物保留。" or background and "预缓存完成（本轮）；统一目标仍以界面各项库存为准。" or "预缓存完成；凝聚物留在约束场，生产时直接抵扣。")
 end local ok,err=xpcall(cacheMain,debug.traceback) if not ok then
 if armed then pcall(pause,15);pcall(generator,false) if record.configOwned then pcall(call,MAIN,"setFluidInterfaceConfiguration",0) end
-end print("预缓存停止："..tostring(err));print("保留 /home/bec_cache.journal 和库存，不删除日志重跑。") end
+end print("预缓存停止："..tostring(err));print("保留 "..JOURNAL.." 和库存，不删除日志重跑。") end
 return ok,err
