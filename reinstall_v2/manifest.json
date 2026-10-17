@@ -1,7 +1,7 @@
 {
   "lib/bridge.lua": {
-    "bytes": 16388,
-    "sha256": "240a141b229961837d55d72c7529a0f56c575e9e81043a29b41b299a52ef09f7"
+    "bytes": 17531,
+    "sha256": "6686216053b84830544effd61022ea730215d6a11c9961dd47dc4b00d6080b6b"
   },
   "lib/cache.lua": {
     "bytes": 14567,
@@ -80,8 +80,8 @@
     "sha256": "c97071568387b5ba16fa8ae1cdcf3d2b67c6caaa6706aca168589616264e98ad"
   },
   "runtime/nanites_cell.lua": {
-    "bytes": 15338,
-    "sha256": "f51fb5572ab815cf3817a6375ce9cb7d648f7a357363648a0f2995aaf535918f"
+    "bytes": 15841,
+    "sha256": "8e923641703e030c8573b42a3adbefc562a4c84ec1f16b0f2277d234a3ac1c0e"
   },
   "runtime/patterns.lua": {
     "bytes": 7842,

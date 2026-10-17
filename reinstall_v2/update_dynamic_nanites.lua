@@ -19,11 +19,14 @@ function M.environment(cfg,index,engine)
  local task=engine.tasks[index]
  local members=task.members or {index}
  local entries=task.entries or {}
- local function nodeSnapshot()
+ local function nodeSnapshot(paused)
   local snapshot={required={},consumed={},parallel=0,requiredTier=0,allIdle=true,allPaused=true}
   for _,i in ipairs(members) do
    local address=cfg.nodes[i].address
    local state=c.invoke(address,'getState')
+   if paused then
+    assert(c.invoke(cfg.nodes[i].redstone,'getOutput',cfg.nodes[i].pauseSide)==15 and (state=='idle'or state=='paused-immediate'or state=='nanite-tier-too-low'),'换蜂必须暂停整组节点')
+   end
    local current=c.invoke(address,'getRequiredCondensate')
    local entry=entries[i]
    assert(entry,'生产组缺少节点快照')
@@ -99,6 +102,19 @@ function M.environment(cfg,index,engine)
   for _,a in ipairs(g.generators)do assert(c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false,'换蜂群必须等待全部纠缠器停机')end
   assert(not task.cancel,'用户暂停蜂群操作，保留记录')
   if checkHive then assert(sharedHiveReady(),'组内蜂群仓读数不同，核对是否共用同一收容网')end
+ end
+ -- One fresh, complete recipe snapshot per IO check, without expanding each
+ -- logical state/tier/family getter into another full cohort scan.
+ local function cellInspection()
+  awaitLock();assert(not task.cancel,'用户暂停蜂群操作，保留记录')
+  local value=nodeSnapshot(true);local included={}
+  for _,i in ipairs(members)do included[i]=true end
+  for i,member in ipairs(cfg.nodes)do if member.group==n.group and not included[i]then
+   local state=c.invoke(member.address,'getState')
+   assert(c.invoke(member.redstone,'getOutput',member.pauseSide)==15 and (state=='idle'or state=='paused-immediate'or state=='nanite-tier-too-low'),'换蜂必须暂停整组节点')
+  end end
+  for _,a in ipairs(g.generators)do assert(c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false,'换蜂必须等待全部纠缠器停机')end
+  return value
  end
 
  function native.list(...)
@@ -244,6 +260,7 @@ function M.environment(cfg,index,engine)
   env.BEC_CELL_IO.node=n.address;env.BEC_CELL_IO.redstone=n.redstone;env.BEC_CELL_IO.pauseSide=n.pauseSide
   env.BEC_CELL_IO.path=C.path('state/group-'..n.group..'/nanites-cell.journal')
   env.BEC_CELL_IO.checkGroup=cellGuard
+  env.BEC_CELL_IO.inspect=cellInspection
   env.BEC_CELL_IO.checkSharedHive=function()cellGuard(true)end
   env.BEC_CELL_IO.sharedHiveReady=sharedHiveReady
  end
@@ -572,6 +589,11 @@ local function hive()
  return n,p
 end
 local function guard()
+ if cfg.inspect then
+  local v=cfg.inspect()
+  assert(v.requiredTier==record.requiredTier,'换蜂过程中配方等级变化，保留现场')
+  assert(not record.requiredFamily or v.requiredFamily==record.requiredFamily,'换蜂过程中蜂群类型需求变化，保留现场')
+ else
  cfg.checkGroup()
  assert(call(PAUSE,'getOutput',cfg.pauseSide)==15,'换蜂必须保持传送节点暂停红石15')
  local s=call(NODE,'getState')
@@ -579,12 +601,13 @@ local function guard()
   s=='idle' and call(NODE,'isWorkAllowed')==false,'节点状态不适合换蜂：'..tostring(s))
  assert(needed()==record.requiredTier,'换蜂过程中配方等级变化，保留现场')
  assert(not record.requiredFamily or requiredFamily()==record.requiredFamily,'换蜂过程中蜂群类型需求变化，保留现场')
+ end
  if context and context.check then context.check() end
  if context and context.stopping and context.stopping() then error('换蜂已暂停，保留现场') end
 end
 local function tick()
  if context and context.tick then context.tick(0.1) else os.sleep(0.1) end
- guard()
+ -- runPort checks freshly at the start of its next iteration, after this yield.
 end
 local function output(a,n)
  call(a,'setOutput',0,n);assert(call(a,'getOutput',0)==n,'IO向下红石回读失败')
@@ -763,12 +786,13 @@ function M.preview()
 end
 function M.ensure(ctx)
  prepStarted=clock.uptime();firstMoveStarted=false
- local need=needed();if not whole(need) or need<1 then return false end
+ local initial=cfg.inspect and cfg.inspect()
+ local need=initial and initial.requiredTier or needed();if not whole(need) or need<1 then return false end
  if cfg.checkSharedHive then cfg.checkSharedHive()end
  context=ctx;local size=discover()
  local old=oldRecord();assert(not old or old.stage=='done','旧蜂群IO未完成，保留盘和日志，不自动重放')
  emptyPorts()
- local family=requiredFamily()
+ local family;if initial then family=initial.requiredFamily else family=requiredFamily()end
  local cells=bank(size);local h,p=hive();local best=choose(cells,need,family)
  local known=old and sameBinding(old.binding)and old.holding
  -- A saturated node reading cannot prove the current raw quantity. Recover to

@@ -2053,11 +2053,14 @@ function M.environment(cfg,index,engine)
  local task=engine.tasks[index]
  local members=task.members or {index}
  local entries=task.entries or {}
- local function nodeSnapshot()
+ local function nodeSnapshot(paused)
   local snapshot={required={},consumed={},parallel=0,requiredTier=0,allIdle=true,allPaused=true}
   for _,i in ipairs(members) do
    local address=cfg.nodes[i].address
    local state=c.invoke(address,'getState')
+   if paused then
+    assert(c.invoke(cfg.nodes[i].redstone,'getOutput',cfg.nodes[i].pauseSide)==15 and (state=='idle'or state=='paused-immediate'or state=='nanite-tier-too-low'),'换蜂必须暂停整组节点')
+   end
    local current=c.invoke(address,'getRequiredCondensate')
    local entry=entries[i]
    assert(entry,'生产组缺少节点快照')
@@ -2133,6 +2136,19 @@ function M.environment(cfg,index,engine)
   for _,a in ipairs(g.generators)do assert(c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false,'换蜂群必须等待全部纠缠器停机')end
   assert(not task.cancel,'用户暂停蜂群操作，保留记录')
   if checkHive then assert(sharedHiveReady(),'组内蜂群仓读数不同，核对是否共用同一收容网')end
+ end
+ -- One fresh, complete recipe snapshot per IO check, without expanding each
+ -- logical state/tier/family getter into another full cohort scan.
+ local function cellInspection()
+  awaitLock();assert(not task.cancel,'用户暂停蜂群操作，保留记录')
+  local value=nodeSnapshot(true);local included={}
+  for _,i in ipairs(members)do included[i]=true end
+  for i,member in ipairs(cfg.nodes)do if member.group==n.group and not included[i]then
+   local state=c.invoke(member.address,'getState')
+   assert(c.invoke(member.redstone,'getOutput',member.pauseSide)==15 and (state=='idle'or state=='paused-immediate'or state=='nanite-tier-too-low'),'换蜂必须暂停整组节点')
+  end end
+  for _,a in ipairs(g.generators)do assert(c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false,'换蜂必须等待全部纠缠器停机')end
+  return value
  end
 
  function native.list(...)
@@ -2278,6 +2294,7 @@ function M.environment(cfg,index,engine)
   env.BEC_CELL_IO.node=n.address;env.BEC_CELL_IO.redstone=n.redstone;env.BEC_CELL_IO.pauseSide=n.pauseSide
   env.BEC_CELL_IO.path=C.path('state/group-'..n.group..'/nanites-cell.journal')
   env.BEC_CELL_IO.checkGroup=cellGuard
+  env.BEC_CELL_IO.inspect=cellInspection
   env.BEC_CELL_IO.checkSharedHive=function()cellGuard(true)end
   env.BEC_CELL_IO.sharedHiveReady=sharedHiveReady
  end

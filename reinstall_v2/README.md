@@ -1,3 +1,5 @@
+蜂群检查优化：16节点同一轮组件读取292→100，保留整组核对；小更新见 [HIVE_INSPECTION.md](HIVE_INSPECTION.md)。
+
 网页连接闪烁、缓存页无法滚动、换蜂后误暂停修复：见 [WEB_CONNECTION.md](WEB_CONNECTION.md)。已有缓存版使用 `update_connection.lua`，保留绑定与日志。
 
 网页新增第三个页签「缓存管理」：默认库存目标、每种流体自定义、0停补与真实后台补库，沿用V1缓存工作器。安装及操作见 [CACHE_MANAGEMENT.md](CACHE_MANAGEMENT.md)。

@@ -73,6 +73,11 @@ local function hive()
  return n,p
 end
 local function guard()
+ if cfg.inspect then
+  local v=cfg.inspect()
+  assert(v.requiredTier==record.requiredTier,'换蜂过程中配方等级变化，保留现场')
+  assert(not record.requiredFamily or v.requiredFamily==record.requiredFamily,'换蜂过程中蜂群类型需求变化，保留现场')
+ else
  cfg.checkGroup()
  assert(call(PAUSE,'getOutput',cfg.pauseSide)==15,'换蜂必须保持传送节点暂停红石15')
  local s=call(NODE,'getState')
@@ -80,12 +85,13 @@ local function guard()
   s=='idle' and call(NODE,'isWorkAllowed')==false,'节点状态不适合换蜂：'..tostring(s))
  assert(needed()==record.requiredTier,'换蜂过程中配方等级变化，保留现场')
  assert(not record.requiredFamily or requiredFamily()==record.requiredFamily,'换蜂过程中蜂群类型需求变化，保留现场')
+ end
  if context and context.check then context.check() end
  if context and context.stopping and context.stopping() then error('换蜂已暂停，保留现场') end
 end
 local function tick()
  if context and context.tick then context.tick(0.1) else os.sleep(0.1) end
- guard()
+ -- runPort checks freshly at the start of its next iteration, after this yield.
 end
 local function output(a,n)
  call(a,'setOutput',0,n);assert(call(a,'getOutput',0)==n,'IO向下红石回读失败')
@@ -264,12 +270,13 @@ function M.preview()
 end
 function M.ensure(ctx)
  prepStarted=clock.uptime();firstMoveStarted=false
- local need=needed();if not whole(need) or need<1 then return false end
+ local initial=cfg.inspect and cfg.inspect()
+ local need=initial and initial.requiredTier or needed();if not whole(need) or need<1 then return false end
  if cfg.checkSharedHive then cfg.checkSharedHive()end
  context=ctx;local size=discover()
  local old=oldRecord();assert(not old or old.stage=='done','旧蜂群IO未完成，保留盘和日志，不自动重放')
  emptyPorts()
- local family=requiredFamily()
+ local family;if initial then family=initial.requiredFamily else family=requiredFamily()end
  local cells=bank(size);local h,p=hive();local best=choose(cells,need,family)
  local known=old and sameBinding(old.binding)and old.holding
  -- A saturated node reading cannot prove the current raw quantity. Recover to
