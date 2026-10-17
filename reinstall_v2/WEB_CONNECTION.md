@@ -35,4 +35,4 @@ lua /home/bec_v2/main.lua web
 
 2026-10-17 r2：用户实机提示“无法释放本次临时下载包”，在替换程序前已退出。临时包清理改为可选，保留空间检查；新增 remove 返回false/nil或抛错的成功安装与空间不足拒绝模拟。
 
-2026-10-17 r3：实机OpenOS无collectgarbage，改为可选pcall，不再依赖该全局函数。模拟无GC且remove失败仍安装通过。已有r2不用重新下载：进入lua解释器，执行 `collectgarbage=function()end;dofile("/home/bec_connection_update.lua")`，成功后Ctrl+D退出，再打开网页。这个空函数只用于当前解释器会话。
+2026-10-17 r3：实机OpenOS无collectgarbage，改为可选pcall，不再依赖该全局函数。模拟无GC且remove失败仍安装通过。实机已证实：解释器临时定义的空函数不会可靠传入 dofile 的执行环境，该补救方法作废。旧版用户必须重新下载 r3，再从命令行运行。

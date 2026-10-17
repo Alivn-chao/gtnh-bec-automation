@@ -13,14 +13,11 @@ def make():
  l.globals().files['/home/bec_v2/state/group-1/cache.journal']='keep-unconfirmed'
  return l
 class ConnectionUpdateTests(unittest.TestCase):
- def test_openos_without_collectgarbage_and_existing_r2_workaround(self):
-  for legacy in [False,True]:
-   l=make();script=SCRIPT
-   if legacy:script=subprocess.check_output(['git','show','9e52354:reinstall_v2/update_connection.lua'],cwd=HERE.parent).decode()
-   l.globals().files['/home/bec_connection_update.lua']=script
-   l.execute("collectgarbage=nil;local fs=require('filesystem');fs.remove=function()return nil,'no such file or directory'end")
-   if legacy:l.execute('collectgarbage=function()end')
-   l.execute(script)
+ def test_openos_missing_or_restricted_collectgarbage(self):
+  for gc in ['collectgarbage=nil',"collectgarbage=function()error('restricted')end"]:
+   l=make();l.globals().files['/home/bec_connection_update.lua']=SCRIPT
+   l.execute(gc+";local fs=require('filesystem');fs.remove=function()return nil,'no such file or directory'end")
+   l.execute(SCRIPT)
    for n in NAMES:self.assertEqual(l.globals().files['/home/bec_v2/'+n],(HERE/'files'/n).read_text(encoding='utf-8'))
    self.assertEqual(l.globals().files['/home/bec_v2/cache.config'],'keep-targets')
 

@@ -296,3 +296,5 @@ getConsumedCondensate 在空闲时仍保留上一单的消耗记录，不能当�
 2026-10-17 heartbeat r2：用户确实执行更新但提示无法释放本次临时下载包，并非spaceassert；原程序未替换。OpenOS fs.remove(self)失败不可断言成功；新updater pcall可选删除，回读exists判断，失败保留下载包，仍检查bytes+512KiB空间。新增false/nil/throw共6分支模拟通过。用户/home清单仅bec_connection_update.lua,bec_bulk10.lua,bec_web_update.lua,bec_v2-stage-nanites-,bec_v2/,.shrc。建议只删旧临时bec_bulk10.lua和bec_web_update.lua释放空间，再下载r2；不能删bec_v2/或未知stage目录。标签bec-v2-web-heartbeat-2026-10-17-r2，运行程序9文件与原heartbeat完全相同，仅安装器改。
 
 2026-10-17 heartbeat r3：用户r2更新在1675行collectgarbage=nil处失败，未替换程序。OpenOS无collectgarbage，cachebuilder改type检查+pcall；同步cache/connection生成包。测试新版无GC+remove返回nil失败、已有9e52354 r2用collectgarbage=function()end后加载都成功，10安装器测试通过。用户可不下载：lua进入解释器，collectgarbage=function()end;dofile("/home/bec_connection_update.lua")，成功后Ctrl+D再main web。标签bec-v2-web-heartbeat-2026-10-17-r3。
+
+2026-10-17：用户实机证明r2解释器collectgarbage空函数+dofile补救失败；OpenOS环境隔离/包装使定义未传入被加载脚本，不能再建议该办法。截图显示临时包这次已经释放，随后GC处失败，程序尚未替换；必须Ctrl+D退解释器下载r3再运行。r3 CDN已逐字验证343149B SHA256 21501d13a7466e5f75b384b5be9dadc819cf53ad16b5eba8e7231be434d1a2c9。
