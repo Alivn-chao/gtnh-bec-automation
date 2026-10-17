@@ -1,7 +1,8 @@
 local c=require('component')
 local clock=require('computer')
 return function(cfg,C,Bridge,monitor)
- local E={tasks={},groupOwner={},fluidOwner=nil,logs={},monitor=monitor,roundRobin={}}
+ local c=C.component and C.component(c)or c
+ local E={tasks={},groupOwner={},fluidOwner=nil,logs={},monitor=monitor,roundRobin={},pulse=C.pulse}
  local phases={starting='detect',waiting='detect',nanites='nanites',gate='gate',converting='convert',watching='produce',producing='produce',stopped='finish',fault='fault'}
  function E.phase(i,stage)
   local t=E.tasks[i];local phase=phases[stage]or(stage:find('craft',1,true)and 'supply')or(stage:find('stream',1,true)and 'supply')or(stage:find('transfer',1,true)and 'supply')

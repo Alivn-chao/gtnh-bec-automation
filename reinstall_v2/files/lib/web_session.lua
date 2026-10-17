@@ -1,6 +1,7 @@
 -- HTML is a data client. Only this Lua allowlist can save bindings or run V2.
 local c=require('component');local clock=require('computer');local ser=require('serialization')
 return function(C,B,W,options)
+ local c=C.component and C.component(c)or c
  options=options or {}
  local H={running=false,group=1,notice='点击机器填写地址；草稿自动存到 OC，应用绑定后再启动。'}
  local path=C.path('config.dat');local expected=B.read(path)

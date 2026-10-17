@@ -2,6 +2,7 @@
 local c=require('component');local clock=require('computer');local fs=require('filesystem');local ser=require('serialization')
 local labels={chromaticglass='彩色玻璃',transcendentmetal='超时空金属',infinity='无尽',neutronium='中子素',cosmicneutronium='宇宙中子素',bedrockium='基岩锭',celestialtungsten='天体钨',hypogen='海珀珍',phononmedium='声子介质',quarkgluonplasma='夸克胶子等离子体',space='空间',time='时间',spacetime='时空',cosmicsolder='宇宙焊锡',dimshiftedsuperfluid='维度偏移超流体',mhdcsm='磁流体动力学约束星体物质',magmatter='磁物质',universium='宇宙素',eternity='永恒'}
 return function(C,B,cfg,storage)
+ local c=C.component and C.component(c)or c
  local path=C.path('cache.config');local raw=B.read(path)
  local fallback=cfg.cacheTarget
  if type(fallback)~='number'or fallback<1 or fallback>2147483647 or fallback%1~=0 then fallback=144000 end

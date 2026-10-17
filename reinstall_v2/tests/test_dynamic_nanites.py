@@ -9,6 +9,28 @@ from cell_fixture import SETUP, EXT
 ROOT=Path(__file__).resolve().parents[2]
 
 class DynamicNaniteTests(unittest.TestCase):
+ def test_post_swap_pause_grace_restarts_and_remains_bounded(self):
+  for baseline,delay in [(True,.25),(False,.25),(False,31)]:
+   with self.subTest(baseline=baseline,delay=delay):
+    l=fixture();l.execute("cfg.recipeDirectory='/home/bec_v2/recipes'")
+    if baseline:
+     l.globals().s.files['/home/bec_v2/runtime/controller.lua']=subprocess.check_output(['git','show','9afccb3:reinstall_v2/files/runtime/controller.lua'],cwd=ROOT).decode()
+    world=WORLD.replace("if W.finished then return 'idle'end", "if W.finished then return 'idle'end\n if W.resumeUntil and s.now<W.resumeUntil and W.outputSignal==0 then return 'paused-immediate'end")
+    world=world.replace('local function hardwareTick(dt)', "local function hardwareTick(dt)\n if W.progress>=2 then W.recipe().tier=4 end")
+    world=world.replace('if not W.finished and W.started and W.outputSignal==0 then',"if not W.finished and W.started and W.outputSignal==0 and W.state()=='crafting' then")
+    world=world.replace('W.outputSignal=args[2]', 'W.outputSignal=args[2];if args[2]==0 and W.started then W.resumeUntil=s.now+'+str(delay)+' end')
+    l.execute(world)
+    l.execute("world.recipes[1].tier=3;world.bank[8]={tier=3,count=39392,family='Gold',material='Gold',damage=4086}")
+    l.execute('for step=1,20000 do E.step();if E.tasks[1].fault or #world.outputs>=1 then break end;world.advance(.05)end')
+    if baseline or delay>30:
+     self.assertTrue(l.eval('E.tasks[1].fault'))
+     self.assertIn('节点运行异常: paused-immediate',l.eval("table.concat(E.logs,' / ')"))
+     self.assertEqual(l.eval('world.outputSignal'),15)
+     self.assertEqual(l.eval('#world.outputs'),0)
+    else:
+     self.assertFalse(l.eval('E.tasks[1].fault'),l.eval("table.concat(E.logs,' / ')"))
+     self.assertEqual(l.eval('#world.outputs'),1)
+
  def test_v1_exact_family_preference_at_same_tier(self):
   from lupa.lua52 import LuaRuntime
   l=LuaRuntime(unpack_returned_tuples=True)

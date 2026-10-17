@@ -10,22 +10,25 @@ local f=assert(io.open(C.path('lib/web_page.html'),'r'));local page=f:read('*a')
 local package={id='bec-v2-studio',title='BEC V2 结构绑定与运行',entry='index.html',files={['index.html']=page},
  events={'save_field','apply_bindings','start','pause','select_group','refresh','scan_components','patterns','cache'}}
 local panel=c.proxy(address);local H=module('web_session')(C,B,W)
+local T=module('web_transport')(panel,event,W,address);C.pulse=T.pulse
 local ok,err=xpcall(function()
  while true do local accepted,reason=panel.setWebApp(package);assert(accepted~=nil,reason);if accepted then break end;event.pull(.6)end
  print('OCHD 已显示结构绑定与流程图。右键屏幕操作；OC 按 Q 退出并暂停。')
- local running,nextPush=true,0
- while running do
-  H.step()
-  if clock.uptime()>=nextPush then
-   local accepted,reason=panel.publish(H.snapshot());assert(accepted~=nil,reason)
-   nextPush=clock.uptime()+(accepted and 2 or .6)
-  end
-  local e={event.pull(.05)}
-  if e[1]=='key_down'and(e[3]==113 or e[3]==81)then running=false end
-  if e[1]=='hd_panel_web'and e[2]==address then
-   local success,message=pcall(function()return H.handle(e[3],W.decode(e[6]),e[5])end)
+ local nextPush=0
+ T.pulse(true)
+ while not T.stopping do
+  T.poll(.05)
+  local request=T.take()
+  if request then
+   local success,message=pcall(function()return H.handle(request.name,request.args,request.request)end)
    if not success then H.notice=tostring(message)end
-   panel.ack(e[5],success,tostring(message));nextPush=clock.uptime()+.6
+   T.publish(H.snapshot(),{token=request.token,name=request.name,ok=success,message=tostring(message):sub(1,400)})
+   nextPush=clock.uptime()+2
+  end
+  if T.stopping then break end
+  H.step();T.pulse()
+  if clock.uptime()>=nextPush then
+   T.publish(H.snapshot());nextPush=clock.uptime()+2
   end
  end
 end,debug.traceback)

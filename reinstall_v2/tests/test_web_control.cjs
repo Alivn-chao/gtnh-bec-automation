@@ -1,6 +1,11 @@
 // Exercise the actual page controller with deferred OC acknowledgements.
 const assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
 const source=fs.readFileSync(path.join(__dirname,'../web/control.js'),'utf8');
+const original={window:{}},packed={window:{}};
+for(const [file,context]of [['../web/structure-base.html',original],['../files/lib/web_page.html',packed]]){
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,file),'utf8').match(/<script>([\s\S]*?)<\/script>/)[1],context);
+}
+assert.equal(JSON.stringify(original.window.BEC_DATA),JSON.stringify(packed.window.BEC_DATA),'packed geometry must preserve all structure rows and textures');
 function fixture(){
  const elements=new Map(),sent=[];
  function el(id){if(!elements.has(id))elements.set(id,{textContent:'',innerHTML:'',disabled:false,dataset:{},options:[],value:'',classList:{toggle(){}},querySelector:()=>el('child'),querySelectorAll:()=>[],appendChild(){},insertBefore(){},addEventListener(){},setAttribute(){},showModal(){},close(){}});return elements.get(id);}
@@ -74,5 +79,25 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
  cache=Object.assign({},cache,{revision:'cache-2',target:200000});f.snapshot('2',valid,{cache:cache});assert.equal(f.el('cache-default').value,200000);
  f.el('cache-enable').onclick();assert.equal(f.sent[1].args.mode,'enable');f.sent[1].reject(Error('设备未绑定'));await flush();assert.match(f.el('cache-feedback').textContent,/未执行.*设备未绑定/);
  f.el('cache-disable').onclick();assert.equal(f.sent[2].args.mode,'disable');f.sent[2].resolve({message:'正在收尾'});await flush();assert.match(f.el('cache-feedback').textContent,/收尾/);
- console.log('Page save races, feedback, picker, patterns and cache actions: 27 scenarios passed');
+ f=fixture();f.snapshot('1',valid,{cache});f.el('cache-enable').onclick();var req=f.sent[0];
+ req.resolve({message:'BEC_REQUEST_ACCEPTED'});await flush();
+ assert.equal(f.el('cache-enable').disabled,true,'receipt alone is not completion');
+ f.snapshot('2',valid,{cache,transportBusy:true,reply:{token:'other',ok:true,message:'wrong request'}});await flush();
+ assert.equal(f.el('cache-enable').disabled,true,'unrelated result must not release action');
+ f.snapshot('3',valid,{cache,reply:{token:req.args._token,name:'cache',ok:true,message:'实际启用完成'}});await flush();
+ assert.match(f.el('cache-feedback').textContent,/实际启用完成/);
+ assert.equal(f.el('cache-enable').disabled,false);
+ f.el('cache-disable').onclick();var next=f.sent[1];next.resolve({message:'BEC_REQUEST_ACCEPTED'});await flush();
+ f.snapshot('4',valid,{cache,reply:{token:req.args._token,ok:true,message:'stale'}});await flush();
+ assert.equal(f.el('cache-disable').disabled,true,'old result cannot finish newer request');
+ f.snapshot('5',valid,{cache,_online:false});await flush();
+ assert.match(f.el('cache-feedback').textContent,/结果待核对/);assert.equal(f.el('start-run').textContent,'状态待确认');
+ f.snapshot('6',valid,{cache,reply:{token:next.args._token,name:'cache',ok:false,message:'设备回读失败'}});await flush();
+ assert.match(f.el('cache-feedback').textContent,/设备回读失败/,'late result replaces unknown state');
+ assert.equal(f.sent.length,2,'disconnect must never replay machine action');
+ f=fixture();f.snapshot('1',valid);f.el('start-run').onclick();req=f.sent[0];req.resolve({message:'BEC_REQUEST_ACCEPTED'});await flush();
+ assert.equal(f.el('start-run').disabled,true);
+ f.snapshot('2',valid,{mode:'running',reply:{token:req.args._token,ok:true,message:'启动已完成'}});await flush();
+ assert.equal(f.el('start-run').textContent,'运行中');assert.match(f.el('action-feedback').textContent,/启动已完成/);
+ console.log('Page save races, feedback, picker, patterns, cache and receipt/completion: 33 scenarios passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

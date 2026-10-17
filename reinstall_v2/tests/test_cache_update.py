@@ -20,7 +20,7 @@ class CacheUpdateTests(unittest.TestCase):
  def test_verified_temporary_download_is_released_before_staging_on_small_disk(self):
   l=make();l.globals().files['/home/bec_cache_update.lua']=SCRIPT
   l.globals().downloadSize=len(SCRIPT.encode('utf-8'))
-  l.execute("local fs=require('filesystem');fs.get=function()return {spaceTotal=function()return 4194304 end,spaceUsed=function()return 4194304-900000+(files['/home/bec_cache_update.lua']and downloadSize or 0)end}end")
+  l.execute("local fs=require('filesystem');fs.get=function()return {spaceTotal=function()return 4194304 end,spaceUsed=function()return 4194304-1000000+(files['/home/bec_cache_update.lua']and downloadSize or 0)end}end")
   l.eval('function(text)return assert(load(text,"@/home/bec_cache_update.lua"))end')(SCRIPT)()
   self.assertIsNone(l.globals().files['/home/bec_cache_update.lua'])
   self.assertEqual(l.globals().files['/home/bec_v2/cache.config'],'custom-targets-keep')

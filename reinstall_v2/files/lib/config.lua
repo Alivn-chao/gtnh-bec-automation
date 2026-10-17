@@ -2,22 +2,37 @@ local c=require('component')
 local fs=require('filesystem')
 local ser=require('serialization')
 local M={ROOT='/home/bec_v2'}
+-- Keep a web lease alive between callbacks; never mutate global component.
+function M.component(native)
+ local proxy={};for k,v in pairs(native)do proxy[k]=v end
+ setmetatable(proxy,{__index=native})
+ for _,name in ipairs({'invoke','methods','list'})do
+  proxy[name]=function(...)
+   if not M.pulse then return native[name](...)end
+   M.pulse();local values=table.pack(native[name](...));M.pulse();return table.unpack(values,1,values.n)
+  end
+ end
+ return proxy
+end
+c=M.component(c)
 function M.path(name) return M.ROOT..'/'..name end
 function M.read(path)
+ if M.pulse then M.pulse()end
  local f=io.open(path,'r');if not f then return nil end
- local text=f:read('*a');f:close()
+ local text=f:read('*a');f:close();if M.pulse then M.pulse()end
  local value=ser.unserialize(text);assert(type(value)=='table','配置/记录损坏: '..path)
  return value
 end
 function M.write(path,value)
+ if M.pulse then M.pulse()end
  local text=ser.serialize(value,false)
  local dir=fs.path(path);assert(fs.exists(dir) or fs.makeDirectory(dir),'无法建立目录')
  local old=io.open(path,'r')
  if old then
   local previous=old:read('*a');old:close();local backup=assert(io.open(path..'.previous','w'))
-  assert(backup:write(previous));assert(backup:flush());backup:close()
+  assert(backup:write(previous));assert(backup:flush());backup:close();if M.pulse then M.pulse()end
  end
- local file=assert(io.open(path,'w'));assert(file:write(text));assert(file:flush());file:close()
+ local file=assert(io.open(path,'w'));assert(file:write(text));assert(file:flush());file:close();if M.pulse then M.pulse()end
  file=assert(io.open(path,'r'));local actual=file:read('*a');file:close();assert(actual==text,'配置回读失败')
 end
 local function integer(n,lo,hi) return type(n)=='number' and n==math.floor(n) and n>=lo and n<=hi end

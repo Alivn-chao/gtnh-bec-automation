@@ -1,3 +1,5 @@
+网页连接闪烁、缓存页无法滚动、换蜂后误暂停修复：见 [WEB_CONNECTION.md](WEB_CONNECTION.md)。已有缓存版使用 `update_connection.lua`，保留绑定与日志。
+
 网页新增第三个页签「缓存管理」：默认库存目标、每种流体自定义、0停补与真实后台补库，沿用V1缓存工作器。安装及操作见 [CACHE_MANAGEMENT.md](CACHE_MANAGEMENT.md)。
 
 网页顶部新增「样板处理」：只读预览、处理一次、停止与逐槽结果，操作及更新见 [WEB_PATTERNS.md](WEB_PATTERNS.md)。

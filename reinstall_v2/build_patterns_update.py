@@ -3,16 +3,16 @@ from pathlib import Path
 import subprocess,zlib
 from build import literal
 HERE=Path(__file__).resolve().parent
-NAMES=['lib/cache.lua','runtime/cache.lua','web.lua','lib/config.lua','lib/patterns.lua','runtime/patterns.lua','lib/web_session.lua','lib/web_page.html']
+NAMES=['runtime/controller.lua','lib/cache.lua', 'runtime/cache.lua', 'web.lua', 'lib/config.lua', 'lib/patterns.lua', 'runtime/patterns.lua', 'lib/web_session.lua', 'lib/web_page.html', 'lib/web_transport.lua', 'lib/engine.lua', 'lib/bridge.lua']
 rows=[]
 for name in NAMES:
  signatures=[]
- for ref in ['334125a','81b7724','f60f785','933750b','180bf41','bccf281','438f625','dae5e0e','d26100c']:
+ for ref in ['334125a','81b7724','f60f785','933750b','180bf41','bccf281','438f625','dae5e0e','d26100c','9afccb3']:
   result=subprocess.run(['git','show',ref+':reinstall_v2/files/'+name],cwd=HERE.parent,capture_output=True)
   if result.returncode:continue
   data=result.stdout
   signatures.append('['+repr(str(len(data))+':'+str(zlib.adler32(data)&0xffffffff))+']=true')
- rows.append('{name='+repr(name)+',added='+('true'if name in ['lib/cache.lua','runtime/cache.lua']else 'false')+',source='+literal((HERE/'files'/name).read_text(encoding='utf-8'))+',supported={'+','.join(signatures)+'}}')
+ rows.append('{name='+repr(name)+',added='+('true'if name in ['lib/cache.lua','runtime/cache.lua','lib/web_transport.lua']else 'false')+',source='+literal((HERE/'files'/name).read_text(encoding='utf-8'))+',supported={'+','.join(signatures)+'}}')
 body=r'''
 local fs=require('filesystem');local root='/home/bec_v2/'
 local function read(p)local f=io.open(p,'r');if not f then return end;local s=f:read('*a');f:close();return s end

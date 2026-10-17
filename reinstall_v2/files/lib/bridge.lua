@@ -13,6 +13,7 @@ local function replace(text,old,new)
  return text:gsub(escaped,function()return new end)
 end
 function M.environment(cfg,index,engine)
+ C.pulse=engine.pulse;local c=C.component and C.component(c)or c
  local n,g=cfg.nodes[index],cfg.groups[cfg.nodes[index].group]
  local task=engine.tasks[index]
  local members=task.members or {index}
@@ -196,6 +197,8 @@ function M.environment(cfg,index,engine)
  -- across a yield, component call, or hardware mutation. This is not an OC API
  -- or an atomic server-side snapshot.
  env.BEC_V2_PHASE=function(stage)if engine.phase then engine.phase(index,stage)end end
+ -- OC reads across a cohort can exceed the original single-node 3-second grace.
+ env.BEC_V2_RELEASE_GRACE=30
  env.BEC_V2_NODE_SNAPSHOT=nodeSnapshot
  -- Gate setup validates the complete recipe once before writing, then checks
  -- every member's actual pause state/output in each of the three readbacks.

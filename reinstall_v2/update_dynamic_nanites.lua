@@ -14,6 +14,7 @@ local function replace(text,old,new)
  return text:gsub(escaped,function()return new end)
 end
 function M.environment(cfg,index,engine)
+ C.pulse=engine.pulse;local c=C.component and C.component(c)or c
  local n,g=cfg.nodes[index],cfg.groups[cfg.nodes[index].group]
  local task=engine.tasks[index]
  local members=task.members or {index}
@@ -197,6 +198,8 @@ function M.environment(cfg,index,engine)
  -- across a yield, component call, or hardware mutation. This is not an OC API
  -- or an atomic server-side snapshot.
  env.BEC_V2_PHASE=function(stage)if engine.phase then engine.phase(index,stage)end end
+ -- OC reads across a cohort can exceed the original single-node 3-second grace.
+ env.BEC_V2_RELEASE_GRACE=30
  env.BEC_V2_NODE_SNAPSHOT=nodeSnapshot
  -- Gate setup validates the complete recipe once before writing, then checks
  -- every member's actual pause state/output in each of the three readbacks.
@@ -438,14 +441,14 @@ local needed=type(demand)=="table" and demand.tier or demand
 local supplied=call(NODE,"getProvidedTier")
 if type(needed)=="number" and (needed~=lastNaniteTier or family~=lastNaniteFamily or type(supplied)~="table" or supplied.tier<needed) then
 pause(15);waitUntil(10,function() local s=call(NODE,"getState");return s=="paused-immediate" or s=="nanite-tier-too-low" end)
-switchNanites();if stopping then break end;verifyGate(filters);pause(0);deadline=computer.uptime()+600;v=call(NODE,"getState")
+switchNanites();if stopping then break end;verifyGate(filters);pause(0);releasedAt=computer.uptime();deadline=releasedAt+600;if BEC_V2_PHASE then BEC_V2_PHASE("producing")end;v=call(NODE,"getState")
 end
 local parallel if req~=nil then parallel=integer(call(NODE,"getParallelRecipesInProgress")) local matching=parallel>0
 for name,n in pairs(req) do if not perRecipe[name] or n~=perRecipe[name]*parallel then matching=false end end for name in pairs(perRecipe) do if req[name]==nil then matching=false end end if not matching then pause(15);break end if not same(gateFilters(req),filters) then pause(15);break end
 lastRequired=req end if v=="idle" then local consumed=call(NODE,"getConsumedCondensate")
 assert(type(consumed)=="table","节点空闲后消耗记录不可读") for name,need in pairs(lastRequired) do assert(integer(consumed[name] or 0)>=need, "节点进入空闲但凝聚物未消耗完，可能故障关闭: "..name.."；需求 "..need.."，已消耗 "..tostring(consumed[name] or 0))
 end stopping=true;break end if waiting[v] then break end
-assert(v=="crafting" or (v=="paused-immediate" and computer.uptime()-releasedAt<3), "节点运行异常: "..tostring(v)) local refill=false if computer.uptime()>=nextQueueCheck and req~=nil then
+assert(v=="crafting" or (v=="paused-immediate" and computer.uptime()-releasedAt<(BEC_V2_RELEASE_GRACE or 3)), "节点运行异常: "..tostring(v)) local refill=false if computer.uptime()>=nextQueueCheck and req~=nil then
 local consumed=call(NODE,"getConsumedCondensate") assert(type(consumed)=="table","当前消耗记录不可读") local fresh=call(NODE,"getRequiredCondensate") if type(fresh)~="table" or not same(req,fresh) or parallel~=call(NODE,"getParallelRecipesInProgress") then pause(15);break end
 local count=math.max(1,queuedRecipes()) for name,amount in pairs(req) do local need=perRecipe[name]*math.max(parallel,count)-integer(consumed[name] or 0) if (stock[name] or 0)<need then refill=true end
 end nextQueueCheck=computer.uptime()+1 end if refill then break end
