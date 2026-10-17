@@ -1,5 +1,5 @@
 -- BEC_V2_CONNECTION_UPDATE_1
-local SELF_SIGNATURE='343030:1994883323'
+local SELF_SIGNATURE='343079:435000088'
 print('BEC connection update; Q to exit the old UI first')
 local rows={{name='lib/cache.lua',added=false,source=[=[-- V1 cache worker, scheduled under the same V2 group and shared-fluid leases.
 local c=require('component');local clock=require('computer');local fs=require('filesystem');local ser=require('serialization')
@@ -1672,7 +1672,7 @@ do
   if not fs.exists(self)then print('已释放临时安装包；程序备份和运行记录保留。')
   else print('临时包保留，继续检查可用空间：'..tostring(ok and reason or removed))end
  end
- downloaded=nil;payload=nil;collectgarbage('collect')
+ downloaded=nil;payload=nil;if type(collectgarbage)=='function'then pcall(collectgarbage,'collect')end
 end
 if identical then print('连接与换蜂恢复修复已安装，无需重复更新。');return end
 local disk=assert(fs.get(root));assert(disk.spaceTotal()-disk.spaceUsed()>=bytes+524288,'磁盘空间不足：更新后需保留512KiB')

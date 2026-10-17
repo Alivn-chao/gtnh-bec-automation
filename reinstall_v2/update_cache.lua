@@ -1,5 +1,5 @@
 -- BEC_V2_CACHE_UPDATE_1
-local SELF_SIGNATURE='373189:2426376318'
+local SELF_SIGNATURE='373238:406954651'
 print('BEC web cache update; Q to exit the old UI first')
 local rows={{name='runtime/controller.lua',added=false,source=[=[local c = require("component") local ser = require("serialization") local computer = require("computer") local fs = require("filesystem")
 local sides = require("sides") local event = require("event") local mode = (...) or "preview" local JOURNAL = "/home/bec_auto.journal"
@@ -1966,7 +1966,7 @@ if debug.getinfo(1,'S').source=='@'..self then
  if payload and signature(payload)==SELF_SIGNATURE then
   assert(fs.remove(self),'无法释放本次临时下载包');print('已释放本次临时安装包；程序备份和运行记录保留。')
  end
- downloaded=nil;payload=nil;collectgarbage('collect')
+ downloaded=nil;payload=nil;if type(collectgarbage)=='function'then pcall(collectgarbage,'collect')end
 end
 if identical then print('缓存管理功能已安装，无需重复更新。');return end
 local disk=assert(fs.get(root));assert(disk.spaceTotal()-disk.spaceUsed()>=bytes+524288,'磁盘空间不足：更新后需保留512KiB')

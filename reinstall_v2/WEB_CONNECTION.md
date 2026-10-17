@@ -15,7 +15,7 @@ OCHD 在五秒无 publish 时将 OC 标记离线。16节点读取、绑定校验
 ```sh
 rm /home/bec_web_update.lua
 rm /home/bec_bulk10.lua
-wget -f https://cdn.jsdelivr.net/gh/Alivn-chao/gtnh-bec-automation@bec-v2-web-heartbeat-2026-10-17-r2/reinstall_v2/update_connection.lua /home/bec_connection_update.lua
+wget -f https://cdn.jsdelivr.net/gh/Alivn-chao/gtnh-bec-automation@bec-v2-web-heartbeat-2026-10-17-r3/reinstall_v2/update_connection.lua /home/bec_connection_update.lua
 lua /home/bec_connection_update.lua
 lua /home/bec_v2/main.lua web
 ```
@@ -34,3 +34,5 @@ lua /home/bec_v2/main.lua web
 构建先安装 `requirements-build.txt`，然后运行各 `build*.py`。依赖 `rjsmin==1.2.5`，离线构建也可预装至 `work/build_tools`。
 
 2026-10-17 r2：用户实机提示“无法释放本次临时下载包”，在替换程序前已退出。临时包清理改为可选，保留空间检查；新增 remove 返回false/nil或抛错的成功安装与空间不足拒绝模拟。
+
+2026-10-17 r3：实机OpenOS无collectgarbage，改为可选pcall，不再依赖该全局函数。模拟无GC且remove失败仍安装通过。已有r2不用重新下载：进入lua解释器，执行 `collectgarbage=function()end;dofile("/home/bec_connection_update.lua")`，成功后Ctrl+D退出，再打开网页。这个空函数只用于当前解释器会话。
