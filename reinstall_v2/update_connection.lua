@@ -1,5 +1,5 @@
 -- BEC_V2_CONNECTION_UPDATE_1
-local SELF_SIGNATURE='342920:903370607'
+local SELF_SIGNATURE='343030:1994883323'
 print('BEC connection update; Q to exit the old UI first')
 local rows={{name='lib/cache.lua',added=false,source=[=[-- V1 cache worker, scheduled under the same V2 group and shared-fluid leases.
 local c=require('component');local clock=require('computer');local fs=require('filesystem');local ser=require('serialization')
@@ -1668,7 +1668,9 @@ do
  local downloaded=read(self)
  local payload=downloaded and downloaded:match('^%-%- BEC_V2_CONNECTION_UPDATE_1\nlocal SELF_SIGNATURE=[^\n]*\n(.*)$')
  if payload and signature(payload)==SELF_SIGNATURE then
-  assert(fs.remove(self),'无法释放本次临时下载包');print('已释放本次临时安装包；程序备份和运行记录保留。')
+  local ok,removed,reason=pcall(fs.remove,self)
+  if not fs.exists(self)then print('已释放临时安装包；程序备份和运行记录保留。')
+  else print('临时包保留，继续检查可用空间：'..tostring(ok and reason or removed))end
  end
  downloaded=nil;payload=nil;collectgarbage('collect')
 end

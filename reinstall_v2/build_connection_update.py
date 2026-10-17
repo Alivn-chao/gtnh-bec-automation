@@ -16,6 +16,7 @@ body=next(ast.literal_eval(n.value)for n in tree.body if isinstance(n,ast.Assign
 body=body.replace('/home/bec_cache_update.lua','/home/bec_connection_update.lua')
 body=body.replace("if debug.getinfo(1,'S').source=='@'..self then",'do')
 body=body.replace('BEC_V2_CACHE_UPDATE_1','BEC_V2_CONNECTION_UPDATE_1')
+body=body.replace("assert(fs.remove(self),'无法释放本次临时下载包');print('已释放本次临时安装包；程序备份和运行记录保留。')", "local ok,removed,reason=pcall(fs.remove,self)\n  if not fs.exists(self)then print('已释放临时安装包；程序备份和运行记录保留。')\n  else print('临时包保留，继续检查可用空间：'..tostring(ok and reason or removed))end")
 body=body.replace('before-cache-','before-connection-').replace('cache-new-','connection-new-').replace('cache-failed-','connection-failed-')
 body=body.replace('缓存管理功能已安装，无需重复更新。','连接与换蜂恢复修复已安装，无需重复更新。')
 body=body.replace('缓存管理已安装：顶部缓存管理设置目标，启动自动化后空闲补库。','连接心跳与换蜂后恢复修复已安装；请重新打开网页。')

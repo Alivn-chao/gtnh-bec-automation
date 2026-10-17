@@ -13,6 +13,21 @@ def make():
  l.globals().files['/home/bec_v2/state/group-1/cache.journal']='keep-unconfirmed'
  return l
 class ConnectionUpdateTests(unittest.TestCase):
+ def test_self_remove_failure_is_optional_but_disk_reserve_still_required(self):
+  for behavior in ["return false,'busy'", "error('busy')", "return nil,'busy'"]:
+   for low in [False,True]:
+    with self.subTest(behavior=behavior,low=low):
+     l=make();l.globals().files['/home/bec_connection_update.lua']=SCRIPT
+     l.execute("local fs=require('filesystem');fs.remove=function()"+behavior+" end")
+     if low:
+      l.execute('used=4100000')
+      with self.assertRaisesRegex(Exception,'磁盘空间不足'):l.execute(SCRIPT)
+      self.assertEqual(l.globals().files['/home/bec_v2/web.lua'],OLD['web.lua'])
+     else:
+      l.execute(SCRIPT)
+      for n in NAMES:self.assertEqual(l.globals().files['/home/bec_v2/'+n],(HERE/'files'/n).read_text(encoding='utf-8'))
+     self.assertEqual(l.globals().files['/home/bec_connection_update.lua'],SCRIPT)
+
  def test_install_release_temporary_without_debug_source_and_preserve_state(self):
   l=make();l.globals().files['/home/bec_connection_update.lua']=SCRIPT
   l.globals().downloadSize=len(SCRIPT.encode())
