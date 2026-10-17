@@ -216,6 +216,12 @@ function M.environment(cfg,index,engine)
  -- OC reads across a cohort can exceed the original single-node 3-second grace.
  env.BEC_V2_RELEASE_GRACE=30
  env.BEC_V2_NODE_SNAPSHOT=nodeSnapshot
+ env.BEC_V2_COHORT_IDLE=function()
+  local value=nodeSnapshot()
+  assert(value.allIdle,'批次节点状态已改变，保留现场核对')
+  for _,i in ipairs(members)do assert(entries[i].finished,'本批节点已空闲但缺少完整消耗证明，保留日志核对')end
+  return true
+ end
  -- Gate setup validates the complete recipe once before writing, then checks
  -- every member's actual pause state/output in each of the three readbacks.
  -- The controller performs a fresh full current() check immediately afterward,

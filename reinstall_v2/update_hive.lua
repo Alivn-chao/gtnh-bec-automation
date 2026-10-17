@@ -1,5 +1,5 @@
 -- BEC_V2_HIVE_UPDATE_1
-local SELF_SIGNATURE='36988:1041343521'
+local SELF_SIGNATURE='37280:566440721'
 print('BEC hive inspection update; Q to exit the old UI first')
 local rows={{name='lib/bridge.lua',source=[=[local c=require('component')
 local computer=require('computer')
@@ -219,6 +219,12 @@ function M.environment(cfg,index,engine)
  -- OC reads across a cohort can exceed the original single-node 3-second grace.
  env.BEC_V2_RELEASE_GRACE=30
  env.BEC_V2_NODE_SNAPSHOT=nodeSnapshot
+ env.BEC_V2_COHORT_IDLE=function()
+  local value=nodeSnapshot()
+  assert(value.allIdle,'批次节点状态已改变，保留现场核对')
+  for _,i in ipairs(members)do assert(entries[i].finished,'本批节点已空闲但缺少完整消耗证明，保留日志核对')end
+  return true
+ end
  -- Gate setup validates the complete recipe once before writing, then checks
  -- every member's actual pause state/output in each of the three readbacks.
  -- The controller performs a fresh full current() check immediately afterward,

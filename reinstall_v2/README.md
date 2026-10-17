@@ -1,3 +1,5 @@
+重启后读取配方一直等idle：已修复旧批次占用设备组不退出的路径，小更新见 [IDLE_COHORT.md](IDLE_COHORT.md)。
+
 蜂群检查优化：16节点同一轮组件读取292→100，保留整组核对；小更新见 [HIVE_INSPECTION.md](HIVE_INSPECTION.md)。
 
 网页连接闪烁、缓存页无法滚动、换蜂后误暂停修复：见 [WEB_CONNECTION.md](WEB_CONNECTION.md)。已有缓存版使用 `update_connection.lua`，保留绑定与日志。
