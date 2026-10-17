@@ -1,3 +1,5 @@
+2026-10-17 空间流体恢复r2：用户已安装166f844并运行恢复，真实错误cache_recover.lua:40库存数量无效，由主网任一库存>2147483647触发；位置在主网缺料检查、pending写入和transferFluid之前，已归档旧日志且current为reconciling-partial。新quantity支持0..2^53-1精确整数，搬运仍int32。允许且仅允许此未搬运checkpoint继续：加载保留的原归档，重新核对原回执/实物/生产/绑定，并逐字段深比较整个恢复记录与从原归档重建的记录；任何pending、返回、转换或篡改仍拒重放。主网预检提前至任何日志写入前，避免相同错误再留checkpoint。更新器支持166f844 helper精确签名，保留所有日志归档。新tag bec-v2-cache-partial-2026-10-17-r2；用户wget fastly新版update_cache_partial.lua同名执行，再原run ae-finished命令。测试重现发布旧版大库存失败再新版恢复成功，零重复AE、只搬96、仅1原归档；大凝聚物库存和非法数字、checkpoint篡改均覆盖。
+
 2026-10-17 缓存部分返回：用户原日志 spatialfluid 前序1498176、最后请求31680/true返回24096、实物1522272；用户明确确认原AE2533440已完成并从CPU消失。runtime/cache按实际有效回执入账+精确子网读回，零返回计数不膨胀日志，订单优先时只补整批余量；未知回执仍pending暂停。新增cache_recover.lua严格限定单种空间流体旧transfer-returned，先只读核对生产记录/整组暂停关闭接单/纠缠器停机/绑定/路线/库存，再逐字归档原日志，run ae-finished只补96并转换1522368、最终精确库存确认后stopped；不调用AE申请/取消/查询，原申请作为人工确认审计保留，失败拒绝自动重放。新增两文件43KB update_cache_partial.lua，保留512KiB、原程序备份和所有日志；OpenOS无collectgarbage或不能删除临时包也支持。操作CACHE_PARTIAL.md；tag bec-v2-cache-partial-2026-10-17。206 Python/Lua测试+20核心模拟+33JS通过；含7恢复/4部分返回/3更新事务新增测试。模拟验证，未Minecraft内执行恢复。
 
 # 2026-10-17 网页缓存管理（第三页签）

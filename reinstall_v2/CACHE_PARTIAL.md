@@ -1,13 +1,15 @@
 # 缓存部分返回修复与本次空间流体收尾
 
-发布标签：`bec-v2-cache-partial-2026-10-17`。约44KB小更新，只替换缓存运行器并增加核对工具，保留地址、配置、缓存目标、配方和所有运行记录。安装器不控制机器，也不自动解锁未确认记录。
+发布标签：`bec-v2-cache-partial-2026-10-17-r2`。约46KB小更新，只替换缓存运行器并增加核对工具，保留地址、配置、缓存目标、配方和所有运行记录。安装器不控制机器，也不自动解锁未确认记录。
+
+r2修复主网库存超过有符号32位时误报“库存数量无效”：网络/凝聚物库存使用Lua可精确表示的非负整数范围，单次搬运仍限制在接口范围。只允许继续原版本停在`reconciling-partial`、尚未写搬运意图且恢复记录与原归档完全对应的情况；重新核对实物，不删除或重写原归档。其他pending/搬运返回/转换中断继续保持保护。
 
 ## 安装与本次收尾
 
 先在OC按Q退出旧网页。下载并安装：
 
 ```sh
-wget -f https://cdn.jsdelivr.net/gh/Alivn-chao/gtnh-bec-automation@bec-v2-cache-partial-2026-10-17/reinstall_v2/update_cache_partial.lua /home/bec_cache_partial_update.lua
+wget -f https://fastly.jsdelivr.net/gh/Alivn-chao/gtnh-bec-automation@bec-v2-cache-partial-2026-10-17-r2/reinstall_v2/update_cache_partial.lua /home/bec_cache_partial_update.lua
 lua /home/bec_cache_partial_update.lua
 ```
 

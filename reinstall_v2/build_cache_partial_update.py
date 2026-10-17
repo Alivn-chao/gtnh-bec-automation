@@ -7,7 +7,7 @@ NAMES=['runtime/cache.lua','cache_recover.lua']
 rows=[]
 for name in NAMES:
  signatures=[]
- for ref in ['9afccb3','9bd9003','3a796b2','6bb05c6','5ad2b03']:
+ for ref in ['9afccb3','9bd9003','3a796b2','6bb05c6','5ad2b03','166f844']:
   result=subprocess.run(['git','show',ref+':reinstall_v2/files/'+name],cwd=HERE.parent,capture_output=True)
   if result.returncode:continue
   data=result.stdout

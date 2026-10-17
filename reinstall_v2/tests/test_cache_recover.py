@@ -1,5 +1,5 @@
 """Explicit, bounded reconciliation; no AE task replay or inferred receipts."""
-import unittest
+import unittest,subprocess
 from pathlib import Path
 from test_read_optimization import fixture
 from simulate_two_recipes import WORLD
@@ -64,7 +64,35 @@ class CacheRecoverTests(unittest.TestCase):
  def test_shortage_does_not_request_ae_or_start_conversion(self):
   l=setup();l.execute('world.main.spatialfluid=0')
   with self.assertRaisesRegex(Exception,'不申请AE'):run(l)
-  l.execute("assert(s.files[path..'.before-partial-recovery-1']==original and world.calls.transferFluid==nil and not world.gen.gen1 and not world.gen.gen2)")
+  l.execute("assert(s.files[path]==original and not s.files[path..'.before-partial-recovery-1'] and world.calls.transferFluid==nil and not world.gen.gen1 and not world.gen.gen2)")
+ def test_main_inventory_over_int32_and_large_unrelated_field_are_valid(self):
+  l=setup();l.execute('world.main.spatialfluid=5000000000;world.main.unrelated=1000000000000;world.stock.entangled_chromaticglass=7000000000;world.stock.entangled_space=3000000000')
+  run(l)
+  l.execute('assert(world.main.spatialfluid==4999999904 and world.stock.entangled_space==3001522368 and world.stock.entangled_chromaticglass==7000000000)')
+ def test_reproduce_published_pretransfer_failure_then_resume_without_duplicate(self):
+  l=setup();l.execute('world.main.unrelated=5000000000')
+  old_source=subprocess.check_output(['git','show','166f844:reinstall_v2/files/cache_recover.lua'],cwd=Path(__file__).resolve().parents[2]).decode()
+  l.globals().RECOVERY=old_source
+  with self.assertRaisesRegex(Exception,'库存数量无效'):run(l)
+  l.execute("assert(C.read(path).stage=='reconciling-partial'and not C.read(path).pending and world.calls.transferFluid==nil);assert(s.files[path..'.before-partial-recovery-1']==original)")
+  l.globals().RECOVERY=SOURCE;run(l)
+  l.execute("assert(world.calls.transferFluid==1 and world.main.spatialfluid==904 and C.read(path).stage=='stopped');assert(not s.files[path..'.before-partial-recovery-2']and s.files[path..'.before-partial-recovery-1']==original)")
+ def test_pretransfer_resume_requires_exact_checkpoint_and_archive(self):
+  for corruption in ["r.pending={raw='spatialfluid',amount=96}","r.transfers[4].amount=24095","r.reconciliation.operatorConfirmedAEFinished=false","r.target.entangled_space=r.target.entangled_space+144","s.files[r.reconciliation.archive]='bad archive'"]:
+   l=setup();l.globals().RECOVERY=subprocess.check_output(['git','show','166f844:reinstall_v2/files/cache_recover.lua'],cwd=Path(__file__).resolve().parents[2]).decode()
+   l.execute('world.main.unrelated=5000000000')
+   with self.assertRaisesRegex(Exception,'库存数量无效'):run(l)
+   l.execute('local r=C.read(path);'+corruption+';C.write(path,r);beforeResume=s.files[path]')
+   l.globals().RECOVERY=SOURCE
+   with self.assertRaises(Exception):run(l)
+   l.execute('assert(world.calls.transferFluid==nil and s.files[path]==beforeResume)')
+ def test_nonfinite_fractional_negative_and_inexact_inventory_rejected_read_only(self):
+  for n in ['0/0','math.huge','-.5','1.5','9007199254740992']:
+   l=setup();l.execute('world.main.invalid='+n)
+   # WORLD inventory rows omit negative values, so inject malformed hardware rows.
+   l.execute("local c=require('component');local invoke=c.invoke;c.invoke=function(a,m,...)if a=='main'and m=='getFluidsInNetwork'then return {{name='invalid',amount=world.main.invalid}}end;return invoke(a,m,...)end")
+   with self.assertRaisesRegex(Exception,'库存数量无效'):run(l)
+   l.execute('assert(s.files[path]==original and world.calls.transferFluid==nil)')
  def test_generator_start_failure_closes_both_and_preserves_recovery(self):
   l=setup();l.execute("local c=require('component');local invoke=c.invoke;c.invoke=function(a,m,...)if a=='gen2'and m=='setWorkAllowed'and (...)==true then error('generator failed')end;return invoke(a,m,...)end")
   with self.assertRaisesRegex(Exception,'generator failed'):run(l)
