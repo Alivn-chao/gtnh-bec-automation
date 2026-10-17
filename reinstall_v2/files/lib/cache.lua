@@ -9,6 +9,7 @@ return function(C,B,cfg,storage)
  local settings=raw and C.read(path)or {version=1,target=fallback,overrides={},enabled=false}
  local K={busy=false,logs={},message='空闲时按目标补库；生产订单优先',page=0}
  local active,nextScan,nextGroup,names=nil,0,1,{}
+ local catalogueReady=false;local displayedStock={}
  local function integer(n,min)return type(n)=='number'and n>=min and n<=2147483647 and n%1==0 end
  local function validate(v)
   assert(v.version==1 and integer(v.target,1)and type(v.overrides)=='table'and type(v.enabled)=='boolean','缓存配置无效')
@@ -45,17 +46,25 @@ return function(C,B,cfg,storage)
   assert(not K.blocked,'缓存操作未确认，保留记录核对：'..tostring(K.blocked))
   for group in ipairs(cfg.groups)do assert(confirmed(C.read(journal(group))),'设备组 '..group..' 有未确认缓存操作，保留 cache.journal 核对，禁止重复申请')end
  end
- local function scan()
+ local function scan(force)
+  if catalogueReady and not force then return end
   local found={};if fs.exists(cfg.recipeDirectory)then for name in fs.list(cfg.recipeDirectory)do if name:match('%.dat$')then
    local r=C.read(cfg.recipeDirectory..'/'..name)
    if r and r.state=='converted'then for _,f in ipairs(r.condensates or {})do
     assert(type(f.name)=='string'and #f.name<=80,'配方流体名称无效');found[f.name]=true
    end end
   end end end
-  names={};for name in pairs(found)do names[#names+1]=name end;table.sort(names);assert(#names<=64,'登记缓存类型超过64种')
+  names={};for name in pairs(found)do names[#names+1]=name end;table.sort(names);assert(#names<=64,'登记缓存类型超过64种');catalogueReady=true
  end
+ function K.invalidateCatalogue()catalogueReady=false end
+ function K.catalogueStep()scan()end
+ function K.refreshStock(group)
+  local ok,stock=pcall(c.invoke,cfg.groups[group].storage,'getStoredCondensate')
+  displayedStock[group]=ok and type(stock)=='table'and stock or {}
+ end
+ function K.observeStock(group,stock)if type(stock)=='table'then displayedStock[group]=stock end end
  function K.action(args)
-  if args.mode=='refresh'then scan();local page=tonumber(args.page)or 0;assert(integer(page,0),'分页无效');K.page=math.min(math.floor(page),math.max(0,math.ceil(#names/8)-1));return '已刷新缓存库存'end
+  if args.mode=='refresh'then scan(true);local page=tonumber(args.page)or 0;assert(integer(page,0),'分页无效');K.page=math.min(math.floor(page),math.max(0,math.ceil(#names/8)-1));return '已刷新缓存目录；库存随状态更新'end
   assert(args.revision==B.revision(raw or ''),'缓存设置已变化，等待最新数据后重试')
   assert(B.read(path)==raw,'缓存设置被其他程序修改，请重新打开网页')
   local next={version=1,target=settings.target,enabled=settings.enabled,overrides={}}
@@ -190,10 +199,10 @@ return function(C,B,cfg,storage)
    end
   end
  end
- function K.snapshot(group)
-  if #names==0 then local ok,err=pcall(scan);if not ok then K.message=tostring(err):sub(1,300)end end
+ function K.snapshot(group,fast)
+  if not fast then local ok,err=pcall(scan);if not ok then K.message=tostring(err):sub(1,300)end;K.refreshStock(group)end
   local out={revision=B.revision(raw or ''),enabled=settings.enabled,target=settings.target,busy=K.busy,group=K.group or group,blocked=K.blocked~=nil,message=K.message,logs=K.logs,page=K.page,total=#names,rows={}}
-  local g=cfg.groups[group];local ok,stock=pcall(c.invoke,g.storage,'getStoredCondensate');if not ok or type(stock)~='table'then stock={}end
+  local stock=displayedStock[group]or {}
   for i=K.page*8+1,math.min(#names,K.page*8+8)do local name=names[i];local override=settings.overrides[name]
    out.rows[#out.rows+1]={name=name,label=labels[name:gsub('^entangled_','')]or name,stock=stock[name]or 0,target=override~=nil and override or settings.target,override=override}
   end

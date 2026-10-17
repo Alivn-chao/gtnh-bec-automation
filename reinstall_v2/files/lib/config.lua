@@ -9,7 +9,9 @@ function M.component(native)
  for _,name in ipairs({'invoke','methods','list'})do
   proxy[name]=function(...)
    if not M.pulse then return native[name](...)end
-   M.pulse();local values=table.pack(native[name](...));M.pulse();return table.unpack(values,1,values.n)
+   M.pulse();local values=table.pack(native[name](...))
+   if name=='invoke'then M.pulse(false,select(1,...),select(2,...),values[1])else M.pulse()end
+   return table.unpack(values,1,values.n)
   end
  end
  return proxy

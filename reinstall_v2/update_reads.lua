@@ -14,12 +14,14 @@ return function(panel,event,W,address)
   T.queue[#T.queue+1]={name=e[3],args=args,request=e[5],token=token}
   panel.ack(e[5],true,'BEC_REQUEST_ACCEPTED')
  end
- function T.pulse(force)
+ function T.pulse(force,address,method,value)
+  if T.observe and address then T.observe(address,method,value)end
   if polling then return end;polling=true
   for i=1,8 do local e={event.pull(0)};if not e[1]then break end;receive(e)end
   local now=clock.uptime()
   if force or now>=T.next then
-   local data=T.pending or T.last
+   local data=T.pending or(T.snapshot and T.snapshot())or T.last
+   data.reply=T.reply
    data.transportProtocol=1;data.transportBusy=T.pending==nil;data.transportAt=now
    local accepted,reason=panel.publish(data)
    assert(accepted~=nil,reason)
@@ -46,6 +48,7 @@ return function(C,B,cfg,storage)
  local settings=raw and C.read(path)or {version=1,target=fallback,overrides={},enabled=false}
  local K={busy=false,logs={},message='空闲时按目标补库；生产订单优先',page=0}
  local active,nextScan,nextGroup,names=nil,0,1,{}
+ local catalogueReady=false;local displayedStock={}
  local function integer(n,min)return type(n)=='number'and n>=min and n<=2147483647 and n%1==0 end
  local function validate(v)
   assert(v.version==1 and integer(v.target,1)and type(v.overrides)=='table'and type(v.enabled)=='boolean','缓存配置无效')
@@ -82,17 +85,25 @@ return function(C,B,cfg,storage)
   assert(not K.blocked,'缓存操作未确认，保留记录核对：'..tostring(K.blocked))
   for group in ipairs(cfg.groups)do assert(confirmed(C.read(journal(group))),'设备组 '..group..' 有未确认缓存操作，保留 cache.journal 核对，禁止重复申请')end
  end
- local function scan()
+ local function scan(force)
+  if catalogueReady and not force then return end
   local found={};if fs.exists(cfg.recipeDirectory)then for name in fs.list(cfg.recipeDirectory)do if name:match('%.dat$')then
    local r=C.read(cfg.recipeDirectory..'/'..name)
    if r and r.state=='converted'then for _,f in ipairs(r.condensates or {})do
     assert(type(f.name)=='string'and #f.name<=80,'配方流体名称无效');found[f.name]=true
    end end
   end end end
-  names={};for name in pairs(found)do names[#names+1]=name end;table.sort(names);assert(#names<=64,'登记缓存类型超过64种')
+  names={};for name in pairs(found)do names[#names+1]=name end;table.sort(names);assert(#names<=64,'登记缓存类型超过64种');catalogueReady=true
  end
+ function K.invalidateCatalogue()catalogueReady=false end
+ function K.catalogueStep()scan()end
+ function K.refreshStock(group)
+  local ok,stock=pcall(c.invoke,cfg.groups[group].storage,'getStoredCondensate')
+  displayedStock[group]=ok and type(stock)=='table'and stock or {}
+ end
+ function K.observeStock(group,stock)if type(stock)=='table'then displayedStock[group]=stock end end
  function K.action(args)
-  if args.mode=='refresh'then scan();local page=tonumber(args.page)or 0;assert(integer(page,0),'分页无效');K.page=math.min(math.floor(page),math.max(0,math.ceil(#names/8)-1));return '已刷新缓存库存'end
+  if args.mode=='refresh'then scan(true);local page=tonumber(args.page)or 0;assert(integer(page,0),'分页无效');K.page=math.min(math.floor(page),math.max(0,math.ceil(#names/8)-1));return '已刷新缓存目录；库存随状态更新'end
   assert(args.revision==B.revision(raw or ''),'缓存设置已变化，等待最新数据后重试')
   assert(B.read(path)==raw,'缓存设置被其他程序修改，请重新打开网页')
   local next={version=1,target=settings.target,enabled=settings.enabled,overrides={}}
@@ -227,10 +238,10 @@ return function(C,B,cfg,storage)
    end
   end
  end
- function K.snapshot(group)
-  if #names==0 then local ok,err=pcall(scan);if not ok then K.message=tostring(err):sub(1,300)end end
+ function K.snapshot(group,fast)
+  if not fast then local ok,err=pcall(scan);if not ok then K.message=tostring(err):sub(1,300)end;K.refreshStock(group)end
   local out={revision=B.revision(raw or ''),enabled=settings.enabled,target=settings.target,busy=K.busy,group=K.group or group,blocked=K.blocked~=nil,message=K.message,logs=K.logs,page=K.page,total=#names,rows={}}
-  local g=cfg.groups[group];local ok,stock=pcall(c.invoke,g.storage,'getStoredCondensate');if not ok or type(stock)~='table'then stock={}end
+  local stock=displayedStock[group]or {}
   for i=K.page*8+1,math.min(#names,K.page*8+8)do local name=names[i];local override=settings.overrides[name]
    out.rows[#out.rows+1]={name=name,label=labels[name:gsub('^entangled_','')]or name,stock=stock[name]or 0,target=override~=nil and override or settings.target,override=override}
   end
@@ -3317,7 +3328,9 @@ function M.component(native)
  for _,name in ipairs({'invoke','methods','list'})do
   proxy[name]=function(...)
    if not M.pulse then return native[name](...)end
-   M.pulse();local values=table.pack(native[name](...));M.pulse();return table.unpack(values,1,values.n)
+   M.pulse();local values=table.pack(native[name](...))
+   if name=='invoke'then M.pulse(false,select(1,...),select(2,...),values[1])else M.pulse()end
+   return table.unpack(values,1,values.n)
   end
  end
  return proxy
@@ -3595,6 +3608,8 @@ local package={id='bec-v2-studio',title='BEC V2 结构绑定与运行',entry='in
  events={'save_field','apply_bindings','start','pause','select_group','refresh','scan_components','patterns','cache'}}
 local panel=c.proxy(address);local H=module('web_session')(C,B,W)
 local T=module('web_transport')(panel,event,W,address);C.pulse=T.pulse
+T.snapshot=function()return H.snapshot(true)end
+T.observe=H.observe
 local ok,err=xpcall(function()
  while true do local accepted,reason=panel.setWebApp(package);assert(accepted~=nil,reason);if accepted then break end;event.pull(.6)end
  print('OCHD 已显示结构绑定与流程图。右键屏幕操作；OC 按 Q 退出并暂停。')
@@ -3606,13 +3621,13 @@ local ok,err=xpcall(function()
   if request then
    local success,message=pcall(function()return H.handle(request.name,request.args,request.request)end)
    if not success then H.notice=tostring(message)end
-   T.publish(H.snapshot(),{token=request.token,name=request.name,ok=success,message=tostring(message):sub(1,400)})
-   nextPush=clock.uptime()+2
+   T.publish(H.snapshot(true),{token=request.token,name=request.name,ok=success,message=tostring(message):sub(1,400)})
+   nextPush=clock.uptime()+.6
   end
   if T.stopping then break end
   H.step();T.pulse()
   if clock.uptime()>=nextPush then
-   T.publish(H.snapshot());nextPush=clock.uptime()+2
+   T.publish(H.snapshot(true));nextPush=clock.uptime()+.6
   end
  end
 end,debug.traceback)
@@ -3630,6 +3645,8 @@ return function(C,B,W,options)
   groups={{name='设备组 01',storage='',gate='',subInterface='',transposer='',mainSide=4,subSide=5,generators={},bulkTransposers={},nanites={enabled=false,mode='cell-io'}}},nodes={}}
  local draftPath=C.path('bindings.draft.dat');local raw=B.read(draftPath);local draft=raw and ser.unserialize(raw)
  local E,P,K
+ local displayed={};local displayJobs,displayIndex,displayGroup,displayNext=nil,1,nil,0
+ local displayedDisk={known=false,ok=false,reserve=524288}
  local storage=options.storage or assert(loadfile(C.path('lib/storage.lua')))()(C)
  -- BEC_WEB_CACHE_1: independent settings; worker shares production resource locks.
  local function cache()if not K then K=assert(loadfile(C.path('lib/cache.lua')))()(C,B,cfg,storage)end;return K end
@@ -3703,8 +3720,8 @@ return function(C,B,W,options)
  local function patternStep()
   if not(P and P.co)then return end
   local ok,err=coroutine.resume(P.co)
-  if not ok then P.co=nil;P.status='failed';P.message=tostring(err):sub(1,400);patternLog('处理失败：',P.message);H.notice=P.message
-  elseif coroutine.status(P.co)=='dead'then P.co=nil;P.status=P.stop and 'stopped'or 'done';P.message=P.stop and '已停止；已完成槽位和需求记录保留'or '本次样板检查/处理完成';H.notice=P.message end
+  if not ok then P.co=nil;P.status='failed';P.message=tostring(err):sub(1,400);patternLog('处理失败：',P.message);H.notice=P.message;if K then K.invalidateCatalogue()end
+  elseif coroutine.status(P.co)=='dead'then P.co=nil;P.status=P.stop and 'stopped'or 'done';P.message=P.stop and '已停止；已完成槽位和需求记录保留'or '本次样板检查/处理完成';H.notice=P.message;if K then K.invalidateCatalogue()end end
  end
  local function cleanDraft()
   assert(expected and B.read(path)==expected,'请先应用绑定；正式配置若被外部修改，请重新打开网页')
@@ -3716,7 +3733,6 @@ return function(C,B,W,options)
   assert(type(request)=='number'and request==math.floor(request)and request>0,'请求编号无效')
   if name=='cache'then
    if args.mode=='enable'then cleanDraft();C.validate(cfg,true)end
-   if args.mode=='save'or args.mode=='enable'then local disk=storage.status();assert(disk.known and disk.ok,'磁盘不足，缓存配置未保存')end
    H.notice=cache().action(args);return H.notice
   elseif name=='patterns'then
    if args.mode=='stop'then
@@ -3763,7 +3779,7 @@ return function(C,B,W,options)
    storage.prune(cfg)
    cfg=B.saveV2(C,cfg,payload(),request,expected,revision());expected=B.read(path)
    -- The old draft's base is no longer current, so B.draftFields ignores it.
-   E=nil;K=nil;H.started=false;H.notice='绑定已校验并应用，点击启动自动化。';return H.notice
+   E=nil;K=nil;displayed={};displayJobs=nil;displayGroup=nil;H.started=false;H.notice='绑定已校验并应用，点击启动自动化。';return H.notice
   elseif name=='start'then
    assert(not H.running,'自动化已经运行')
    assert(not(P and P.co),'先停止或等待样板处理结束，再启动自动化')
@@ -3801,7 +3817,39 @@ return function(C,B,W,options)
   end
   error('不支持的页面事件')
  end
+ -- Display reads are spread across loop iterations. They never feed control guards.
+ function H.observe(a,m,value)
+  if m=='getState'or m=='isWorkAllowed'or m=='isMachineActive'then
+   displayed[a]=displayed[a]or {};displayed[a][m]={value=value,at=clock.uptime()}
+  elseif m=='getStoredCondensate'and K then
+   for group,g in ipairs(cfg.groups)do if g.storage==a then K.observeStock(group,value)end end
+  end
+ end
+ function H.displayStep()
+  if displayGroup~=H.group then displayJobs=nil;displayNext=0;displayGroup=H.group end
+  if not displayJobs then
+   if clock.uptime()<displayNext then return end
+   displayJobs={};displayIndex=1;local group=H.group;local g=cfg.groups[group]
+   local function add(a,m)
+    if not a or a==''then return end
+    displayJobs[#displayJobs+1]=function()
+     local recent=displayed[a]and displayed[a][m];if recent and clock.uptime()-recent.at<1 then return end
+     local v=read(a,m);displayed[a]=displayed[a]or {};displayed[a][m]={value=v,at=clock.uptime()}
+    end
+   end
+   add(g.storage,'isMachineActive');add(g.gate,'isMachineActive')
+   for _,a in ipairs(g.generators)do add(a,'isMachineActive')end
+   for _,n in ipairs(cfg.nodes)do if n.group==group then add(n.address,'getState');add(n.address,'isWorkAllowed')end end
+   displayJobs[#displayJobs+1]=function()cache().refreshStock(group)end
+   displayJobs[#displayJobs+1]=function()displayedDisk=storage.status()end
+   displayJobs[#displayJobs+1]=function()cache().catalogueStep()end
+  end
+  local job=displayJobs[displayIndex];displayIndex=displayIndex+1
+  if job then pcall(job)end
+  if displayIndex>#displayJobs then displayJobs=nil;displayNext=clock.uptime()+.2 end
+ end
  function H.step()
+  H.displayStep()
   scanStep();patternStep()
   if K then
    local ok,err=pcall(K.step,E,H.running)
@@ -3813,15 +3861,15 @@ return function(C,B,W,options)
   if H.running or draining then E.step()end
   if E.diskLow then H.running=false;H.notice='磁盘空间不足，自动化已暂停；当前及未确认日志保留，请腾出至少512KiB。'end
  end
- function H.snapshot()
+ function H.snapshot(fast)
   local now=clock.uptime();local values={}
   for _,f in ipairs(fields())do
    local g=f.key:match('^g(%d+)%.')
    if not g or tonumber(g)==H.group then values[f.key]=f.value end
   end
   local out={mode=H.running and 'running'or 'binding',revision=revision(),values=values,group=H.group,groupCount=#cfg.groups,
-   configured=expected~=nil,notice=H.notice,scan=scanSnapshot(),now=now,machines={},nodes={},flow={},timeline={},logs={},disk=storage.status()}
-  out.cache=cache().snapshot(H.group)
+   configured=expected~=nil,notice=H.notice,scan=scanSnapshot(),now=now,machines={},nodes={},flow={},timeline={},logs={},disk=fast and displayedDisk or storage.status()}
+  out.cache=cache().snapshot(H.group,fast)
   if P then out.patterns={mode=P.mode,status=P.status,slot=P.slot,message=P.message,logs=P.logs,rows=P.rows}end
   local g=cfg.groups[H.group];out.groupName=g.name or ('设备组 '..H.group);out.generatorSlots=math.max(4,#g.generators);local selected
   if E then local owner=E.groupOwner[H.group];selected=owner and E.tasks[owner]
@@ -3838,8 +3886,13 @@ return function(C,B,W,options)
    for _,row in ipairs(selected.timeline or {})do out.timeline[#out.timeline+1]={phase=row.phase,offset=row.at-selected.startedAt}end
    out.fault=selected.fault==true;out.leader=selected.members and selected.members[1]
   else out.phase='idle';out.elapsed=0;out.phaseElapsed=0 end
+  local function sample(a,m)
+   if not fast then return read(a,m)end
+   local item=displayed[a]and displayed[a][m]
+   if item and now-item.at<=10 then return item.value end
+  end
   local function actual(id,a)
-   local active=read(a,'isMachineActive');out.machines[id]=active==nil and 'unknown'or active and 'active'or 'idle'
+   local active=sample(a,'isMachineActive');out.machines[id]=active==nil and 'unknown'or active and 'active'or 'idle'
   end
   actual('field',g.storage);actual('gate',g.gate)
   for j=1,math.max(1,#g.generators)do actual(j==1 and 'generator'or 'generator-'..j,g.generators[j])end
@@ -3847,7 +3900,7 @@ return function(C,B,W,options)
   for j=1,10 do out.machines['bulk-transposer-'..j]=supply and 'phase'or 'idle'end
   out.machines['nanite-transposer']=out.phase=='nanites'and 'phase'or 'idle'
   for i,n in ipairs(cfg.nodes)do if n.group==H.group then
-   local state=read(n.address,'getState')or 'offline';local allowed=read(n.address,'isWorkAllowed')
+   local state=sample(n.address,'getState')or 'offline';local allowed=sample(n.address,'isWorkAllowed')
    out.nodes[#out.nodes+1]={slot=n.slot or i,state=state,workAllowed=allowed==true,name=n.name}
    out.machines['node-'..(n.slot or i)]=state=='crafting'and 'active'or state=='offline'and 'unknown'or 'idle'
   end end

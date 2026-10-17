@@ -14,12 +14,14 @@ return function(panel,event,W,address)
   T.queue[#T.queue+1]={name=e[3],args=args,request=e[5],token=token}
   panel.ack(e[5],true,'BEC_REQUEST_ACCEPTED')
  end
- function T.pulse(force)
+ function T.pulse(force,address,method,value)
+  if T.observe and address then T.observe(address,method,value)end
   if polling then return end;polling=true
   for i=1,8 do local e={event.pull(0)};if not e[1]then break end;receive(e)end
   local now=clock.uptime()
   if force or now>=T.next then
-   local data=T.pending or T.last
+   local data=T.pending or(T.snapshot and T.snapshot())or T.last
+   data.reply=T.reply
    data.transportProtocol=1;data.transportBusy=T.pending==nil;data.transportAt=now
    local accepted,reason=panel.publish(data)
    assert(accepted~=nil,reason)
