@@ -764,10 +764,12 @@ M.read=read
 return M
 ]=]},
 {"lib/patterns.lua",[=[local c=require('component')
-return function(C,mode)
+return function(C,mode,options)
+ options=options or {}
  assert(mode=='preview'or mode=='run'or mode=='watch','用法：patterns preview / run / watch')
  local cfg=C.load();local address=assert(cfg.workshopInterface,'先setup绑定专用工坊ME接口')
  assert(address~=cfg.mainInterface,'工坊接口不能用主网供液接口')
+ local function guard()
  for group,g in ipairs(cfg.groups)do
   assert(address~=g.subInterface,'工坊接口不能用原液子网接口')
   for _,n in ipairs(cfg.nodes)do if n.group==group then
@@ -778,10 +780,15 @@ return function(C,mode)
    assert(mode=='preview'or (c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false),'先关闭纠缠器再处理样板')
   end
  end
+ end
+ guard()
  local f=assert(io.open(C.path('runtime/patterns.lua'),'r'));local text=f:read('*a');f:close()
  text=text:gsub('local ADDRESS="[^"]+"',function()return 'local ADDRESS='..string.format('%q',address)end,1)
  text=text:gsub('local DIR="[^"]+"',function()return 'local DIR='..string.format('%q',cfg.recipeDirectory)end,1)
- assert(load(text,'V2样板处理','t',_ENV))(mode)
+ local env=options.print and setmetatable({print=options.print},{__index=_ENV})or _ENV
+ local hooks=options.hooks
+ if hooks then local before=hooks.beforeSlot;hooks.beforeSlot=function(slot)guard();if before then before(slot)end end end
+ assert(load(text,'V2样板处理','t',env))(mode,hooks)
 end
 ]=]},
 {"lib/reports.lua",[=[-- V2 fault outbox. Network polling never sleeps or controls a machine.
@@ -1374,6 +1381,8 @@ input,textarea{caret-color:#236ee8;cursor:text}input:focus,textarea:focus{outlin
 #binding-issues-list{display:grid;gap:8px;margin:12px 0 18px}#binding-issues-list button{text-align:left;border:1px solid #efc7cd;background:#fff6f7;color:#a52d3c;padding:10px;border-radius:6px}
 
 .pick-component{border:1px solid #bcd5f4;background:#edf4ff;color:#236ee8;padding:6px 10px;border-radius:5px;margin-top:6px}.component-choice{display:block;width:100%;text-align:left;border:1px solid #d7e3f3;border-radius:6px;padding:10px;margin:8px 0;background:#fff}.component-choice strong,.component-choice code,.component-choice small{display:block}.component-choice code{font-size:12px;user-select:text}.component-choice small{color:#73839a}#component-picker footer{gap:6px;flex-wrap:wrap}#picker-status{color:#315f94}
+
+#patterns-log{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.7 Consolas,monospace;max-height:260px;overflow:auto;background:#f5f8fc;padding:10px;border-radius:5px}#patterns-status{color:#315f94}#patterns-dialog footer{gap:6px;flex-wrap:wrap}.pattern-busy input,.pattern-busy .direction-grid button,.pattern-busy .pick-component,.pattern-busy .clear-address,.pattern-busy .ochd-select{pointer-events:none;opacity:.55}
 </style></head><body>
 <header class="topbar"><a class="brand" href="#"><span class="brand-icon"><i></i><i></i><i></i></span><strong>BEC<span> / STUDIO</span></strong></a><div class="top-divider"></div><span class="project-name">装配线 01 <span class="pill">配置原型</span></span><div class="top-actions"><span id="save-status" class="save-status"><i></i>本地草稿已就绪</span><button class="button quiet" id="import-btn">↥ 导入草稿</button><button class="button primary" id="export-btn">↧ 导出配置</button><input id="import-file" type="file" accept="application/json,.json" hidden></div></header>
 <div class="workspace"><aside class="sidebar"><div class="side-head"><span class="eyebrow">PROJECT EXPLORER</span><h1>装配线结构</h1><p>以实际设备为入口，完成每一处绑定。</p></div><div class="search-box"><span>⌕</span><input id="tree-search" placeholder="查找设备或地址" aria-label="查找设备或地址"><kbd>/</kbd></div><div class="line-header"><span>⌄</span><b>设备组 01</b><span id="binding-count" class="count">0 / 31</span></div><div id="structure-tree" class="tree"></div><div class="side-footer"><div class="source-label"><span class="verified">✓</span><span>GTNH 官方结构数据</span></div><p>GregTech 5.09.54.133<br>方块形状与材质来自原始资源</p><button class="text-button" id="source-button">查看数据来源 ↗</button></div></aside>
@@ -1738,19 +1747,20 @@ document.addEventListener('scroll',function(e){if(open&&!open.menu.contains(e.ta
 new MutationObserver(refresh).observe(document.body,{childList:true,subtree:true});window.BEC_REFRESH_SELECTS=refresh;refresh();
 })();
 </script><script>(function(){'use strict';
-var $=function(id){return document.getElementById(id);},app=window.BEC_APP,last=null,online=false,receivedAt=0,receiving=false,queue={},inflight=false,waiting=null,failed=false,group=1,switching=null,currentSave=null,actionPending=null,actionMessage=null,picking=null,pickerPending=false,pickerSerial=0;
+var $=function(id){return document.getElementById(id);},app=window.BEC_APP,last=null,online=false,receivedAt=0,receiving=false,queue={},inflight=false,waiting=null,failed=false,group=1,switching=null,currentSave=null,actionPending=null,actionMessage=null,picking=null,pickerPending=false,pickerSerial=0,patternPending=false;
 var order=['detect','nanites','gate','supply','convert','produce','finish'],titles={idle:'等待订单',detect:'读取配方',nanites:'蜂群检查',gate:'韦门确认',supply:'原液备料',convert:'凝聚物转换',produce:'配方运行',finish:'批次收尾',fault:'保护暂停'};
+function list(v){return Array.isArray(v)?v:[];}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];});}
 function time(n){n=Math.max(0,Number(n)||0);return n<60?n.toFixed(1)+'s':Math.floor(n/60)+'m '+(n%60).toFixed(1)+'s';}
 function status(s,bad){$('save-status').textContent=s;$('save-status').classList.toggle('offline-alert',!!bad);}
 function saving(){return inflight||!!waiting||!!Object.keys(queue).length;}
 function showAction(message,bad){actionMessage={text:message,bad:!!bad};refreshActions();}
 function refreshActions(){
- var running=last&&last.mode==='running',reason=!online?'OC 未连接，暂不能启动。':running?'自动化运行中。':saving()?'正在保存草稿，请稍候。':!last.configured?'草稿已保存还不等于绑定已应用。请先点击「应用绑定」，校验通过后再启动。':'绑定已应用，可以启动；修改地址后需重新应用绑定。';
+ var patternBusy=last&&last.patterns&&last.patterns.status==='running';var running=last&&last.mode==='running',reason=!online?'OC 未连接，暂不能启动。':running?'自动化运行中。':patternBusy?'样板处理中，请在样板处理窗口等待完成或停止。':saving()?'正在保存草稿，请稍候。':!last.configured?'草稿已保存还不等于绑定已应用。请先点击「应用绑定」，校验通过后再启动。':'绑定已应用，可以启动；修改地址后需重新应用绑定。';
  var hint=$('action-feedback');hint.textContent=actionPending?({'apply_bindings':'正在校验并应用绑定…',start:'正在启动自动化…',pause:'正在暂停自动化…'}[actionPending]):actionMessage?actionMessage.text:reason;
  hint.classList.toggle('action-error',!!(actionMessage&&actionMessage.bad&&!actionPending));hint.setAttribute('role',actionMessage&&actionMessage.bad?'alert':'status');
- $('start-run').textContent=running?'运行中':'启动自动化';$('start-run').disabled=!online||running||!!actionPending||saving();$('start-run').title=reason;
- $('apply-config').disabled=!online||running||!!actionPending||saving();$('stop-run').disabled=!online||!running||!!actionPending;
+ $('start-run').textContent=running?'运行中':'启动自动化';$('start-run').disabled=!online||running||!!actionPending||patternBusy||saving();$('start-run').title=reason;
+ $('apply-config').disabled=!online||running||!!actionPending||patternBusy||saving();$('stop-run').disabled=!online||!running||!!actionPending;
 }
 function send(name,args){if(!online)return Promise.reject(Error('OC 未连接，未执行操作'));return OC.emit(name,args||{});}
 function key(id,k){var m={'field':'g'+group+'.storage','generator':'g'+group+'.generator1','gate':'g'+group+'.gate','main-me':'mainInterface','workshop-me':'workshopInterface','sub-me':'g'+group+'.subInterface','fluid-transposer':'g'+group+'.transposer','nanite-transposer':'g'+group+'.bee_transposer','load-redstone':'g'+group+'.bee_loadRedstone','return-redstone':'g'+group+'.bee_returnRedstone'};
@@ -1761,7 +1771,7 @@ function key(id,k){var m={'field':'g'+group+'.storage','generator':'g'+group+'.g
 function fieldKeys(m){return ['address'].concat(m.kind==='node'?['redstone','group','pauseSide','gate']:(m.sides||[]).map(function(f){return f[0];}));}
 function toValues(draft){var out={};app.scene.modules.forEach(function(m){var v=draft.modules[m.id];if(!v||!m.role)return;fieldKeys(m).forEach(function(k){if(v[k]!=null){var name=key(m.id,k);if(name)out[name]=String(v[k]);}});});return out;}
 function importValues(values){var draft={version:1,modules:{}};app.scene.modules.forEach(function(m){if(!m.role)return;var v={};fieldKeys(m).forEach(function(k){var value=values[key(m.id,k)];if(value!=null)v[k]=k==='address'||k==='redstone'||k==='gate'?value:Number(value);});draft.modules[m.id]=v;});receiving=true;app.importDraft(draft);receiving=false;}
-function dirty(draft){if(receiving||switching||!last||last.mode==='running')return;var values=toValues(draft);Object.keys(values).forEach(function(k){if(values[k]!==last.values[k]||(currentSave&&currentSave.key===k&&currentSave.value!==values[k])||(waiting&&waiting.key===k&&waiting.value!==values[k]))queue[k]=values[k];});status('正在保存到 OC…');pump();}
+function dirty(draft){if(receiving||switching||!last||last.mode==='running'||last.patterns&&last.patterns.status==='running')return;var values=toValues(draft);Object.keys(values).forEach(function(k){if(values[k]!==last.values[k]||(currentSave&&currentSave.key===k&&currentSave.value!==values[k])||(waiting&&waiting.key===k&&waiting.value!==values[k]))queue[k]=values[k];});status('正在保存到 OC…');pump();}
 window.BEC_BINDING_DIRTY=dirty;
 function pump(){if(inflight||waiting||failed||switching||!online||!last)return;var keys=Object.keys(queue);if(!keys.length){status('草稿已保存到 OC');return;}var k=keys[0],v=queue[k],revision=last.revision;delete queue[k];inflight=true;currentSave={key:k,value:v};status('正在保存到 OC…');send('save_field',{key:k,value:v,revision:revision}).then(function(){inflight=false;currentSave=null;waiting={revision:revision,key:k,value:v};if(last&&(last.revision!==revision||last.values[k]===v)){waiting=null;pump();}}).catch(function(e){inflight=false;currentSave=null;if(!Object.prototype.hasOwnProperty.call(queue,k))queue[k]=v;failed=true;status('保存未确认 · 点击重试',true);$('runtime-notice').textContent=e.message;});}
 function syncModels(d){var scene=app.scene,base=scene.modules.find(function(m){return m.id==='generator';});if(!base)return;var count=Math.min(16,Math.max(4,d.generatorSlots||4));scene.modules=scene.modules.filter(function(m){return m.id.indexOf('generator-')!==0||Number(m.id.slice(10))<=count;});if(!scene.modules.some(function(m){return m.id===scene.selected;}))scene.selected='assembler';
@@ -1778,7 +1788,7 @@ function flow(){if(!last)return;var age=online?Math.min(3,(Date.now()-receivedAt
 function data(d){var changed=group!==(d.group||1);last=d;online=d._online!==false;receivedAt=Date.now();group=d.group||1;if(switching===group)switching=null;if(waiting&&(waiting.revision!==d.revision||(d.values||{})[waiting.key]===waiting.value))waiting=null;
  syncModels(d);if(!switching&&!inflight&&!waiting&&!Object.keys(queue).length&&(changed||!/INPUT|TEXTAREA/.test(document.activeElement.tagName)))importValues(d.values||{});
  $('runtime-notice').textContent=(online?'': 'OC 离线，显示最后快照。')+(d.notice||'')+(d.disk&&d.disk.known?' · 磁盘剩余 '+(d.disk.free/1024).toFixed(0)+' KiB / 保留 '+(d.disk.reserve/1024).toFixed(0)+' KiB':' · 磁盘容量不可读');$('runtime-notice').classList.toggle('offline-alert',!online);
- document.body.classList.toggle('runtime-running',d.mode==='running');$('flow-panel').hidden=false;refreshActions();$('global-settings').disabled=d.mode==='running';
+ document.body.classList.toggle('runtime-running',d.mode==='running');$('flow-panel').hidden=false;refreshActions();$('global-settings').disabled=d.mode==='running'||!!(d.patterns&&d.patterns.status==='running');document.body.classList.toggle('pattern-busy',!!(d.patterns&&d.patterns.status==='running'));renderPatterns();
  if(!online)status('OC 离线 · 未保存操作',true);else if(failed)status('保存未确认 · 点击重试',true);else if(!inflight&&!waiting&&!Object.keys(queue).length)status('OC 已连接 · 草稿已保存');
  if($('group-select').options.length!==d.groupCount){$('group-select').innerHTML=Array.from({length:d.groupCount||1},function(_,i){return '<option value="'+(i+1)+'">设备组 '+String(i+1).padStart(2,'0')+'</option>';}).join('');}$('group-select').value=group;if(window.BEC_REFRESH_SELECTS)window.BEC_REFRESH_SELECTS();
  markMachines();flow();pump();renderPicker(d.scan);
@@ -1804,7 +1814,7 @@ function bindingName(k){var n=k.match(/^n(\d+)\.(.+)$/),g=k.match(/^g(\d+)\.(.+)
 function renderPicker(scan){
  pickerButtons();if(!picking||!scan||scan.role!==picking.role||scan.token!==picking.token||pickerPending)return;
  $('picker-status').textContent=scan.status==='scanning'?'扫描中，已检查 '+scan.checked+' 个组件…':scan.status==='failed'?scan.message:'找到 '+scan.total+' 项 · 第 '+(scan.page+1)+' 页'+(scan.baseline?' · 比上次减少 '+scan.removed+' 项':' · 首次扫描作为比较基准')+(scan.message?' · '+scan.message:'');
- $('picker-results').innerHTML=(scan.rows||[]).map(function(r){return '<button class="component-choice" type="button" data-address="'+esc(r.address)+'"><strong>'+(r.fresh?'新增 / 重新接入 · ':'')+esc(r.kind)+'</strong><code>'+esc(r.address)+'</code><small>'+esc(r.name||'')+(r.used?' · 已填写于 '+esc(r.used.split(', ').map(bindingName).join('、')):' · 尚未填写')+'</small></button>';}).join('')||(scan.status==='done'?'<p>没有匹配设备。当前 OC 组件网络看不到这种设备，检查适配器连接及 P2P。</p>':'');
+ $('picker-results').innerHTML=list(scan.rows).map(function(r){return '<button class="component-choice" type="button" data-address="'+esc(r.address)+'"><strong>'+(r.fresh?'新增 / 重新接入 · ':'')+esc(r.kind)+'</strong><code>'+esc(r.address)+'</code><small>'+esc(r.name||'')+(r.used?' · 已填写于 '+esc(r.used.split(', ').map(bindingName).join('、')):' · 尚未填写')+'</small></button>';}).join('')||(scan.status==='done'?'<p>没有匹配设备。当前 OC 组件网络看不到这种设备，检查适配器连接及 P2P。</p>':'');
  $('picker-results').querySelectorAll('button').forEach(function(b){b.onclick=function(){
   if(!picking||!online||last.mode==='running'||saving()){showAction('状态已改变，请等待保存完成并保持暂停后重新选择。',true);return;}
   var selected=picking;app.select(selected.id);var input=$('field-'+selected.field);if(!input){$('picker-status').textContent='当前字段不可用，请关闭后重试';return;}
@@ -1846,12 +1856,24 @@ function action(name){
  actionMessage=null;actionPending=name;refreshActions();
  send(name,{revision:last&&last.revision}).then(function(r){actionPending=null;showAction(r.message||'请求已确认，等待 OC 状态更新。',false);}).catch(function(e){actionPending=null;showAction((name==='apply_bindings'?'应用绑定失败：':name==='start'?'启动失败：':'暂停失败：')+e.message,true);});
 }
+function renderPatterns(){
+ var p=last&&last.patterns,busy=p&&p.status==='running';$('patterns-status').textContent=p?({running:'进行中',done:'已完成',failed:'处理失败',stopped:'已停止'}[p.status]||p.status)+' · 槽位 '+p.slot+' / 9 · '+p.message:!last||!last.configured?'请先绑定并应用独立的样板工坊 ME 接口。':'先预览工坊接口内的样板，再处理原样板的副本。';
+ $('patterns-log').textContent=p?(list(p.rows).join('\n')+'\n'+list(p.logs).join('\n')):'';['patterns-preview','patterns-run'].forEach(function(id){$(id).disabled=!online||!last||last.mode==='running'||!last.configured||busy||patternPending||saving();});$('patterns-stop').disabled=!online||!busy||patternPending;
+ $('patterns-open').textContent=busy?'样板处理中':'样板处理';
+ $('patterns-target').textContent=last?'工坊接口：'+(last.values.workshopInterface||'未绑定')+' · 配方目录：'+(last.values.recipeDirectory||'未设置'):'';
+}
+function patternAction(mode){
+ if(patternPending)return;if(mode!=='stop'&&saving()){$('patterns-status').textContent='请先等待草稿保存完成。';return;}
+ patternPending=true;renderPatterns();$('patterns-status').textContent=mode==='stop'?'正在请求停止…':'正在提交样板操作…';
+ send('patterns',{mode:mode,revision:last&&last.revision}).then(function(r){patternPending=false;renderPatterns();$('patterns-status').textContent=r.message||'请求已确认，等待处理状态。';}).catch(function(e){patternPending=false;renderPatterns();$('patterns-status').textContent='未执行：'+e.message;showAction('样板操作失败：'+e.message,true);});
+}
 function settings(){if(!last)return;var specs=[['recipeDirectory','配方目录'],['cacheTarget','库存参考目标']];for(var i=1;i<=Math.max(4,last.generatorSlots||4);i++)specs.push(['g'+group+'.generator'+i,'纠缠器 '+i+'（多余可空）']);$('extra-fields').innerHTML=specs.map(function(f){return '<label>'+f[1]+'<input data-config="'+f[0]+'" value="'+esc(last.values[f[0]]||'')+'" maxlength="160" spellcheck="false"></label>';}).join('');$('extra-fields').querySelectorAll('input').forEach(function(input){input.onchange=function(){queue[input.dataset.config]=input.value;pump();};});$('runtime-settings').showModal();}
-document.querySelector('.top-actions').innerHTML='<span id="save-status" class="save-status">等待 OC 连接</span><button class="button quiet" id="global-settings">公共设置</button><button class="button quiet" id="apply-config">应用绑定</button><button class="button primary run-button" id="start-run">启动自动化</button><button class="button quiet stop-button" id="stop-run">暂停</button>';
+document.querySelector('.top-actions').innerHTML='<span id="save-status" class="save-status">等待 OC 连接</span><button class="button quiet" id="patterns-open">样板处理</button><button class="button quiet" id="global-settings">公共设置</button><button class="button quiet" id="apply-config">应用绑定</button><button class="button primary run-button" id="start-run">启动自动化</button><button class="button quiet stop-button" id="stop-run">暂停</button>';
 var feedback=document.createElement('div');feedback.id='action-feedback';feedback.className='action-feedback';feedback.textContent='等待 OC 连接…';feedback.setAttribute('aria-live','polite');document.body.appendChild(feedback);
 var tabs=document.createElement('nav');tabs.className='runtime-tabs';tabs.innerHTML='<button class="active" data-tab="structure">结构 / 绑定</button><button data-tab="flow">运行流程</button>';document.querySelector('.topbar').insertBefore(tabs,document.querySelector('.top-actions'));
 var flowPanel=document.createElement('section');flowPanel.className='flow-panel';flowPanel.id='flow-panel';flowPanel.innerHTML='<div class="flow-title"><div><h2>自动化流程 <span id="flow-current">等待 OC</span></h2><p id="flow-stage-time">当前步骤 —</p></div><div><div class="elapsed" id="flow-elapsed">0.0s</div><small>当前 / 最近批次总耗时</small></div></div><div class="flow-path" id="flow-steps"></div><div class="flow-bottom"><div><h4>TRANSFER NODES / 接单控制</h4><div class="node-list" id="node-status-list"></div><div class="runtime-legend"><b>绿色：机器回读运行中</b> · <em>金色：当前步骤使用的外设</em><br>外设阶段占用不等同于硬件正在搬运</div></div><div><h4>EXECUTION / 阶段时间线</h4><div id="runtime-log" class="runtime-log" style="white-space:pre-wrap"></div></div></div>';
 document.querySelector('.main').appendChild(flowPanel);var notice=document.createElement('div');notice.id='runtime-notice';notice.className='runtime-notice';notice.textContent='等待 OC 数据，网页预览不控制机器。';document.querySelector('.main').appendChild(notice);
+var patternsDialog=document.createElement('dialog');patternsDialog.id='patterns-dialog';patternsDialog.className='runtime-settings';patternsDialog.innerHTML='<h2>样板处理</h2><p>将原加工样板的副本放入独立工坊 ME 接口。预览只读；处理一次会去除凝聚物输入并保存配方需求。请先暂停生产和纠缠器。</p><p id="patterns-target"></p><div id="patterns-status" role="status" aria-live="polite"></div><pre id="patterns-log"></pre><footer><button id="patterns-preview" class="button">只读预览</button><button id="patterns-run" class="button primary">处理一次</button><button id="patterns-stop" class="button">停止处理</button><button id="patterns-close" class="button">关闭</button></footer>';document.body.appendChild(patternsDialog);$('patterns-open').onclick=function(){$('patterns-dialog').showModal();renderPatterns();};$('patterns-close').onclick=function(){$('patterns-dialog').close();};$('patterns-preview').onclick=function(){patternAction('preview');};$('patterns-run').onclick=function(){patternAction('run');};$('patterns-stop').onclick=function(){patternAction('stop');};
 var pickerDialog=document.createElement('dialog');pickerDialog.id='component-picker';pickerDialog.className='runtime-settings';pickerDialog.innerHTML='<h2 id="picker-title">从 OC 选择设备</h2><p>只读取组件。点击候选地址填入草稿，不启动机器。</p><p>同类机器位置识别：暂停自动化后，仅断开目标适配器的 OC 信号分支，扫描一次；接回原线再「重新扫描」。新增/重新接入项就是候选。不要拆机器或适配器，也不要断整条共用主线。若出现多项新增，逐项确认，不按 UUID 排列猜位置。</p><div id="picker-status"></div><div id="picker-results"></div><footer><button id="picker-prev" class="button">上一页</button><button id="picker-next" class="button">下一页</button><button id="picker-refresh" class="button">重新扫描</button><button id="picker-close" class="button primary">关闭</button></footer>';document.body.appendChild(pickerDialog);$('picker-refresh').onclick=function(){scanPicker();};$('picker-close').onclick=closePicker;
 var issuesDialog=document.createElement('dialog');issuesDialog.id='binding-issues';issuesDialog.className='runtime-settings binding-issues';issuesDialog.innerHTML='<h2>绑定检查 / 当前设备组</h2><p>点击下列项目跳转填写。这里只检查填写内容；通过后还会由 OC 校验设备是否在线、方法和机器状态。</p><div id="binding-issues-list"></div><p>空传送节点会跳过。额外纠缠器、高速供液口、样板工坊可留空；自动换蜂的三项地址须全部填写或全部留空。每个节点须有独立韦门或使用本组公共韦门。</p><footer><button id="close-issues" class="button primary">返回修改</button></footer>';document.body.appendChild(issuesDialog);$('close-issues').onclick=function(){$('binding-issues').close();};
 var dialog=document.createElement('dialog');dialog.id='runtime-settings';dialog.className='runtime-settings';dialog.innerHTML='<h2>公共配置</h2><p>填写后自动暂存。应用绑定通过设备校验后，才能启动。</p><label>当前模型对应 <select id="group-select"></select></label><div id="extra-fields"></div><footer><button id="close-settings" class="button primary">完成</button></footer>';document.body.appendChild(dialog);
@@ -1875,7 +1897,7 @@ return function(C,B,W,options)
  local cfg=expected and C.read(path)or {version=2,mainInterface='',recipeDirectory=C.path('recipes'),cacheTarget=144000,
   groups={{name='设备组 01',storage='',gate='',subInterface='',transposer='',mainSide=4,subSide=5,generators={},bulkTransposers={},nanites={enabled=false,mode='cell-io'}}},nodes={}}
  local draftPath=C.path('bindings.draft.dat');local raw=B.read(draftPath);local draft=raw and ser.unserialize(raw)
- local E
+ local E,P
  local storage=options.storage or assert(loadfile(C.path('lib/storage.lua')))()(C)
  local function revision()return B.revision((expected or '')..'|'..(raw or ''))end
  local function fields()return B.draftFields(cfg,draft,expected)end
@@ -1929,16 +1951,54 @@ return function(C,B,W,options)
  end
  local function idleEditor()
   assert(not H.running,'先暂停自动化再编辑绑定')
+  assert(not(P and P.co),'先等待样板处理结束或停止后再编辑绑定')
   if E then for _,t in ipairs(E.tasks)do assert(not t.co,'等待工作器退出并保留日志后再编辑')end end
  end
  local function read(a,m,...)
   if not a or a==''then return nil end
   local ok,value=pcall(c.invoke,a,m,...);if ok then return value end
  end
+ -- BEC_WEB_PATTERNS_1: resumes only between completed slot transactions.
+ local function patternLog(...)
+  local text={};for i=1,select('#',...)do text[i]=tostring(select(i,...))end
+  local line=table.concat(text,' ')
+  if P.slot>0 then P.rows[P.slot]=((P.rows[P.slot]or '')..line..'\n'):sub(1,380)end
+  P.logs[#P.logs+1]=line:sub(1,220);while #P.logs>6 do table.remove(P.logs,1)end
+ end
+ local function patternStep()
+  if not(P and P.co)then return end
+  local ok,err=coroutine.resume(P.co)
+  if not ok then P.co=nil;P.status='failed';P.message=tostring(err):sub(1,400);patternLog('处理失败：',P.message);H.notice=P.message
+  elseif coroutine.status(P.co)=='dead'then P.co=nil;P.status=P.stop and 'stopped'or 'done';P.message=P.stop and '已停止；已完成槽位和需求记录保留'or '本次样板检查/处理完成';H.notice=P.message end
+ end
+ local function cleanDraft()
+  assert(expected and B.read(path)==expected,'请先应用绑定；正式配置若被外部修改，请重新打开网页')
+  local formal={};for _,f in ipairs(B.v2Fields(cfg))do formal[f.key]=f.value end
+  for _,f in ipairs(fields())do assert(f.value==formal[f.key],'草稿尚未应用，请先应用绑定')end
+ end
  function H.handle(name,args,request)
   assert(type(args)=='table','页面参数必须为对象')
   assert(type(request)=='number'and request==math.floor(request)and request>0,'请求编号无效')
-  if name=='scan_components'then
+  if name=='patterns'then
+   if args.mode=='stop'then
+    if P and P.co then P.stop=true;P.message='正在停止，当前槽位完成核对后退出';return P.message end
+    return '没有正在执行的样板处理'
+   end
+   idleEditor();assert(args.mode=='preview'or args.mode=='run','仅支持预览或处理一次')
+   assert(args.revision==revision(),'绑定已变化，请等待保存并应用后再试');cleanDraft()
+   assert(cfg.workshopInterface and cfg.workshopInterface~='','先绑定并应用独立的样板工坊ME接口')
+   local formal=expected;local mode=args.mode;scan=nil
+   P={mode=mode,status='running',slot=0,logs={},rows={},message=mode=='preview'and '正在只读预览'or '正在处理样板副本'}
+   P.co=coroutine.create(function()
+    local hooks={raiseErrors=true,shouldStop=function()return P.stop==true end,
+     beforeSlot=function(slot)
+      assert(B.read(path)==formal,'样板处理期间正式配置变化，保留现场停止');P.slot=slot
+      if mode=='run'then local disk=storage.status();assert(disk.known and disk.ok,'磁盘空间不足，停止样板处理并保留记录')end
+     end,onSlot=function(slot)if not P.rows[slot]then P.rows[slot]='槽 '..slot..'：空槽'end;coroutine.yield()end}
+    assert(loadfile(C.path('lib/patterns.lua')))()(C,mode,{print=patternLog,hooks=hooks})
+   end)
+   return P.message
+  elseif name=='scan_components'then
    if args.close==true then scan=nil;return '已关闭组件选择'end
    assert(type(args.role)=='string'and required[args.role],'未知设备用途')
    local token=args.token or request;assert(type(token)=='number'and token>0 and token==math.floor(token)and token<=2147483647,'扫描标识无效')
@@ -1967,6 +2027,7 @@ return function(C,B,W,options)
    E=nil;H.started=false;H.notice='绑定已校验并应用，点击启动自动化。';return H.notice
   elseif name=='start'then
    assert(not H.running,'自动化已经运行')
+   assert(not(P and P.co),'先停止或等待样板处理结束，再启动自动化')
    assert(B.read(path)==expected,'正式配置已被其他程序修改，请退出页面后重新打开')
    storage.prune(cfg);local disk=storage.status()
    assert(disk.known and disk.ok,'磁盘剩余空间不足或不可读：至少保留512KiB，暂停启动并保留恢复记录')
@@ -1995,13 +2056,13 @@ return function(C,B,W,options)
    local seen={};for i,n in ipairs(cfg.nodes)do if not seen[n.group]then E.resumeNode(i);seen[n.group]=true end end
    H.running=true;H.notice='自动化运行中；节点按批次关闭接单，整组完成后再接下一单。';return H.notice
   elseif name=='pause'then
-   H.running=false;if E then E.pauseAll()end;H.notice='已请求暂停；工作器收尾，未确认记录保留。';return H.notice
+   H.running=false;if P and P.co then P.stop=true end;if E then E.pauseAll()end;H.notice='已请求暂停；工作器收尾，未确认记录保留。';return H.notice
   elseif name=='refresh'then return '页面在线'
   end
   error('不支持的页面事件')
  end
  function H.step()
-  scanStep()
+  scanStep();patternStep()
   if not E then return end
   local draining=false;for _,t in ipairs(E.tasks)do if t.co then draining=true end end
   if H.running or draining then E.step()end
@@ -2015,6 +2076,7 @@ return function(C,B,W,options)
   end
   local out={mode=H.running and 'running'or 'binding',revision=revision(),values=values,group=H.group,groupCount=#cfg.groups,
    configured=expected~=nil,notice=H.notice,scan=scanSnapshot(),now=now,machines={},nodes={},flow={},timeline={},logs={},disk=storage.status()}
+  if P then out.patterns={mode=P.mode,status=P.status,slot=P.slot,message=P.message,logs=P.logs,rows=P.rows}end
   local g=cfg.groups[H.group];out.groupName=g.name or ('设备组 '..H.group);out.generatorSlots=math.max(4,#g.generators);local selected
   if E then local owner=E.groupOwner[H.group];selected=owner and E.tasks[owner]
    if not selected then for i,n in ipairs(cfg.nodes)do
@@ -2046,6 +2108,7 @@ return function(C,B,W,options)
   return out
  end
  function H.close()
+  if P and P.co then P.stop=true;patternStep()end
   H.running=false;if E then return E.shutdown()end;return {}
  end
  function H.engine()return E end
@@ -2857,7 +2920,8 @@ end
 return M
 ]=]},
 {"runtime/patterns.lua",[=[-- Automatic workshop pattern registration. Never touches the production interface.
-local mode=(...) or "preview"
+local mode,hooks=...
+mode=mode or "preview";hooks=hooks or {}
 local c=require("component")
 local fs=require("filesystem")
 local ser=require("serialization")
@@ -2997,8 +3061,11 @@ local function main()
  print(mode=="preview" and "只读预览，不修改样板或记录" or "放入原加工样板的副本，自动去除凝聚物输入并保存需求")
  repeat
   for slot=1,9 do
+   if hooks.shouldStop and hooks.shouldStop()then print("样板处理已停止，已完成槽位和需求记录保留");return end
+   if hooks.beforeSlot then hooks.beforeSlot(slot)end
    local ok,err=pcall(process,slot)
-   if not ok then notify(slot,"暂停处理："..tostring(err));return end
+   if not ok then notify(slot,"暂停处理："..tostring(err));if hooks.raiseErrors then error(err)end;return end
+   if hooks.onSlot then hooks.onSlot(slot)end
   end
   if mode~="watch" then break end
   local _,_,char=event.pull(1,"key_down")
@@ -3007,7 +3074,7 @@ local function main()
  print("样板处理已结束；转换样板仍在工作接口，需求记录在 "..DIR)
 end
 local ok,err=xpcall(main,debug.traceback)
-if not ok then print("样板服务停止："..tostring(err)) end
+if not ok then print("样板服务停止："..tostring(err));if hooks.raiseErrors then error(err)end end
 ]=]},
 {"setup_hd.lua",[=[-- A setup-only OCHD page. Never starts production or changes machine outputs.
 local c=require('component');local event=require('event');local clock=require('computer')
@@ -3102,7 +3169,7 @@ local methods=c.methods(address)
 assert(methods.setWebApp~=nil and methods.publish~=nil,'需要支持 HTML 页面的 OCHD alpha7 或兼容版 JAR')
 local f=assert(io.open(C.path('lib/web_page.html'),'r'));local page=f:read('*a');f:close()
 local package={id='bec-v2-studio',title='BEC V2 结构绑定与运行',entry='index.html',files={['index.html']=page},
- events={'save_field','apply_bindings','start','pause','select_group','refresh','scan_components'}}
+ events={'save_field','apply_bindings','start','pause','select_group','refresh','scan_components','patterns'}}
 local panel=c.proxy(address);local H=module('web_session')(C,B,W)
 local ok,err=xpcall(function()
  while true do local accepted,reason=panel.setWebApp(package);assert(accepted~=nil,reason);if accepted then break end;event.pull(.6)end

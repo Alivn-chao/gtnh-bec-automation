@@ -16,8 +16,8 @@
     "sha256": "30f7b44aae5fca274d471313cc70e82cc79add26ddb53e16ffdcb8aec1d7aa26"
   },
   "lib/patterns.lua": {
-    "bytes": 1254,
-    "sha256": "2a296c338574c62f44379e5bfbd212f82feb39dcf744ee33f4fd62e4288ce30e"
+    "bytes": 1565,
+    "sha256": "5d9d3bcdc5b0001e8172b406e949466286974d797e1ff21cb9018a1b7fd25ce5"
   },
   "lib/reports.lua": {
     "bytes": 12631,
@@ -44,12 +44,12 @@
     "sha256": "6ab7b6a9762c0a9a93a91bf0d724d1710d0009f5ecd19a9cc9b68a1d7631fd3c"
   },
   "lib/web_page.html": {
-    "bytes": 245579,
-    "sha256": "3ef6b01c7cd407cc77aae1454b9bd33c6e34417037201ef6b012b0d550c09369"
+    "bytes": 249319,
+    "sha256": "96cd137a589ebc21f59ea922adf95c67a1ad4467d7c4dd7700733ca1015ca0d2"
   },
   "lib/web_session.lua": {
-    "bytes": 12354,
-    "sha256": "f8ac4b10e03db5d4dc75479adfc60e4ea41c279bd9dba84d9b5656b6e376e8cd"
+    "bytes": 15309,
+    "sha256": "d761f59b3085dde2758ff53a76b51f29b36d8d7e5bc452b321f0e464b221ad98"
   },
   "main.lua": {
     "bytes": 2807,
@@ -72,8 +72,8 @@
     "sha256": "76c5be95e0d949bb92a94e50ea5c3a1e515f24bedc53e58277097c2ce2007e3f"
   },
   "runtime/patterns.lua": {
-    "bytes": 7499,
-    "sha256": "221eeddc0de6be3be44d26a0384bb32eb6c56aa1ad47571e61c46875eb9bb713"
+    "bytes": 7842,
+    "sha256": "d0373086a128f3f4e89e4489e532b9dae224d8eb31e87e954fd346b95925cbac"
   },
   "setup_hd.lua": {
     "bytes": 3112,
@@ -84,7 +84,7 @@
     "sha256": "40775376191d0b773395314a8ac7c27ffce4b6c9379da80c513c396c5690feb8"
   },
   "web.lua": {
-    "bytes": 2045,
-    "sha256": "9ed4589b776c1a2aa19e5391cfd83847d5e56eeb1f5aabca0d2d93bcc6855994"
+    "bytes": 2056,
+    "sha256": "c8ea106f2f3dc49045291ec91b5dc9686398a3dbb4e6288c096137538fb1af28"
   }
 }

@@ -1,5 +1,6 @@
 -- Automatic workshop pattern registration. Never touches the production interface.
-local mode=(...) or "preview"
+local mode,hooks=...
+mode=mode or "preview";hooks=hooks or {}
 local c=require("component")
 local fs=require("filesystem")
 local ser=require("serialization")
@@ -139,8 +140,11 @@ local function main()
  print(mode=="preview" and "只读预览，不修改样板或记录" or "放入原加工样板的副本，自动去除凝聚物输入并保存需求")
  repeat
   for slot=1,9 do
+   if hooks.shouldStop and hooks.shouldStop()then print("样板处理已停止，已完成槽位和需求记录保留");return end
+   if hooks.beforeSlot then hooks.beforeSlot(slot)end
    local ok,err=pcall(process,slot)
-   if not ok then notify(slot,"暂停处理："..tostring(err));return end
+   if not ok then notify(slot,"暂停处理："..tostring(err));if hooks.raiseErrors then error(err)end;return end
+   if hooks.onSlot then hooks.onSlot(slot)end
   end
   if mode~="watch" then break end
   local _,_,char=event.pull(1,"key_down")
@@ -149,4 +153,4 @@ local function main()
  print("样板处理已结束；转换样板仍在工作接口，需求记录在 "..DIR)
 end
 local ok,err=xpcall(main,debug.traceback)
-if not ok then print("样板服务停止："..tostring(err)) end
+if not ok then print("样板服务停止："..tostring(err));if hooks.raiseErrors then error(err)end end

@@ -3,7 +3,7 @@ import subprocess,unittest
 from pathlib import Path
 from test_web_update import fixture
 HERE=Path(__file__).resolve().parents[1]
-NAMES=['web.lua','lib/ochd_bindings.lua','lib/web_session.lua','lib/web_page.html']
+NAMES=['lib/patterns.lua','runtime/patterns.lua','web.lua','lib/ochd_bindings.lua','lib/web_session.lua','lib/web_page.html']
 SCRIPT=(HERE/'update_bulk10.lua').read_text(encoding='utf-8')
 OLD={name:subprocess.check_output(['git','show','f60f785:reinstall_v2/files/'+name],cwd=HERE.parent).decode()for name in NAMES}
 def make():

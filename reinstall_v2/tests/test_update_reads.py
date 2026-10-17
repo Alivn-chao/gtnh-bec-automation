@@ -9,7 +9,7 @@ ROOT=HERE.parents[1]
 TREE=ast.parse((HERE/'test_install.py').read_text(encoding='utf-8'))
 SETUP=next(n.value.value for n in TREE.body if isinstance(n,ast.Assign)and any(isinstance(t,ast.Name)and t.id=='SETUP'for t in n.targets))
 SCRIPT=(HERE.parent/'update_reads.lua').read_text(encoding='utf-8')
-NAMES=['lib/ochd_bindings.lua','lib/bridge.lua','runtime/controller.lua','lib/engine.lua','runtime/nanites_cell.lua','lib/config.lua','main.lua']
+NAMES=['lib/patterns.lua','runtime/patterns.lua','lib/ochd_bindings.lua','lib/bridge.lua','runtime/controller.lua','lib/engine.lua','runtime/nanites_cell.lua','lib/config.lua','main.lua']
 BASE={name:subprocess.check_output(['git','show','549df6e:reinstall_v2/files/'+name],cwd=ROOT).decode('utf-8')for name in NAMES}
 
 def fixture():
@@ -47,7 +47,7 @@ class UpdateReadsTests(unittest.TestCase):
   writes=l.globals().count;l.execute(SCRIPT);self.assertEqual(l.globals().count,writes);self.assertPreserved(l)
  def test_published_studio_checkpoint_upgrades_with_originals_preserved(self):
   l=fixture()
-  names=['lib/ochd_bindings.lua','lib/bridge.lua','runtime/controller.lua','lib/engine.lua','runtime/nanites_cell.lua','lib/config.lua','lib/storage.lua','main.lua','web.lua','lib/web_session.lua','lib/web_json.lua','lib/web_page.html']
+  names=['lib/patterns.lua','runtime/patterns.lua','lib/ochd_bindings.lua','lib/bridge.lua','runtime/controller.lua','lib/engine.lua','runtime/nanites_cell.lua','lib/config.lua','lib/storage.lua','main.lua','web.lua','lib/web_session.lua','lib/web_json.lua','lib/web_page.html']
   previous={name:subprocess.check_output(['git','show','334125a:reinstall_v2/files/'+name],cwd=ROOT).decode('utf-8')for name in names}
   for name,text in previous.items():l.globals().files['/home/bec_v2/'+name]=text
   l.execute(SCRIPT)

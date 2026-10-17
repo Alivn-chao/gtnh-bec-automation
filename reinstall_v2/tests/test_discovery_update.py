@@ -3,7 +3,7 @@ import subprocess,unittest
 from pathlib import Path
 from test_web_update import fixture
 HERE=Path(__file__).resolve().parents[1]
-NAMES=['web.lua','lib/config.lua','lib/web_session.lua','lib/web_page.html']
+NAMES=['lib/patterns.lua','runtime/patterns.lua','web.lua','lib/config.lua','lib/web_session.lua','lib/web_page.html']
 SCRIPT=(HERE/'update_discovery.lua').read_text(encoding='utf-8')
 OLD={name:subprocess.check_output(['git','show','bccf281:reinstall_v2/files/'+name],cwd=HERE.parent).decode()for name in NAMES}
 def make():

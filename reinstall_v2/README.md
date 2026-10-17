@@ -1,3 +1,5 @@
+网页顶部新增「样板处理」：只读预览、处理一次、停止与逐槽结果，操作及更新见 [WEB_PATTERNS.md](WEB_PATTERNS.md)。
+
 无需手抄 UUID：地址框旁新增「从 OC 识别 / 选择」，同类设备可对比断开/接回分支后的新增组件。更新及操作见 [COMPONENT_PICKER.md](COMPONENT_PICKER.md)。
 
 网页应用/启动反馈修复：见 [WEB_START.md](WEB_START.md)。应用前会显示当前设备组缺项清单，点击可跳转；OC 校验失败会显示在顶部。

@@ -7,7 +7,7 @@ return function(C,B,W,options)
  local cfg=expected and C.read(path)or {version=2,mainInterface='',recipeDirectory=C.path('recipes'),cacheTarget=144000,
   groups={{name='设备组 01',storage='',gate='',subInterface='',transposer='',mainSide=4,subSide=5,generators={},bulkTransposers={},nanites={enabled=false,mode='cell-io'}}},nodes={}}
  local draftPath=C.path('bindings.draft.dat');local raw=B.read(draftPath);local draft=raw and ser.unserialize(raw)
- local E
+ local E,P
  local storage=options.storage or assert(loadfile(C.path('lib/storage.lua')))()(C)
  local function revision()return B.revision((expected or '')..'|'..(raw or ''))end
  local function fields()return B.draftFields(cfg,draft,expected)end
@@ -61,16 +61,54 @@ return function(C,B,W,options)
  end
  local function idleEditor()
   assert(not H.running,'先暂停自动化再编辑绑定')
+  assert(not(P and P.co),'先等待样板处理结束或停止后再编辑绑定')
   if E then for _,t in ipairs(E.tasks)do assert(not t.co,'等待工作器退出并保留日志后再编辑')end end
  end
  local function read(a,m,...)
   if not a or a==''then return nil end
   local ok,value=pcall(c.invoke,a,m,...);if ok then return value end
  end
+ -- BEC_WEB_PATTERNS_1: resumes only between completed slot transactions.
+ local function patternLog(...)
+  local text={};for i=1,select('#',...)do text[i]=tostring(select(i,...))end
+  local line=table.concat(text,' ')
+  if P.slot>0 then P.rows[P.slot]=((P.rows[P.slot]or '')..line..'\n'):sub(1,380)end
+  P.logs[#P.logs+1]=line:sub(1,220);while #P.logs>6 do table.remove(P.logs,1)end
+ end
+ local function patternStep()
+  if not(P and P.co)then return end
+  local ok,err=coroutine.resume(P.co)
+  if not ok then P.co=nil;P.status='failed';P.message=tostring(err):sub(1,400);patternLog('处理失败：',P.message);H.notice=P.message
+  elseif coroutine.status(P.co)=='dead'then P.co=nil;P.status=P.stop and 'stopped'or 'done';P.message=P.stop and '已停止；已完成槽位和需求记录保留'or '本次样板检查/处理完成';H.notice=P.message end
+ end
+ local function cleanDraft()
+  assert(expected and B.read(path)==expected,'请先应用绑定；正式配置若被外部修改，请重新打开网页')
+  local formal={};for _,f in ipairs(B.v2Fields(cfg))do formal[f.key]=f.value end
+  for _,f in ipairs(fields())do assert(f.value==formal[f.key],'草稿尚未应用，请先应用绑定')end
+ end
  function H.handle(name,args,request)
   assert(type(args)=='table','页面参数必须为对象')
   assert(type(request)=='number'and request==math.floor(request)and request>0,'请求编号无效')
-  if name=='scan_components'then
+  if name=='patterns'then
+   if args.mode=='stop'then
+    if P and P.co then P.stop=true;P.message='正在停止，当前槽位完成核对后退出';return P.message end
+    return '没有正在执行的样板处理'
+   end
+   idleEditor();assert(args.mode=='preview'or args.mode=='run','仅支持预览或处理一次')
+   assert(args.revision==revision(),'绑定已变化，请等待保存并应用后再试');cleanDraft()
+   assert(cfg.workshopInterface and cfg.workshopInterface~='','先绑定并应用独立的样板工坊ME接口')
+   local formal=expected;local mode=args.mode;scan=nil
+   P={mode=mode,status='running',slot=0,logs={},rows={},message=mode=='preview'and '正在只读预览'or '正在处理样板副本'}
+   P.co=coroutine.create(function()
+    local hooks={raiseErrors=true,shouldStop=function()return P.stop==true end,
+     beforeSlot=function(slot)
+      assert(B.read(path)==formal,'样板处理期间正式配置变化，保留现场停止');P.slot=slot
+      if mode=='run'then local disk=storage.status();assert(disk.known and disk.ok,'磁盘空间不足，停止样板处理并保留记录')end
+     end,onSlot=function(slot)if not P.rows[slot]then P.rows[slot]='槽 '..slot..'：空槽'end;coroutine.yield()end}
+    assert(loadfile(C.path('lib/patterns.lua')))()(C,mode,{print=patternLog,hooks=hooks})
+   end)
+   return P.message
+  elseif name=='scan_components'then
    if args.close==true then scan=nil;return '已关闭组件选择'end
    assert(type(args.role)=='string'and required[args.role],'未知设备用途')
    local token=args.token or request;assert(type(token)=='number'and token>0 and token==math.floor(token)and token<=2147483647,'扫描标识无效')
@@ -99,6 +137,7 @@ return function(C,B,W,options)
    E=nil;H.started=false;H.notice='绑定已校验并应用，点击启动自动化。';return H.notice
   elseif name=='start'then
    assert(not H.running,'自动化已经运行')
+   assert(not(P and P.co),'先停止或等待样板处理结束，再启动自动化')
    assert(B.read(path)==expected,'正式配置已被其他程序修改，请退出页面后重新打开')
    storage.prune(cfg);local disk=storage.status()
    assert(disk.known and disk.ok,'磁盘剩余空间不足或不可读：至少保留512KiB，暂停启动并保留恢复记录')
@@ -127,13 +166,13 @@ return function(C,B,W,options)
    local seen={};for i,n in ipairs(cfg.nodes)do if not seen[n.group]then E.resumeNode(i);seen[n.group]=true end end
    H.running=true;H.notice='自动化运行中；节点按批次关闭接单，整组完成后再接下一单。';return H.notice
   elseif name=='pause'then
-   H.running=false;if E then E.pauseAll()end;H.notice='已请求暂停；工作器收尾，未确认记录保留。';return H.notice
+   H.running=false;if P and P.co then P.stop=true end;if E then E.pauseAll()end;H.notice='已请求暂停；工作器收尾，未确认记录保留。';return H.notice
   elseif name=='refresh'then return '页面在线'
   end
   error('不支持的页面事件')
  end
  function H.step()
-  scanStep()
+  scanStep();patternStep()
   if not E then return end
   local draining=false;for _,t in ipairs(E.tasks)do if t.co then draining=true end end
   if H.running or draining then E.step()end
@@ -147,6 +186,7 @@ return function(C,B,W,options)
   end
   local out={mode=H.running and 'running'or 'binding',revision=revision(),values=values,group=H.group,groupCount=#cfg.groups,
    configured=expected~=nil,notice=H.notice,scan=scanSnapshot(),now=now,machines={},nodes={},flow={},timeline={},logs={},disk=storage.status()}
+  if P then out.patterns={mode=P.mode,status=P.status,slot=P.slot,message=P.message,logs=P.logs,rows=P.rows}end
   local g=cfg.groups[H.group];out.groupName=g.name or ('设备组 '..H.group);out.generatorSlots=math.max(4,#g.generators);local selected
   if E then local owner=E.groupOwner[H.group];selected=owner and E.tasks[owner]
    if not selected then for i,n in ipairs(cfg.nodes)do
@@ -178,6 +218,7 @@ return function(C,B,W,options)
   return out
  end
  function H.close()
+  if P and P.co then P.stop=true;patternStep()end
   H.running=false;if E then return E.shutdown()end;return {}
  end
  function H.engine()return E end
