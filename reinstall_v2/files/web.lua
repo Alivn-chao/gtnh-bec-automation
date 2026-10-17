@@ -8,7 +8,7 @@ local methods=c.methods(address)
 assert(methods.setWebApp~=nil and methods.publish~=nil,'需要支持 HTML 页面的 OCHD alpha7 或兼容版 JAR')
 local f=assert(io.open(C.path('lib/web_page.html'),'r'));local page=f:read('*a');f:close()
 local package={id='bec-v2-studio',title='BEC V2 结构绑定与运行',entry='index.html',files={['index.html']=page},
- events={'save_field','apply_bindings','start','pause','select_group','refresh','scan_components','patterns'}}
+ events={'save_field','apply_bindings','start','pause','select_group','refresh','scan_components','patterns','cache'}}
 local panel=c.proxy(address);local H=module('web_session')(C,B,W)
 local ok,err=xpcall(function()
  while true do local accepted,reason=panel.setWebApp(package);assert(accepted~=nil,reason);if accepted then break end;event.pull(.6)end

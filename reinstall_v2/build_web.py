@@ -12,9 +12,11 @@ def build():
  # Runtime work indication is separate from the selected-module highlight.
  html=html.replace("m.id===self.hovered?.45:0", "m.id===self.hovered?.45:(self.liveStates&&self.liveStates[m.id]==='active'?.7:0)")
  html=html.replace('</head>','<style>'+(HERE/'web/control.css').read_text(encoding='utf-8')+'</style></head>',1)
- html=html.replace('</body>','<script>'+(HERE/'web/input-controls.js').read_text(encoding='utf-8')+'</script><script>'+(HERE/'web/control.js').read_text(encoding='utf-8')+'</script></body>',1)
+ def compact(name):
+  return '\n'.join(line.strip()for line in(HERE/'web'/name).read_text(encoding='utf-8').splitlines()if not line.lstrip().startswith('//'))
+ html=html.replace('</body>','<script>'+compact('input-controls.js')+'</script><script>'+compact('control.js')+'</script></body>',1)
  html=html.replace('BEC 结构配置台 · 交互原型','BEC V2 · 结构绑定与自动化流程')
- package={'id':'bec-v2-studio','title':'BEC V2 结构绑定与运行','entry':'index.html','files':{'index.html':html},'events':['save_field','apply_bindings','start','pause','select_group','refresh','scan_components','patterns']}
+ package={'id':'bec-v2-studio','title':'BEC V2 结构绑定与运行','entry':'index.html','files':{'index.html':html},'events':['save_field','apply_bindings','start','pause','select_group','refresh','scan_components','patterns','cache']}
  encoded=json.dumps(package,ensure_ascii=False,separators=(',',':')).encode()
  assert len(encoded)<262144, f'OCHD encoded package too large: {len(encoded)}'
  target=HERE/'files/lib/web_page.html';target.write_text(html,encoding='utf-8',newline='\n')

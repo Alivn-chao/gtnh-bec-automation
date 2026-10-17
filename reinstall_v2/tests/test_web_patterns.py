@@ -77,7 +77,11 @@ assert(not pcall(H.handle,'patterns',{mode='run',revision=H.snapshot().revision}
   def convert(v):
    if hasattr(v,'items'):return {str(k):convert(x)for k,x in v.items()}
    return v
-  d=convert(l.eval('H.snapshot()'))
+  snapshot=l.eval('H.snapshot()')
+  # Largest cache page can coexist with full pattern logs and a scanner page.
+  snapshot.cache.rows=l.table_from([l.table_from(dict(name='entangled_'+str(i),label='Fluid '+str(i),stock=1000,target=144000,override=1000))for i in range(8)])
+  snapshot.scan=l.table_from(dict(role='node',token=1,status='done',page=0,total=512,checked=2048,message='',removed=0,baseline=True,rows=l.table_from([l.table_from(dict(address='a'*36,kind='bec_io_node',name='node',fresh=True,used='n1.address'))for _ in range(6)])))
+  d=convert(snapshot)
   def count(v):return 1+sum(count(x)for x in v.values())if isinstance(v,dict)else 1
   self.assertLessEqual(count(d),512)
   self.assertLess(len(json.dumps(d,ensure_ascii=False).encode()),16384)

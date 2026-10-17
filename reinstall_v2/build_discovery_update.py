@@ -3,14 +3,16 @@ from pathlib import Path
 import subprocess,zlib
 from build import literal
 HERE=Path(__file__).resolve().parent
-NAMES=['lib/patterns.lua','runtime/patterns.lua','web.lua','lib/config.lua','lib/web_session.lua','lib/web_page.html']
+NAMES=['lib/cache.lua','runtime/cache.lua','lib/patterns.lua','runtime/patterns.lua','web.lua','lib/config.lua','lib/web_session.lua','lib/web_page.html']
 rows=[]
 for name in NAMES:
  signatures=[]
- for ref in ['334125a','81b7724','f60f785','933750b','180bf41','bccf281','438f625']:
-  data=subprocess.check_output(['git','show',ref+':reinstall_v2/files/'+name],cwd=HERE.parent)
+ for ref in ['334125a','81b7724','f60f785','933750b','180bf41','bccf281','438f625','dae5e0e','d26100c']:
+  result=subprocess.run(['git','show',ref+':reinstall_v2/files/'+name],cwd=HERE.parent,capture_output=True)
+  if result.returncode:continue
+  data=result.stdout
   signatures.append('['+repr(str(len(data))+':'+str(zlib.adler32(data)&0xffffffff))+']=true')
- rows.append('{name='+repr(name)+',source='+literal((HERE/'files'/name).read_text(encoding='utf-8'))+',supported={'+','.join(signatures)+'}}')
+ rows.append('{name='+repr(name)+',added='+('true'if name in ['lib/cache.lua','runtime/cache.lua']else 'false')+',source='+literal((HERE/'files'/name).read_text(encoding='utf-8'))+',supported={'+','.join(signatures)+'}}')
 body=r'''
 local fs=require('filesystem');local root='/home/bec_v2/'
 local function read(p)local f=io.open(p,'r');if not f then return end;local s=f:read('*a');f:close();return s end
@@ -18,8 +20,8 @@ local function normal(s)return s and s:gsub('\r\n','\n')end
 local function signature(s)local a,b=1,0;for i=1,#s do a=(a+s:byte(i))%65521;b=(b+a)%65521 end;return string.format('%d:%.0f',#s,b*65536+a)end
 local old,identical,bytes={},true,0
 for i,row in ipairs(rows)do
- local target=root..row.name;old[i]=assert(read(target),'缺少V2程序: '..target)
- local text=normal(old[i]);assert(text==row.source or row.supported[signature(text)],'未知本地程序，保留未覆盖: '..target)
+ local target=root..row.name;old[i]=read(target);assert(old[i]or row.added,'缺少V2程序: '..target)
+ local text=normal(old[i]);assert(row.added and text==nil or text==row.source or text and row.supported[signature(text)],'未知本地程序，保留未覆盖: '..target)
  if text~=row.source then identical=false end
  if row.name:sub(-4)=='.lua'then assert(load(row.source,'@'..target,'t',_ENV),'新程序语法无效')end
  bytes=bytes+#row.source
@@ -39,7 +41,7 @@ for i,row in ipairs(rows)do assert(read(root..row.name)==old[i],'更新期间程
 local backed,installed={},{}
 local ok,reason=pcall(function()
  for i,row in ipairs(rows)do local target=root..row.name
-  assert(fs.rename(target,target..'.before-discovery-'..n),'备份失败');backed[i]=true
+  if old[i]then assert(fs.rename(target,target..'.before-discovery-'..n),'备份失败');backed[i]=true end
   assert(fs.rename(target..'.discovery-new-'..n,target),'替换失败');installed[i]=true
   assert(read(target)==row.source,'安装回读失败')
  end

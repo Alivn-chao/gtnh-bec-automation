@@ -7,8 +7,10 @@ return function(C,B,W,options)
  local cfg=expected and C.read(path)or {version=2,mainInterface='',recipeDirectory=C.path('recipes'),cacheTarget=144000,
   groups={{name='设备组 01',storage='',gate='',subInterface='',transposer='',mainSide=4,subSide=5,generators={},bulkTransposers={},nanites={enabled=false,mode='cell-io'}}},nodes={}}
  local draftPath=C.path('bindings.draft.dat');local raw=B.read(draftPath);local draft=raw and ser.unserialize(raw)
- local E,P
+ local E,P,K
  local storage=options.storage or assert(loadfile(C.path('lib/storage.lua')))()(C)
+ -- BEC_WEB_CACHE_1: independent settings; worker shares production resource locks.
+ local function cache()if not K then K=assert(loadfile(C.path('lib/cache.lua')))()(C,B,cfg,storage)end;return K end
  local function revision()return B.revision((expected or '')..'|'..(raw or ''))end
  local function fields()return B.draftFields(cfg,draft,expected)end
  local function payload(change)
@@ -62,6 +64,7 @@ return function(C,B,W,options)
  local function idleEditor()
   assert(not H.running,'先暂停自动化再编辑绑定')
   assert(not(P and P.co),'先等待样板处理结束或停止后再编辑绑定')
+  assert(not(K and(K.busy or K.blocked)),'先暂停并等待缓存补库收尾；未确认缓存记录须保留核对，再编辑绑定')
   if E then for _,t in ipairs(E.tasks)do assert(not t.co,'等待工作器退出并保留日志后再编辑')end end
  end
  local function read(a,m,...)
@@ -89,7 +92,11 @@ return function(C,B,W,options)
  function H.handle(name,args,request)
   assert(type(args)=='table','页面参数必须为对象')
   assert(type(request)=='number'and request==math.floor(request)and request>0,'请求编号无效')
-  if name=='patterns'then
+  if name=='cache'then
+   if args.mode=='enable'then cleanDraft();C.validate(cfg,true)end
+   if args.mode=='save'or args.mode=='enable'then local disk=storage.status();assert(disk.known and disk.ok,'磁盘不足，缓存配置未保存')end
+   H.notice=cache().action(args);return H.notice
+  elseif name=='patterns'then
    if args.mode=='stop'then
     if P and P.co then P.stop=true;P.message='正在停止，当前槽位完成核对后退出';return P.message end
     return '没有正在执行的样板处理'
@@ -134,7 +141,7 @@ return function(C,B,W,options)
    storage.prune(cfg)
    cfg=B.saveV2(C,cfg,payload(),request,expected,revision());expected=B.read(path)
    -- The old draft's base is no longer current, so B.draftFields ignores it.
-   E=nil;H.started=false;H.notice='绑定已校验并应用，点击启动自动化。';return H.notice
+   E=nil;K=nil;H.started=false;H.notice='绑定已校验并应用，点击启动自动化。';return H.notice
   elseif name=='start'then
    assert(not H.running,'自动化已经运行')
    assert(not(P and P.co),'先停止或等待样板处理结束，再启动自动化')
@@ -145,6 +152,7 @@ return function(C,B,W,options)
    local formal={};for _,f in ipairs(B.v2Fields(cfg))do formal[f.key]=f.value end
    for _,f in ipairs(fields())do assert(f.value==formal[f.key],'草稿尚未应用，请先应用绑定')end
    cfg=C.load();C.validate(cfg,true)
+   cache().assertReady()
    for _,n in ipairs(cfg.nodes)do
     local state=c.invoke(n.address,'getState')
     assert(state=='idle'or state=='paused-immediate'or state=='nanite-tier-too-low','先暂停节点，当前 '..tostring(state))
@@ -173,6 +181,11 @@ return function(C,B,W,options)
  end
  function H.step()
   scanStep();patternStep()
+  if K then
+   local ok,err=pcall(K.step,E,H.running)
+   if not ok then K.blocked=tostring(err);K.message=tostring(err):sub(1,300)end
+   if K.blocked then local was=H.running;H.running=false;H.notice='缓存保护暂停：'..K.message;if E and was then E.pauseAll()end end
+  end
   if not E then return end
   local draining=false;for _,t in ipairs(E.tasks)do if t.co then draining=true end end
   if H.running or draining then E.step()end
@@ -186,6 +199,7 @@ return function(C,B,W,options)
   end
   local out={mode=H.running and 'running'or 'binding',revision=revision(),values=values,group=H.group,groupCount=#cfg.groups,
    configured=expected~=nil,notice=H.notice,scan=scanSnapshot(),now=now,machines={},nodes={},flow={},timeline={},logs={},disk=storage.status()}
+  out.cache=cache().snapshot(H.group)
   if P then out.patterns={mode=P.mode,status=P.status,slot=P.slot,message=P.message,logs=P.logs,rows=P.rows}end
   local g=cfg.groups[H.group];out.groupName=g.name or ('设备组 '..H.group);out.generatorSlots=math.max(4,#g.generators);local selected
   if E then local owner=E.groupOwner[H.group];selected=owner and E.tasks[owner]
@@ -218,6 +232,7 @@ return function(C,B,W,options)
   return out
  end
  function H.close()
+  if K then K.close()end
   if P and P.co then P.stop=true;patternStep()end
   H.running=false;if E then return E.shutdown()end;return {}
  end

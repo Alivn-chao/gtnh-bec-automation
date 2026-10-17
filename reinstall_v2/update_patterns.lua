@@ -1,5 +1,504 @@
 print('BEC web patterns update; Q to exit the old UI first')
-local rows={{name='web.lua',source=[=[local c=require('component');local event=require('event');local clock=require('computer')
+local rows={{name='lib/cache.lua',added=true,source=[=[-- V1 cache worker, scheduled under the same V2 group and shared-fluid leases.
+local c=require('component');local clock=require('computer');local fs=require('filesystem');local ser=require('serialization')
+local labels={chromaticglass='彩色玻璃',transcendentmetal='超时空金属',infinity='无尽',neutronium='中子素',cosmicneutronium='宇宙中子素',bedrockium='基岩锭',celestialtungsten='天体钨',hypogen='海珀珍',phononmedium='声子介质',quarkgluonplasma='夸克胶子等离子体',space='空间',time='时间',spacetime='时空',cosmicsolder='宇宙焊锡',dimshiftedsuperfluid='维度偏移超流体',mhdcsm='磁流体动力学约束星体物质',magmatter='磁物质',universium='宇宙素',eternity='永恒'}
+return function(C,B,cfg,storage)
+ local path=C.path('cache.config');local raw=B.read(path)
+ local fallback=cfg.cacheTarget
+ if type(fallback)~='number'or fallback<1 or fallback>2147483647 or fallback%1~=0 then fallback=144000 end
+ local settings=raw and C.read(path)or {version=1,target=fallback,overrides={},enabled=false}
+ local K={busy=false,logs={},message='空闲时按目标补库；生产订单优先',page=0}
+ local active,nextScan,nextGroup,names=nil,0,1,{}
+ local function integer(n,min)return type(n)=='number'and n>=min and n<=2147483647 and n%1==0 end
+ local function validate(v)
+  assert(v.version==1 and integer(v.target,1)and type(v.overrides)=='table'and type(v.enabled)=='boolean','缓存配置无效')
+  local count=0;for name,n in pairs(v.overrides)do count=count+1;assert(count<=64 and type(name)=='string'and #name<=80 and name:match('^[%w_]+$')and integer(n,0),'单项缓存目标无效')end
+ end
+ validate(settings)
+ local function log(text)K.message=tostring(text):sub(1,300);K.logs[#K.logs+1]=K.message;while #K.logs>4 do table.remove(K.logs,1)end end
+ local function journal(group)return C.path('state/group-'..group..'/cache.journal')end
+ local function confirmed(r)
+  if not r then return true end
+  if r.kind~='cache'or r.stage~='stopped'or r.pending~=nil or r.plan~=nil or r.configOwned~=false or r.incomplete then return false end
+  for _,move in ipairs(r.transfers or {})do if move.ok~=true then return false end end
+  for _,job in ipairs(r.requests or {})do if job.state~='done'and not(job.state=='rejected'and job.preSubmissionFailed==true)then return false end end
+  return true
+ end
+ local function prune(group)
+  local directory=C.path('state/group-'..group);if not fs.exists(directory)then return end
+  local rows={};local scanned=0
+  for name in fs.list(directory)do
+   scanned=scanned+1;if scanned>512 then break end
+   local id=name:match('^cache%.journal%.stopped%-(%d+)$')
+   if id then
+    local p=directory..'/'..name;local f=io.open(p,'r');local text
+    if f then text=f:read(65537);f:close()end
+    if text and #text<=65536 then local ok,r=pcall(ser.unserialize,text)
+     if ok and type(r)=='table'and confirmed(r)then rows[#rows+1]={path=p,id=tonumber(id),modified=fs.lastModified and fs.lastModified(p)or 0}end
+    end
+   end
+  end
+  table.sort(rows,function(a,b)if a.modified==b.modified then return a.id>b.id end;return a.modified>b.modified end)
+  for i=3,#rows do assert(fs.remove(rows[i].path),'缓存已完成归档清理失败')end
+ end
+ function K.assertReady()
+  assert(not K.blocked,'缓存操作未确认，保留记录核对：'..tostring(K.blocked))
+  for group in ipairs(cfg.groups)do assert(confirmed(C.read(journal(group))),'设备组 '..group..' 有未确认缓存操作，保留 cache.journal 核对，禁止重复申请')end
+ end
+ local function scan()
+  local found={};if fs.exists(cfg.recipeDirectory)then for name in fs.list(cfg.recipeDirectory)do if name:match('%.dat$')then
+   local r=C.read(cfg.recipeDirectory..'/'..name)
+   if r and r.state=='converted'then for _,f in ipairs(r.condensates or {})do
+    assert(type(f.name)=='string'and #f.name<=80,'配方流体名称无效');found[f.name]=true
+   end end
+  end end end
+  names={};for name in pairs(found)do names[#names+1]=name end;table.sort(names);assert(#names<=64,'登记缓存类型超过64种')
+ end
+ function K.action(args)
+  if args.mode=='refresh'then scan();local page=tonumber(args.page)or 0;assert(integer(page,0),'分页无效');K.page=math.min(math.floor(page),math.max(0,math.ceil(#names/8)-1));return '已刷新缓存库存'end
+  assert(args.revision==B.revision(raw or ''),'缓存设置已变化，等待最新数据后重试')
+  assert(B.read(path)==raw,'缓存设置被其他程序修改，请重新打开网页')
+  local next={version=1,target=settings.target,enabled=settings.enabled,overrides={}}
+  for name,n in pairs(settings.overrides)do next.overrides[name]=n end
+  if args.mode=='enable'then K.assertReady();scan();assert(#names>0,'请先用样板处理登记配方，再启用补库');next.enabled=true
+  elseif args.mode=='disable'then next.enabled=false;if active then active.stop=true end
+  elseif args.mode=='save'then
+   assert(type(args.value)=='string'and #args.value<=10 and(args.value==''or args.value:match('^%d+$')),'目标量请输入整数mB')
+   local value=args.value==''and nil or tonumber(args.value)
+   if args.name=='default'then assert(integer(value,1),'默认目标须为1到2147483647的整数mB');next.target=value
+   else
+    scan();local known=false;for _,name in ipairs(names)do if name==args.name then known=true end end
+    assert(known,'只能设置已登记配方中的流体');assert(value==nil or integer(value,0),'单项目标须为整数mB；0停补，留空使用默认')
+    next.overrides[args.name]=value
+   end
+  else error('未知缓存操作')end
+  validate(next);local disk=storage.status();assert(disk.known and disk.ok,'磁盘不足，缓存设置未保存')
+  C.write(path,next);settings=next;raw=B.read(path)
+  return args.mode=='disable'and '已停补；已申请/搬入部分核对并收尾后退出'or '缓存设置已保存；运行中的补库在本轮结束后使用新目标'
+ end
+ local function worker(group,E,ctx)
+  local g=cfg.groups[group];local leader
+  for i,n in ipairs(cfg.nodes)do if n.group==group then leader=leader or i end end
+  assert(leader,'缓存设备组没有节点');local n=cfg.nodes[leader]
+  local function guard()
+   assert(E.fluidOwner==ctx.token and E.groupOwner[group]==ctx.token,'缓存资源锁变化')
+   assert(B.read(C.path('config.dat'))==ctx.formal,'缓存期间绑定变化，保留记录')
+   local disk=storage.status();assert(disk.known and disk.ok,'缓存期间磁盘不足，保留记录')
+   for _,member in ipairs(cfg.nodes)do if member.group==group then
+    assert(c.invoke(member.redstone,'getOutput',member.pauseSide)==15,'缓存期间节点暂停信号变化')
+    local s=c.invoke(member.address,'getState');assert(s=='idle'or s=='paused-immediate'or s=='nanite-tier-too-low','缓存期间节点状态异常：'..tostring(s))
+   end end
+  end
+  local native={};for key,value in pairs(c)do native[key]=value end
+  local allowed={[g.transposer]=true};for _,a in ipairs(g.bulkTransposers or {})do allowed[a]=true end
+  native.list=function(...)
+   local iter=c.list(...);return function()while true do local a,t=iter();if not a then return end;if t~='transposer'or allowed[a]then return a,t end end end
+  end
+  native.invoke=function(a,m,...)
+   local args={...}
+   if m=='transferFluid'or m=='setFluidInterfaceConfiguration'or m=='setWorkAllowed'or m=='setOutput'then guard()end
+   if a==n.address and (m=='getState'or m=='getRequiredCondensate')then
+    local state='idle';local req={}
+    for _,member in ipairs(cfg.nodes)do if member.group==group then
+     local s=c.invoke(member.address,'getState');if s~='idle'then state=s end
+     if m=='getRequiredCondensate'then for key,v in pairs(c.invoke(member.address,m)or {})do req[key]=(req[key]or 0)+v end end
+    end end
+    return m=='getState'and state or req
+   end
+   if a==n.redstone and (m=='getOutput'or m=='setOutput')then
+    for _,member in ipairs(cfg.nodes)do if member.group==group then
+     if m=='getOutput'then if c.invoke(member.redstone,m,member.pauseSide)~=15 then return 0 end
+     else assert(args[2]==15,'缓存禁止放行节点');c.invoke(member.redstone,m,member.pauseSide,args[2])end
+    end end;return m=='getOutput'and 15 or true
+   end
+   if a==g.generators[1]then
+    if m=='setWorkAllowed'then for _,address in ipairs(g.generators)do c.invoke(address,m,args[1]);assert(c.invoke(address,'isWorkAllowed')==args[1],'缓存纠缠器回读失败')end;return true end
+    if m=='isWorkAllowed'or m=='isMachineActive'then for _,address in ipairs(g.generators)do if c.invoke(address,m)then return true end end;return false end
+   end
+   if a==g.transposer and type(args[1])=='number'then local function side(s)return s==4 and g.mainSide or s==5 and g.subSide or s end;args[1]=side(args[1]);if m=='transferFluid'then args[2]=side(args[2])end end
+   return c.invoke(a,m,table.unpack(args))
+  end
+  local env=setmetatable({},{__index=_G});env._ENV=env
+  env.BEC_V2_CACHE_GUARD=guard
+  env.BEC_V2_CACHE_PRUNE=function()prune(group)end
+  env.BEC_V2_CACHE_YIELD=function()
+   if ctx.stop then return true end
+   for _,t in ipairs(E.tasks)do if t.co and t.waitKind=='lock'then return true end end
+   return false
+  end
+  env.print=function(...)local rows={...};for i,v in ipairs(rows)do rows[i]=tostring(v)end;log(table.concat(rows,' '))end
+  local sleeping={};for k,v in pairs(os)do sleeping[k]=v end
+  sleeping.sleep=function(seconds)coroutine.yield(clock.uptime()+(seconds or .1))end;env.os=sleeping
+  env.require=function(name)
+   if name=='component'then return native end
+   if name=='event'then return {pull=function(seconds)coroutine.yield(clock.uptime()+(seconds or .1))end}end
+   return require(name)
+  end
+  local f=assert(io.open(C.path('runtime/cache.lua'),'r'));local text=f:read('*a');f:close()
+  local mapping={['3afdc4cf-04e3-4ae9-8be6-e753c23a249d']=cfg.mainInterface,
+   ['86311657-33d1-41b5-a0d9-0aee7b5c2c50']=g.subInterface,['66fb280f-080d-4623-8d54-0dffd5cd5aad']=g.transposer,
+   ['237a9cac-118a-4b74-8755-0d0b0ad216c0']=g.storage,['b04787f9-5423-4b03-8549-c786d4ef38d0']=n.address,
+   ['c1ae3f7c-f714-4c27-baf3-392d94a0aa50']=g.generators[1]}
+  text=text:gsub('%x+%-%x+%-%x+%-%x+%-%x+',function(a)return mapping[a]or a end)
+  local function replace(before,after)text=text:gsub(before:gsub('([^%w])','%%%1'),function()return after end)end
+  replace('"266f65b5"',string.format('%q',n.redstone));replace('"c1ae3f7c"',string.format('%q',g.generators[1]))
+  replace('"/home/bec/recipes"',string.format('%q',cfg.recipeDirectory));replace('"/home/bec/recipes/"',string.format('%q',cfg.recipeDirectory..'/'))
+  replace('"/home/bec_cache.journal"',string.format('%q',journal(group)));replace('"/home/bec_cache.config"',string.format('%q',path))
+  guard();return assert(load(text,C.path('runtime/cache.lua'),'t',env))('background-stock',settings.target)
+ end
+ local function stopGenerators(group)for _,a in ipairs(cfg.groups[group].generators)do pcall(c.invoke,a,'setWorkAllowed',false)end end
+ function K.step(E,running)
+  if active then
+   if not running or not settings.enabled then active.stop=true end
+   if clock.uptime()<(active.deadline or 0)then return end
+   local ok,result,reason=coroutine.resume(active.co)
+   if ok and coroutine.status(active.co)~='dead'then active.deadline=result or clock.uptime();return end
+   local group=active.group;stopGenerators(group)
+   local record=C.read(journal(group));local clean=confirmed(record)
+   if not ok or result==false or not clean then
+    K.blocked=tostring(not ok and result or reason or '缓存记录未确认');log('缓存保护暂停：'..K.blocked)
+   else
+    E.groupOwner[group]=nil;if E.fluidOwner==active.token then E.fluidOwner=nil end
+   end
+   active=nil;K.busy=false;nextScan=clock.uptime()+5
+   return
+  end
+  if not E or not running or K.blocked or not settings.enabled or clock.uptime()<nextScan or E.fluidOwner then return end
+  nextScan=clock.uptime()+5
+  scan();if #names==0 then K.message='尚无已登记配方，等待样板处理登记需求';return end
+  for offset=0,#cfg.groups-1 do
+   local group=(nextGroup+offset-1)%#cfg.groups+1;local g=cfg.groups[group];local safe=not E.groupOwner[group];local members=0
+   local saved=C.read(C.path('state/group-'..group..'/cohort.dat'));if saved and saved.stage~='stopped'then safe=false end
+   for i,n in ipairs(cfg.nodes)do if n.group==group then members=members+1
+    local t=E.tasks[i];if t.disabled or t.fault or c.invoke(n.address,'getState')~='idle'then safe=false end
+    local old=C.read(C.path('state/node-'..i..'/production.journal'))
+    if old then
+     if old.stage~='stopped'or old.pending~=nil or old.configOwned~=false then safe=false end
+     for _,job in ipairs(old.requests or {})do if job.state~='done'then safe=false end end
+    end
+   end end
+   for _,a in ipairs(g.generators)do if c.invoke(a,'isWorkAllowed')or c.invoke(a,'isMachineActive')then safe=false end end
+   if safe and members>0 then
+    K.assertReady();prune(group);local disk=storage.status();if not disk.known or not disk.ok then return end
+    -- Keep immediate pause asserted, but allow idle nodes to admit a new order
+    -- so the V1 priority check can see physical inputs as well as AE queues.
+    for i,n in ipairs(cfg.nodes)do if n.group==group then c.invoke(n.redstone,'setOutput',n.pauseSide,15);E.nodeWork(i,true)end end
+    active={group=group,token='cache-'..group,formal=B.read(C.path('config.dat'))}
+    E.groupOwner[group]=active.token;E.fluidOwner=active.token
+    active.co=coroutine.create(function()return worker(group,E,active)end)
+    K.busy=true;K.group=group;nextGroup=group%#cfg.groups+1;return
+   end
+  end
+ end
+ function K.snapshot(group)
+  if #names==0 then local ok,err=pcall(scan);if not ok then K.message=tostring(err):sub(1,300)end end
+  local out={revision=B.revision(raw or ''),enabled=settings.enabled,target=settings.target,busy=K.busy,group=K.group or group,blocked=K.blocked~=nil,message=K.message,logs=K.logs,page=K.page,total=#names,rows={}}
+  local g=cfg.groups[group];local ok,stock=pcall(c.invoke,g.storage,'getStoredCondensate');if not ok or type(stock)~='table'then stock={}end
+  for i=K.page*8+1,math.min(#names,K.page*8+8)do local name=names[i];local override=settings.overrides[name]
+   out.rows[#out.rows+1]={name=name,label=labels[name:gsub('^entangled_','')]or name,stock=stock[name]or 0,target=override~=nil and override or settings.target,override=override}
+  end
+  return out
+ end
+ function K.close()if active then active.stop=true;stopGenerators(active.group)end end
+ return K
+end
+]=],supported={}},{name='runtime/cache.lua',added=true,source=[=[-- V2 adapter of V1 bec_cache.lua; original transfer/AE/conversion protocol retained.
+local c = require("component") local ser = require("serialization") local computer = require("computer")
+local fs = require("filesystem") local sides = require("sides") local event = require("event")
+local mode, cacheCopies = ... mode=mode or "preview" local fixedStock -- BEC_V1_CACHE_CUSTOM_V1
+local overrides={}
+local background=mode=="background-stock" if mode=="preview-stock" or mode=="run-stock" or background then fixedStock=tonumber(cacheCopies)
+assert(fixedStock and fixedStock>=1 and fixedStock<=2147483647 and fixedStock==math.floor(fixedStock),"统一库存需指定正整数mB") mode=mode=="preview-stock" and "preview" or "run" cacheCopies=1
+else cacheCopies=tonumber(cacheCopies) or 1 end local JOURNAL = "/home/bec_cache.journal" local MAIN = "3afdc4cf-04e3-4ae9-8be6-e753c23a249d"
+local SUB = "86311657-33d1-41b5-a0d9-0aee7b5c2c50" local TRANS = "66fb280f-080d-4623-8d54-0dffd5cd5aad" local STORAGE = "237a9cac-118a-4b74-8755-0d0b0ad216c0"
+local NODE = "b04787f9-5423-4b03-8549-c786d4ef38d0" local GATE_ADDRESS = "cf2a0c4a-ab8d-4958-b1df-253094d6690c" local RS, GEN, GATE, armed, record
+local stopping=false local mapping = { entangled_infinity = "molten.infinity",
+entangled_chromaticglass = "molten.chromaticglass", entangled_transcendentmetal = "molten.transcendentmetal", entangled_dimshiftedsuperfluid = "dimensionallyshiftedsuperfluid",
+entangled_neutronium="molten.neutronium",entangled_cosmicneutronium="molten.cosmicneutronium", entangled_bedrockium="molten.bedrockium",entangled_celestialtungsten="molten.celestialtungsten", entangled_hypogen="molten.hypogen",entangled_phononmedium="phononmedium",
+entangled_quarkgluonplasma="quarkgluonplasma",entangled_spacetime="molten.spacetime", entangled_time="molten.temporalfluid",entangled_space="molten.spatialfluid", entangled_cosmicsolder="boundlesscosmicsolder",
+entangled_mhdcsm="molten.magnetohydrodynamicallyconstrainedstarmatter", entangled_magmatter="molten.magmatter",entangled_universium="molten.universium", entangled_eternity="molten.eternity"
+} local units={entangled_dimshiftedsuperfluid=1000,entangled_phononmedium=1000, entangled_quarkgluonplasma=1000,entangled_cosmicsolder=1000}
+local function call(a, m, ...) return c.invoke(a, m, ...) end local function method(a, m) assert(c.methods(a)[m] ~= nil, "组件缺少方法: " .. m)
+end local function resolve(prefix, kind) local address, count = nil, 0
+for a, t in c.list() do if a:sub(1, #prefix) == prefix and t == kind then address, count = a, count + 1
+end end assert(count == 1, "目标组件缺失或不唯一: " .. prefix)
+return address end local function integer(v)
+assert(type(v) == "number" and v >= 0 and v == math.floor(v), "库存/需求数量无效") return v end
+local function same(a, b) for k, v in pairs(a) do if b[k] ~= v then return false end end for k, v in pairs(b) do if a[k] ~= v then return false end end
+return true end local function network(a)
+local rows, result = call(a, "getFluidsInNetwork"), {} assert(type(rows) == "table", "网络库存不可读") for _, f in pairs(rows) do
+assert(type(f) == "table", "流体条目无效") local n = integer(f.amount or f.size or 0) if n > 0 then
+assert(type(f.name) == "string", "流体名称缺失") result[f.name] = (result[f.name] or 0) + n end
+end return result end
+local matchedOutputs, perRecipe local function tick(seconds) local _,_,character=event.pull(seconds,"key_down")
+if character==113 or character==81 then stopping=true end end local function archiveJournal(contents,suffix)
+if BEC_V2_CACHE_PRUNE then BEC_V2_CACHE_PRUNE() end
+
+suffix=suffix or ".stopped-" local index=1 while fs.exists(JOURNAL..suffix..index) do index=index+1 end
+local backup=JOURNAL..suffix..index assert(fs.rename(JOURNAL,backup),"旧常驻日志归档失败") local f=assert(io.open(backup,"r"));local actual=f:read("*a");f:close()
+assert(actual==contents and not fs.exists(JOURNAL),"旧常驻日志归档验证失败") end local function field()
+assert(call(STORAGE, "isWorkAllowed") == true, "约束场必须保持开启") local v = call(STORAGE, "getStoredCondensate") assert(type(v) == "table", "凝聚物库存不可读")
+for _, n in pairs(v) do integer(n) end return v end
+local function writeVerified(path, contents) local f = assert(io.open(path, "w")) local ok, err = f:write(contents)
+local flushed, flushErr = f:flush() f:close() assert(ok and flushed, tostring(err or flushErr or "日志写入失败"))
+local r = assert(io.open(path, "r")) local actual = r:read("*a"); r:close() assert(actual == contents and type(ser.unserialize(actual)) == "table", "日志回读失败")
+end local function save(stage) record.stage = stage
+if fs.exists(JOURNAL) then local f = assert(io.open(JOURNAL, "r")) local old = f:read("*a"); f:close()
+writeVerified(JOURNAL .. ".previous", old) end writeVerified(JOURNAL, ser.serialize(record, false))
+end local function pause(value) call(RS, "setOutput", sides.top, value)
+assert(call(RS, "getOutput", sides.top) == value, "红石输出回读不符") end local function generator(enabled)
+call(GEN, "setWorkAllowed", enabled) assert(call(GEN, "isWorkAllowed") == enabled, "纠缠装置启停回读不符") end
+local function gateFilters(required) assert(type(required)=="table","门过滤需求不可读") local result={}
+for name,n in pairs(required) do assert(mapping[name] and integer(n)>0,"门过滤需求无效: "..tostring(name)) result[#result+1]=name
+end table.sort(result) assert(#result>0,"禁止写入全空过滤；全空会放行全部凝聚物")
+return result end local function verifyGate(expected)
+local count=integer(call(GATE,"getCondensateFilterCount")) assert(count>=#expected,"麦克斯韦门过滤槽不足") local actual=call(GATE,"getCondensateFilters")
+assert(type(actual)=="table" and same(actual,expected), "麦克斯韦门过滤回读不符；检查门的流体输入仓是否自动覆盖 OC 过滤") assert(call(GATE,"isWorkAllowed")==true,"麦克斯韦门未启用，保持暂停")
+assert(call(GATE,"isMachineActive")==true,"麦克斯韦门未运行；检查结构和供电，保持暂停") end local function configureGate(required)
+assert(call(RS,"getOutput",sides.top)==15 and call(NODE,"getState")=="paused-immediate", "切换门过滤前节点必须立即暂停") local expected=gateFilters(required)
+assert(integer(call(GATE,"getCondensateFilterCount"))>=#expected,"麦克斯韦门过滤槽不足") local actual=call(GATE,"getCondensateFilters") assert(type(actual)=="table","麦克斯韦门过滤不可读")
+record.gateIntent={address=GATE,filters=expected};save(record.stage) if not same(actual,expected) then call(GATE,"setCondensateFilters",expected) end for i=1,3 do
+verifyGate(expected) assert(call(NODE,"getState")=="paused-immediate","设置过滤时订单状态变化") if i<3 then tick(0.1) end
+end print("麦克斯韦门过滤: "..table.concat(expected,", ")) return expected
+end local function tanks(side, name) local count, amount = integer(call(TRANS, "getTankCount", side)), 0
+assert(count > 0, "接口没有流体槽") for i = 1, count do local f = call(TRANS, "getFluidInTank", side, i)
+assert(type(f) == "table", "接口缓存不可读") if type(f[1]) == "table" then f = f[i] or f[1] end local n = integer(f.amount or 0)
+if n > 0 then assert(name and f.name == name, "接口有未处理流体缓存") amount = amount + n
+end end return amount
+end local function emptyConfig() for slot = 0, 5 do
+assert(call(MAIN, "getFluidInterfaceConfiguration", slot) == nil, "供液接口已有配置") end end
+local function waitUntil(seconds, condition, guard) local deadline = computer.uptime() + seconds while true do
+local ready, snapshot = condition() if ready then return end if guard then guard(snapshot) end
+assert(computer.uptime() < deadline, "等待超时，停止") os.sleep(0.25) end
+end local function bulkPorts() local allowed,ports={},{}
+for _,raw in pairs(mapping) do allowed[raw]=true;allowed["fluid."..raw]=true end
+for _,raw in ipairs({"spatialfluid","fluid.spatialfluid","temporalfluid","fluid.temporalfluid"}) do allowed[raw]=true end for address,kind in c.list("transposer") do if kind=="transposer" and address~=TRANS then
+local sources,receivers={},{} for side=0,5 do local ok,count=pcall(call,address,"getTankCount",side)
+if ok and count==1 then local readable,capacity=pcall(call,address,"getTankCapacity",side,1) if readable and capacity==2147483647 then
+local f=call(address,"getFluidInTank",side,1) if type(f)=="table" and type(f[1])=="table" then f=f[1] end if type(f)=="table" and allowed[f.name] then sources[#sources+1]={from=side,raw=f.name} end
+end elseif ok and count==6 then local readable,capacity=pcall(call,address,"getTankCapacity",side,1)
+if readable and capacity==16000 then receivers[#receivers+1]=side end end end
+if #sources>0 then assert(#receivers==1,"高速供液口接收方向缺失或不唯一: "..address) for _,source in ipairs(sources) do
+assert(not ports[source.raw],"高速供液口重复绑定: "..source.raw) ports[source.raw]={address=address,from=source.from,to=receivers[1]} end
+end end end
+return ports end local function verifyBulk(route,raw)
+local f=call(route.address,"getFluidInTank",route.from,1) if type(f)=="table" and type(f[1])=="table" then f=f[1] end assert(type(f)=="table" and f.name==raw
+and call(route.address,"getTankCapacity",route.from,1)==2147483647,"高速缓存口绑定已变化") assert(call(route.address,"getTankCount",route.to)==6,"高速接收接口已变化") for i=1,6 do
+local tank=call(route.address,"getFluidInTank",route.to,i) if type(tank)=="table" and type(tank[1])=="table" then tank=tank[i] or tank[1] end assert(type(tank)=="table" and integer(tank.amount or 0)==0,"高速接收接口有未处理缓存")
+end end local function unchanged()
+local state=call(NODE,"getState") local blocked={idle=true,["paused-immediate"]=true,["assembler-offline"]=true,unpowered=true,["nanite-tier-too-low"]=true} assert(state=="idle" or (background and blocked[state]),"节点状态变化，停止预缓存并保留已有库存")
+assert(call(RS,"getOutput",sides.top)==15,"暂停信号变化") field() end
+-- BEC_V1_CACHE_FAST_V2
+local productionOutputs,priorityAt,priorityQueued={},-math.huge,false
+local unknownReported=false
+local function productionWaiting()
+ if not background then return false end
+ if BEC_V2_CACHE_YIELD and BEC_V2_CACHE_YIELD()then return true end
+ local state=call(NODE,"getState")
+ if state~="idle" then
+  local req=call(NODE,"getRequiredCondensate")
+  if (type(req)=="table" and next(req)~=nil) or state=="crafting" or state=="paused-step" then
+   print("后台缓存让位：节点有配方，优先生产。")
+   return true
+  end
+ end
+ if computer.uptime()<priorityAt then return priorityQueued end
+ priorityAt=computer.uptime()+1;priorityQueued=false
+ local cpus=call(MAIN,"getCpus");assert(type(cpus)=="table","主网 CPU 状态不可读")
+ for _,cpu in pairs(cpus) do if cpu.busy==true then
+  for _,getter in ipairs({"activeItems","pendingItems"}) do
+   local ok,rows=pcall(function()return cpu.cpu[getter]()end)
+   if not ok or type(rows)~="table" then
+    if not unknownReported then print("AE CPU任务列表不可读；未确认为配方，空闲补库继续。") end
+    unknownReported=true
+   else for _,item in pairs(rows) do
+    local key=tostring(item.name)..":"..tostring(tonumber(item.damage or 0))
+    if productionOutputs[key] and (item.size or item.amount or 0)>0 then priorityQueued=true end
+   end end
+  end
+ end end
+ if priorityQueued then print("后台缓存让位：AE队列有登记配方，优先生产。") end
+ return priorityQueued
+end
+
+local function prepareStreaming(target) local ports=bulkPorts() local stock,previous=field(),network(SUB)
+local expected,raws={},{}
+
+local priority=false
+local function handoff()
+ for _,job in ipairs(record.requests) do assert(job.state=="done" or (job.state=="rejected" and job.preSubmissionFailed==true),"缓存申请尚未完成，不能交回生产") end
+ for raw,n in pairs(previous) do
+  local known=false;for name in pairs(target) do if mapping[name]==raw then known=true;assert(integer(n)%(units[name] or 144)==0,"已搬缓存不是整批") end end
+  assert(known,"交回生产前子网有无关原液")
+ end
+ for name in pairs(target) do target[name]=(stock[name] or 0)+(previous[mapping[name]] or 0) end
+ expected=previous;record.target=target;record.expected=previous;record.secured=previous;record.plan=nil
+ record.yieldedToRecipe=true;save("stream-prepared")
+ print("已有配方，停止补缓存；仅转换已搬入原液后交回生产。")
+ return previous
+end
+if productionWaiting() then return handoff() end
+
+for name,need in pairs(target) do local raw=mapping[name]
+local batch=units[name] or 144 local amount=math.ceil(math.max(0,need-(stock[name] or 0))/batch)*batch local existing=previous[raw] or 0
+assert(amount==0 or ports[raw],"缺少高速供液口："..raw.."；禁止普通接口回退")
+assert(existing<=amount and existing%batch==0,"子网原液超额或非整批: "..raw) if amount>0 then expected[raw]=amount end raws[#raws+1]={raw=raw,amount=amount,batch=batch}
+end for raw in pairs(previous) do local allowed=false
+for _,item in ipairs(raws) do if item.raw==raw then allowed=true end end assert(allowed,"子网有无关原液: "..raw) end
+for name,amount in pairs(stock) do assert(amount==0 or mapping[name],"约束场有未知凝聚物") end table.sort(raws,function(a,b) return a.raw<b.raw end) record.plan=raws;record.expected=expected;record.secured=previous;save("stream-planned")
+for _,item in ipairs(raws) do if productionWaiting() then return handoff() end local raw,need,batch=item.raw,item.amount,item.batch local route=ports[raw]
+local chunk=math.floor(2147483647/batch)*batch local function bufferedInlet() return 0 end if (previous[raw] or 0)<need then
+unchanged();emptyConfig();tanks(4,nil) record.configOwned=false;save("stream-configuring")
+assert(route,"高速供液口不可用："..raw);verifyBulk(route,raw)
+print("高速供液: "..raw.."；源 "..route.from.." -> 接收 "..route.to)
+print(raw.." 整批目标 "..need.." mB；到账即搬入子网。") local job,status,craft,jobDeadline,doneAt
+local attempts=0 local inletOpen=false local deadline=computer.uptime()+1800
+while not stopping do unchanged();assert(same(field(),stock),"备料时约束场库存变化") assert(same(network(SUB),previous),"备料时子网库存变化")
+priority=priority or productionWaiting()
+local remaining=need-(previous[raw] or 0) local buffered=network(MAIN)[raw] or 0 local amount=priority and 0 or math.floor(math.min(remaining,buffered,chunk)/batch)*batch
+if amount>0 then verifyBulk(route,raw);local address,from,to=route.address,route.from,route.to
+record.pending={raw=raw,amount=amount,address=address,from=from,to=to};save("transfer-pending") local ok,moved=call(address,"transferFluid",from,to,amount) record.transfers[#record.transfers+1]={raw=raw,ok=ok,amount=moved,requested=amount,address=address,from=from,to=to}
+save("transfer-returned") assert(ok==true and moved==amount,"未完整确认搬运，停止且不重试") previous[raw]=(previous[raw] or 0)+amount
+waitUntil(10,function() return same(network(SUB),previous) end,unchanged) record.pending=nil;record.secured=previous;save("stream-transfer-confirmed") print(raw.." 已入子网 "..previous[raw].." / "..need.." mB")
+deadline=computer.uptime()+1800 end remaining=need-(previous[raw] or 0)
+if remaining==0 and inletOpen then assert(call(MAIN,"setFluidInterfaceConfiguration",0)==true,"清供液配置失败") record.configOwned=false;inletOpen=false;save("stream-inlet-cleared")
+waitUntil(20,function() return tanks(4,raw)==0 end,unchanged) end -- BEC_V1_SEQUENTIAL_CPU_WAIT_V1: keep both production fallback and cache alive while CPUs are occupied.
+local supplyWaiting=false
+local function supplyWait(reason,manual,missing,failure)
+ supplyWaiting=true
+ local summary=raw..': '..reason
+ if not record.supplyWait or record.supplyWait.cpuWaitSummary~=summary then
+  record.supplyWait={cpuWaitSummary=summary,cpuWait={[raw]={reason=reason,manual=manual,amount=missing,failure=failure}}}
+  save(record.stage);print('供液等待: '..summary)
+ end
+end
+if status and job.state=='submitted' then
+ local computing=type(status.isComputing)=='function' and status.isComputing()
+ local failed,why
+ if type(status.hasFailed)=='function' then failed,why=status.hasFailed()end
+ if computing==false and type(status.isComputing)=='function' and failed==true then
+  job.state='rejected';job.preSubmissionFailed=true;job.manualSupply=true;job.failure=tostring(why)
+  status=nil;save('stream-request-rejected')
+ elseif computing then supplyWait('AE 正在计算计划，继续收料')
+ else
+  local canceled,why=status.isCanceled();assert(canceled==false,'AE任务取消且结果未确认: '..tostring(why))
+  local done=status.isDone();assert(type(done)=='boolean','AE 状态不可读')
+  if done then job.state='done';job.securedAfter=previous[raw] or 0;doneAt=computer.uptime();save('stream-craft-done')
+  else supplyWait('AE 合成进行中，继续收料')end
+ end
+end
+if priority and (not job or job.state=='done' or job.state=='rejected')then return handoff()end
+if remaining==0 and (not job or job.state=='done' or job.state=='rejected')then record.supplyWait=nil;break end
+if not priority and remaining>0 and (not job or job.state=='done' or job.state=='rejected')then
+ local function deficit()return math.max(0,need-(previous[raw]or 0)-bufferedInlet()-(network(MAIN)[raw]or 0))end
+ local missing=deficit()
+ if missing>0 and (not doneAt or computer.uptime()-doneAt>=3)then
+  if job and job.state=='done'then assert((previous[raw]or 0)>job.securedBefore,'原液合成已结束但没有收获，核对竞争设备')end
+  local ok,cpus=pcall(call,MAIN,'getCpus');local free,total,known,maxStorage=0,0,0,0;local unknown=not ok or type(cpus)~='table'
+  if not unknown then for _,cpu in pairs(cpus)do
+   total=total+1
+   if type(cpu)~='table' or type(cpu.busy)~='boolean'then unknown=true
+   else if not cpu.busy then free=free+1 end
+    if type(cpu.storage)=='number'and cpu.storage>=0 then known=known+1;maxStorage=math.max(maxStorage,cpu.storage)end
+   end
+  end end
+  if job and job.manualSupply then
+   supplyWait('AE未启动申请；请在 ME 手动申请 '..missing..' mB；自动收料继续',true,missing,job.failure)
+  elseif unknown then supplyWait('等待 CPU 状态恢复可读')
+  elseif total==0 or (known==total and maxStorage==0)then supplyWait('CPU 容量不足：没有可用合成存储')
+  elseif free==0 then supplyWait('等待合成 CPU 空闲，自动化继续运行')
+  else
+   if not craft then
+    local rows=call(MAIN,'getCraftables',{name=raw});assert(type(rows)=='table','原液配方不可读')
+    local count=0;for _,v in pairs(rows)do craft=v;count=count+1 end
+    assert(count==1,'原液配方缺失或不唯一: '..raw)
+    local f=craft.getStack();assert(type(f)=='table'and f.name==raw and f.isCraftable==true and type(f.amount)=='number'and f.amount==f.size and f.hasTag==false,'未验证的流体合成对象')
+   end
+   missing=deficit()
+   if missing>0 then
+    if productionWaiting()then return handoff()end
+    attempts=attempts+1;assert(attempts<=3,'原液被其他设备争抢，保留已收库存')
+    job={raw=raw,amount=missing,unit='mB',state='pending',securedBefore=previous[raw]or 0}
+    record.requests[#record.requests+1]=job;save('craft-request-pending')
+    local why;status,why=craft.request(missing);assert(status~=nil,'AE申请结果不明: '..tostring(why))
+    job.state='submitted';doneAt=nil;save('stream-crafting')
+    supplyWait('AE 正在计算计划，继续收料')
+   end
+  end
+ end
+end
+if supplyWaiting then deadline=math.max(deadline,computer.uptime()+1800)end
+assert(computer.uptime()<deadline,'持续收料超时，保留子网已搬入原液')
+ tick(0.1) end
+if inletOpen then assert(call(MAIN,"setFluidInterfaceConfiguration",0)==true,"清供液配置失败") record.configOwned=false;save("stream-inlet-cleared")
+end waitUntil(20,function() return tanks(4,raw)==0 end,unchanged) if stopping then return expected end
+end end assert(same(network(SUB),expected),"整批子网原液不符")
+record.plan=nil;save("stream-prepared") return expected end
+local function cacheTarget(copies) assert(type(copies)=="number" and copies>=1 and copies==math.floor(copies),"缓存份数必须为正整数") local totals,count={},0 local selectedBackground
+assert(fs.exists("/home/bec/recipes"),"没有已登记配方") for filename in fs.list("/home/bec/recipes") do if filename:sub(-4)==".dat" then local f=assert(io.open("/home/bec/recipes/"..filename,"r"));local text=f:read("*a");f:close()
+local recipe=ser.unserialize(text) assert(type(recipe)=="table" and recipe.state=="converted" and type(recipe.condensates)=="table","配方记录未完成: "..filename) local demand={}
+for _,out in ipairs(recipe.outputs or {}) do productionOutputs[tostring(out.name)..":"..tostring(tonumber(out.damage or 0))]=true end
+for _,fluid in ipairs(recipe.condensates) do assert(mapping[fluid.name],"未登记原液映射: "..tostring(fluid.name)) demand[fluid.name]=(demand[fluid.name] or 0)+integer(fluid.amount)
+end assert(next(demand),"配方没有凝聚物需求: "..filename) for name,need in pairs(demand) do
+assert(need*copies<=2147483647,"缓存目标过大") totals[name]=math.max(totals[name] or 0,need*copies) end
+count=count+1 print("配方 "..count.."："..filename) end end
+assert(count>0,"没有可缓存的已登记配方") if fixedStock then
+local input=io.open("/home/bec_cache.config","r")
+if input then local cfg=ser.unserialize(input:read("*a"));input:close()
+ assert(type(cfg)=="table" and cfg.version==1 and (cfg.overrides==nil or type(cfg.overrides)=="table"),"单项缓存配置无效")
+ overrides=cfg.overrides or {};for name,n in pairs(overrides) do assert(type(name)=="string" and type(n)=="number" and n>=0 and n<=2147483647 and n==math.floor(n),"单项缓存目标无效") end
+end
+for name in pairs(totals) do totals[name]=overrides[name]~=nil and overrides[name] or fixedStock end
+end if background then local previous=io.open(JOURNAL,"r")
+local old if previous then old=ser.unserialize(previous:read("*a"));previous:close() end if old and old.background and old.incomplete then
+assert(old.stage=="stopped" and old.pending==nil and old.configOwned==false,"后台缓存有未确认操作，保留日志核对") totals=old.target else
+if productionWaiting() then return {} end local stock=field();local selected,lowest for name,need in pairs(totals) do local available=stock[name] or 0
+if available<need and (not lowest or available<lowest) then selected=name;lowest=available end end if not selected then return {} end
+selectedBackground=selected;totals={[selected]=totals[selected]} end end
+local live,stock=network(MAIN),field();for raw,n in pairs(network(SUB)) do live[raw]=math.max(live[raw] or 0,n) end local visibleRoutes=bulkPorts();local waiting for kind in pairs(totals) do local raw=mapping[kind]
+local candidates={[raw]=true} candidates["fluid."..raw]=true if kind=="entangled_space" or kind=="entangled_time" then
+local stem=kind=="entangled_space" and "spatialfluid" or "temporalfluid" candidates[stem]=true;candidates["fluid."..stem]=true end
+local found={} for name in pairs(candidates) do if (live[name] or 0)>0 or visibleRoutes[name] then found[name]=true end end for name in pairs(candidates) do
+local rows=call(MAIN,"getCraftables",{name=name}) assert(type(rows)=="table","原液配方读取失败") for _,craft in pairs(rows) do local stack=craft.getStack()
+if type(stack)=="table" and stack.name==name and type(stack.amount)=="number" then found[name]=true end end end
+local name,n=nil,0;for candidate in pairs(found) do name=candidate;n=n+1 end assert(n<=1,"原液名称不唯一: "..kind)
+if n==0 and (stock[kind] or 0)<totals[kind] then waiting="等待原液库存/样板可见: "..kind.." / "..raw end
+if n==1 then mapping[kind]=name end end
+if productionWaiting() then return totals end local routes=bulkPorts();local stored=field()
+for kind,need in pairs(totals) do
+ if (stored[kind] or 0)<need and not routes[mapping[kind]] then waiting="等待高速口流体可见: "..kind.." / "..mapping[kind].."；空口暂不能识别绑定，稍后重扫" end
+end
+if selectedBackground then print("空闲高速补库：直接补本种完整缺口到 "..totals[selectedBackground].." mB；有配方优先让位。") end if fixedStock then
+print("登记配方 "..count.."；默认目标 "..fixedStock.." mB，单项设置优先，0停补；只补差额。") else print("登记配方 "..count.."；每配方 "..copies.." 份，共用流体按最大用量缓存。") end return totals,waiting
+end local function cacheMain() assert(mode=="preview" or mode=="run","用法: preview / run [每配方份数，默认1]")
+RS=resolve("266f65b5","redstone");GEN=resolve("c1ae3f7c","gt_machine") assert(call(GEN,"getName")=="multi.bec.generator","纠缠装置名称不符") local target,waiting=cacheTarget(cacheCopies)
+while waiting do print(waiting)
+if background or mode=="preview" then return end
+tick(2);if stopping then print("已取消等待；日志和库存未修改。");return end
+target,waiting=cacheTarget(cacheCopies) end
+if background and next(target)==nil then return end local stock=field() for name,need in pairs(target) do
+local batch=units[name] or 144 print(name.." 缓存目标 "..need.."；凝聚物已有 "..(stock[name] or 0) .."；待补原液 "..math.ceil(math.max(0,need-(stock[name] or 0))/batch)*batch.." mB")
+end if mode=="preview" then print("只读规划完成，未申请、搬料、转换或写记录。");return end
+assert(BEC_V2_CACHE_GUARD,'缺少V2缓存调度器');BEC_V2_CACHE_GUARD()
+local nodeState=call(NODE,"getState") local blocked={idle=true,["paused-immediate"]=true,["assembler-offline"]=true,unpowered=true,["nanite-tier-too-low"]=true} assert(nodeState=="idle" or (background and blocked[nodeState]),"预缓存须在节点空闲/已暂停时进行")
+assert(call(RS,"getOutput",sides.top)==15 and call(GEN,"isWorkAllowed")==false and call(GEN,"isMachineActive")==false,"预缓存前须暂停并关闭纠缠装置") emptyConfig();tanks(4,nil);tanks(5,nil)
+if fs.exists(JOURNAL) then local f=assert(io.open(JOURNAL,"r"));local text=f:read("*a");f:close() local old=ser.unserialize(text)
+assert(type(old)=="table" and old.kind=="cache" and old.stage=="stopped" and old.pending==nil and old.configOwned==false,"旧缓存有未确认操作，请保留日志核对") for _,job in ipairs(old.requests or {}) do assert(job.state=="done" or (job.state=="rejected" and job.preSubmissionFailed==true),"缓存申请仍未确认") end
+archiveJournal(text) end record={version=1,kind="cache",requests={},transfers={},configOwned=false,target=target,copies=cacheCopies,fixedStock=fixedStock,background=background}
+save("starting");armed=true local expected=prepareStreaming(target) if not stopping and next(expected) then
+unchanged();save("converting");generator(true);if background then print("后台缓存纠缠转换中；本轮目标已更新。") end local deadline=computer.uptime()+180 for kind in pairs(target) do
+deadline=deadline+math.ceil((expected[mapping[kind]] or 0)/(units[kind] or 144))*180 end while true do
+unchanged();local ready=true;local now=field() for name,need in pairs(target) do if (now[name] or 0)<need then ready=false end end if ready then break end
+assert(computer.uptime()<deadline,"缓存转换超时，保留库存与日志") tick(0.25) if stopping then break end
+end generator(false) end
+unchanged();generator(false) record.incomplete=false local final=field()
+for name,need in pairs(target) do if (final[name] or 0)<need then record.incomplete=true end end for _,job in ipairs(record.requests) do if job.state~="done" and not(job.state=="rejected" and job.preSubmissionFailed==true) then save("craft-paused");print("缓存已暂停，AE申请仍需核对，不重复下单。");return
+end end save("stopped") print(stopping and "预缓存已暂停，已有原液/凝聚物保留。" or background and "预缓存完成（本轮）；统一目标仍以界面各项库存为准。" or "预缓存完成；凝聚物留在约束场，生产时直接抵扣。")
+end local ok,err=xpcall(cacheMain,debug.traceback) if not ok then
+if armed then pcall(pause,15);pcall(generator,false) if record.configOwned then pcall(call,MAIN,"setFluidInterfaceConfiguration",0) end
+end print("预缓存停止："..tostring(err));print("保留 /home/bec_cache.journal 和库存，不删除日志重跑。") end
+return ok,err
+]=],supported={}},{name='web.lua',added=false,source=[=[local c=require('component');local event=require('event');local clock=require('computer')
 local ROOT='/home/bec_v2'
 local function module(n)return assert(loadfile(ROOT..'/lib/'..n..'.lua'))()end
 local C,B,W=module('config'),module('ochd_bindings'),module('web_json')
@@ -9,7 +508,7 @@ local methods=c.methods(address)
 assert(methods.setWebApp~=nil and methods.publish~=nil,'需要支持 HTML 页面的 OCHD alpha7 或兼容版 JAR')
 local f=assert(io.open(C.path('lib/web_page.html'),'r'));local page=f:read('*a');f:close()
 local package={id='bec-v2-studio',title='BEC V2 结构绑定与运行',entry='index.html',files={['index.html']=page},
- events={'save_field','apply_bindings','start','pause','select_group','refresh','scan_components','patterns'}}
+ events={'save_field','apply_bindings','start','pause','select_group','refresh','scan_components','patterns','cache'}}
 local panel=c.proxy(address);local H=module('web_session')(C,B,W)
 local ok,err=xpcall(function()
  while true do local accepted,reason=panel.setWebApp(package);assert(accepted~=nil,reason);if accepted then break end;event.pull(.6)end
@@ -33,7 +532,7 @@ end,debug.traceback)
 local errors=H.close();for _,reason in ipairs(errors)do print('需人工检查：'..reason)end
 pcall(function()panel.release()end)
 assert(ok,err);assert(#errors==0,'暂停存在回读失败，请核对机器')
-]=],supported={['2027:1356401707']=true,['2027:1356401707']=true,['2027:1356401707']=true,['2027:1356401707']=true,['2027:1356401707']=true,['2027:1356401707']=true,['2045:2430604015']=true}},{name='lib/config.lua',source=[=[local c=require('component')
+]=],supported={['2027:1356401707']=true,['2027:1356401707']=true,['2027:1356401707']=true,['2027:1356401707']=true,['2027:1356401707']=true,['2027:1356401707']=true,['2045:2430604015']=true,['2056:4125103834']=true,['2056:4125103834']=true}},{name='lib/config.lua',added=false,source=[=[local c=require('component')
 local fs=require('filesystem')
 local ser=require('serialization')
 local M={ROOT='/home/bec_v2'}
@@ -145,7 +644,7 @@ function M.validate(cfg,live)
 end
 function M.load() return assert(M.read(M.path('config.dat')),'请先运行 setup') end
 return M
-]=],supported={['7134:2524978389']=true,['7134:2524978389']=true,['7134:2524978389']=true,['7134:2524978389']=true,['7134:2524978389']=true,['7134:2524978389']=true,['7343:3682171505']=true}},{name='lib/patterns.lua',source=[=[local c=require('component')
+]=],supported={['7134:2524978389']=true,['7134:2524978389']=true,['7134:2524978389']=true,['7134:2524978389']=true,['7134:2524978389']=true,['7134:2524978389']=true,['7343:3682171505']=true,['7343:3682171505']=true,['7343:3682171505']=true}},{name='lib/patterns.lua',added=false,source=[=[local c=require('component')
 return function(C,mode,options)
  options=options or {}
  assert(mode=='preview'or mode=='run'or mode=='watch','用法：patterns preview / run / watch')
@@ -172,7 +671,7 @@ return function(C,mode,options)
  if hooks then local before=hooks.beforeSlot;hooks.beforeSlot=function(slot)guard();if before then before(slot)end end end
  assert(load(text,'V2样板处理','t',env))(mode,hooks)
 end
-]=],supported={['1254:2564943297']=true,['1254:2564943297']=true,['1254:2564943297']=true,['1254:2564943297']=true,['1254:2564943297']=true,['1254:2564943297']=true,['1254:2564943297']=true}},{name='runtime/patterns.lua',source=[=[-- Automatic workshop pattern registration. Never touches the production interface.
+]=],supported={['1254:2564943297']=true,['1254:2564943297']=true,['1254:2564943297']=true,['1254:2564943297']=true,['1254:2564943297']=true,['1254:2564943297']=true,['1254:2564943297']=true,['1565:1253859302']=true,['1565:1253859302']=true}},{name='runtime/patterns.lua',added=false,source=[=[-- Automatic workshop pattern registration. Never touches the production interface.
 local mode,hooks=...
 mode=mode or "preview";hooks=hooks or {}
 local c=require("component")
@@ -328,7 +827,7 @@ local function main()
 end
 local ok,err=xpcall(main,debug.traceback)
 if not ok then print("样板服务停止："..tostring(err));if hooks.raiseErrors then error(err)end end
-]=],supported={['7499:1281814973']=true,['7499:1281814973']=true,['7499:1281814973']=true,['7499:1281814973']=true,['7499:1281814973']=true,['7499:1281814973']=true,['7499:1281814973']=true}},{name='lib/web_session.lua',source=[=[-- HTML is a data client. Only this Lua allowlist can save bindings or run V2.
+]=],supported={['7499:1281814973']=true,['7499:1281814973']=true,['7499:1281814973']=true,['7499:1281814973']=true,['7499:1281814973']=true,['7499:1281814973']=true,['7499:1281814973']=true,['7842:1953465280']=true,['7842:1953465280']=true}},{name='lib/web_session.lua',added=false,source=[=[-- HTML is a data client. Only this Lua allowlist can save bindings or run V2.
 local c=require('component');local clock=require('computer');local ser=require('serialization')
 return function(C,B,W,options)
  options=options or {}
@@ -337,8 +836,10 @@ return function(C,B,W,options)
  local cfg=expected and C.read(path)or {version=2,mainInterface='',recipeDirectory=C.path('recipes'),cacheTarget=144000,
   groups={{name='设备组 01',storage='',gate='',subInterface='',transposer='',mainSide=4,subSide=5,generators={},bulkTransposers={},nanites={enabled=false,mode='cell-io'}}},nodes={}}
  local draftPath=C.path('bindings.draft.dat');local raw=B.read(draftPath);local draft=raw and ser.unserialize(raw)
- local E,P
+ local E,P,K
  local storage=options.storage or assert(loadfile(C.path('lib/storage.lua')))()(C)
+ -- BEC_WEB_CACHE_1: independent settings; worker shares production resource locks.
+ local function cache()if not K then K=assert(loadfile(C.path('lib/cache.lua')))()(C,B,cfg,storage)end;return K end
  local function revision()return B.revision((expected or '')..'|'..(raw or ''))end
  local function fields()return B.draftFields(cfg,draft,expected)end
  local function payload(change)
@@ -392,6 +893,7 @@ return function(C,B,W,options)
  local function idleEditor()
   assert(not H.running,'先暂停自动化再编辑绑定')
   assert(not(P and P.co),'先等待样板处理结束或停止后再编辑绑定')
+  assert(not(K and(K.busy or K.blocked)),'先暂停并等待缓存补库收尾；未确认缓存记录须保留核对，再编辑绑定')
   if E then for _,t in ipairs(E.tasks)do assert(not t.co,'等待工作器退出并保留日志后再编辑')end end
  end
  local function read(a,m,...)
@@ -419,7 +921,11 @@ return function(C,B,W,options)
  function H.handle(name,args,request)
   assert(type(args)=='table','页面参数必须为对象')
   assert(type(request)=='number'and request==math.floor(request)and request>0,'请求编号无效')
-  if name=='patterns'then
+  if name=='cache'then
+   if args.mode=='enable'then cleanDraft();C.validate(cfg,true)end
+   if args.mode=='save'or args.mode=='enable'then local disk=storage.status();assert(disk.known and disk.ok,'磁盘不足，缓存配置未保存')end
+   H.notice=cache().action(args);return H.notice
+  elseif name=='patterns'then
    if args.mode=='stop'then
     if P and P.co then P.stop=true;P.message='正在停止，当前槽位完成核对后退出';return P.message end
     return '没有正在执行的样板处理'
@@ -464,7 +970,7 @@ return function(C,B,W,options)
    storage.prune(cfg)
    cfg=B.saveV2(C,cfg,payload(),request,expected,revision());expected=B.read(path)
    -- The old draft's base is no longer current, so B.draftFields ignores it.
-   E=nil;H.started=false;H.notice='绑定已校验并应用，点击启动自动化。';return H.notice
+   E=nil;K=nil;H.started=false;H.notice='绑定已校验并应用，点击启动自动化。';return H.notice
   elseif name=='start'then
    assert(not H.running,'自动化已经运行')
    assert(not(P and P.co),'先停止或等待样板处理结束，再启动自动化')
@@ -475,6 +981,7 @@ return function(C,B,W,options)
    local formal={};for _,f in ipairs(B.v2Fields(cfg))do formal[f.key]=f.value end
    for _,f in ipairs(fields())do assert(f.value==formal[f.key],'草稿尚未应用，请先应用绑定')end
    cfg=C.load();C.validate(cfg,true)
+   cache().assertReady()
    for _,n in ipairs(cfg.nodes)do
     local state=c.invoke(n.address,'getState')
     assert(state=='idle'or state=='paused-immediate'or state=='nanite-tier-too-low','先暂停节点，当前 '..tostring(state))
@@ -503,6 +1010,11 @@ return function(C,B,W,options)
  end
  function H.step()
   scanStep();patternStep()
+  if K then
+   local ok,err=pcall(K.step,E,H.running)
+   if not ok then K.blocked=tostring(err);K.message=tostring(err):sub(1,300)end
+   if K.blocked then local was=H.running;H.running=false;H.notice='缓存保护暂停：'..K.message;if E and was then E.pauseAll()end end
+  end
   if not E then return end
   local draining=false;for _,t in ipairs(E.tasks)do if t.co then draining=true end end
   if H.running or draining then E.step()end
@@ -516,6 +1028,7 @@ return function(C,B,W,options)
   end
   local out={mode=H.running and 'running'or 'binding',revision=revision(),values=values,group=H.group,groupCount=#cfg.groups,
    configured=expected~=nil,notice=H.notice,scan=scanSnapshot(),now=now,machines={},nodes={},flow={},timeline={},logs={},disk=storage.status()}
+  out.cache=cache().snapshot(H.group)
   if P then out.patterns={mode=P.mode,status=P.status,slot=P.slot,message=P.message,logs=P.logs,rows=P.rows}end
   local g=cfg.groups[H.group];out.groupName=g.name or ('设备组 '..H.group);out.generatorSlots=math.max(4,#g.generators);local selected
   if E then local owner=E.groupOwner[H.group];selected=owner and E.tasks[owner]
@@ -548,13 +1061,14 @@ return function(C,B,W,options)
   return out
  end
  function H.close()
+  if K then K.close()end
   if P and P.co then P.stop=true;patternStep()end
   H.running=false;if E then return E.shutdown()end;return {}
  end
  function H.engine()return E end
  return H
 end
-]=],supported={['7956:3662685464']=true,['8356:432333941']=true,['8356:432333941']=true,['8357:2294998177']=true,['8357:2294998177']=true,['8357:2294998177']=true,['12354:680836750']=true}},{name='lib/web_page.html',source=[=[<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BEC V2 · 结构绑定与自动化流程</title><meta name="description" content="用真实GTNH方块结构与贴图查看BEC装配线，旋转、分层、选模块并保存绑定草稿。"><style>:root{--ink:#263342;--muted:#8a95a3;--line:#e5eaf0;--blue:#2e77ee;--teal:#20a88e;--soft:#f5f8fc;--font:'Segoe UI','Microsoft YaHei',sans-serif}*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden}body{font:13px/1.5 var(--font);color:var(--ink);background:#fff}button,input,select{font:inherit}button{cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #6ba7ff;outline-offset:3px}button{transition:background .15s,color .15s,border .15s}button:hover{filter:brightness(.98)}button:disabled{cursor:not-allowed;opacity:.5}a{color:var(--blue);text-decoration:none}h1,h2,h3,p{margin:0}[hidden]{display:none!important}.topbar{height:70px;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 26px;gap:26px;background:#fff;position:relative;z-index:3}.brand{display:flex;align-items:center;gap:12px;color:var(--ink);white-space:nowrap}.brand strong{font-size:17px;letter-spacing:.3px}.brand strong>span{font-weight:400;color:#9aa5b2;font-size:12px;letter-spacing:1.2px}.brand-icon{position:relative;width:27px;height:30px;display:block}.brand-icon i{position:absolute;width:15px;height:15px;border:2px solid var(--blue);transform:rotate(30deg) skewY(-10deg);border-radius:2px;left:2px;top:4px}.brand-icon i:nth-child(2){left:10px;top:9px;background:white}.brand-icon i:nth-child(3){left:2px;top:14px;background:#eaf2ff}.top-divider{height:25px;border-left:1px solid var(--line)}.project-name{font-size:13px;font-weight:600;white-space:nowrap}.pill{margin-left:12px;padding:3px 7px;font-size:10px;color:#4983d1;background:#edf4ff;border-radius:4px;font-weight:400}.top-actions{margin-left:auto;display:flex;align-items:center;gap:10px}.save-status{font-size:11px;color:#8995a4;margin-right:12px;white-space:nowrap}.save-status i,.statusbar i{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--teal);margin-right:7px;vertical-align:middle}.save-status.busy i{background:#e9ac40}.save-status.error i{background:#e48163}.button{height:34px;padding:0 13px;border:1px solid #dfe6ef;border-radius:5px;background:#fff;color:#687789;font-size:11px}.button.primary{background:var(--blue);border-color:var(--blue);color:white;box-shadow:0 2px 5px #2e77ee16}.workspace{display:grid;grid-template-columns:238px minmax(300px,1fr) 292px;height:calc(100% - 100px)}.sidebar{border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;background:#fff}.side-head{padding:27px 22px 22px}.eyebrow{font-size:8px;font-weight:600;letter-spacing:1.8px;color:#9da8b5;display:block}.side-head h1{font-size:18px;letter-spacing:.3px;font-weight:600;margin-top:7px}.side-head p{font-size:10px;color:#a0a9b5;margin-top:9px;line-height:1.7}.search-box{display:flex;align-items:center;background:#f6f8fb;border:1px solid #edf0f5;border-radius:5px;margin:0 17px 24px;padding:7px 9px;gap:6px}.search-box>span{font-size:19px;line-height:15px;color:#97a4b4}.search-box input{background:none;border:0;outline:none;width:100%;min-width:0;font-size:10px;color:#68788b}.search-box kbd{border:1px solid #e2e7ee;border-radius:3px;font-size:9px;color:#a7b0bd;padding:0 4px}.line-header{display:flex;align-items:center;gap:8px;padding:0 20px 12px;color:#8592a3;font-size:10px}.line-header>b{color:#647487;font-weight:600}.count{margin-left:auto;background:#eff3f8;color:#98a5b4;padding:2px 6px;border-radius:4px;font:9px Consolas,monospace}.tree{overflow-y:auto;flex:1;padding:0 11px 20px}.tree-row{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;text-align:left;padding:10px 11px;border-radius:5px;margin:3px 0;color:#708094;position:relative;min-height:43px}.tree-row:hover{background:#f6f8fc}.tree-row.active{background:#edf4ff;color:#3478db}.tree-row.active:before{content:'';position:absolute;left:-11px;height:24px;width:3px;background:var(--blue);border-radius:0 3px 3px 0}.module-icon{font:17px var(--font);width:25px;height:25px;display:flex;align-items:center;justify-content:center;border:1px solid #dbe3ec;border-radius:5px;color:#8fa1b5;background:#f8fafc;flex-shrink:0}.tree-row.active .module-icon{border-color:#bdd3f4;color:var(--blue);background:#f6faff}.tree-title{font-size:11px;display:block;font-weight:500}.tree-role{font-size:8px;color:#a2acba;display:block;margin-top:2px}.state-dot{width:5px;height:5px;background:#bdc7d3;flex-shrink:0;display:inline-block;border-radius:50%;margin-left:auto}.state-dot.filled{background:var(--teal);box-shadow:0 0 0 3px #20a88e0a}.node-group-button{display:flex;align-items:center;gap:9px;width:100%;background:none;border:0;padding:12px 11px 6px;color:#8393a7;font-size:10px}.node-group-button .count{margin-left:auto}.node-rows{border-left:1px solid #eaf0f7;margin:6px 0 3px 22px;padding-left:9px}.node-rows .tree-row{min-height:33px;padding:7px 9px}.node-rows .tree-title{font-size:10px}.node-rows .tree-role{display:none}.node-rows .module-icon{width:19px;height:19px;font-size:12px}.node-rows .tree-row.active:before{left:-10px;height:18px;width:2px}.side-footer{padding:18px 22px;border-top:1px solid var(--line);background:#fbfcfe}.source-label{display:flex;align-items:center;gap:6px;font-size:10px;color:#8797a9}.verified{display:inline-flex;align-items:center;justify-content:center;border:1px solid #9fb7d2;border-radius:50%;width:12px;height:12px;font-size:8px;color:#6e96be}.side-footer p{font-size:9px;color:#a3adba;line-height:1.8;margin-top:7px}.text-button{background:none;border:0;padding:0;color:#729bd0;font-size:9px;margin-top:7px}.main{display:flex;flex-direction:column;min-height:0;min-width:0;background:#f1f4f8}.view-header{height:51px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 22px;border-bottom:1px solid #e1e8f0;background:#fafbfd;flex-shrink:0}.breadcrumb{display:flex;align-items:center;gap:10px;font-size:10px;color:#96a2b2;white-space:nowrap}.breadcrumb>span{color:#c0cad6;font-size:9px}.breadcrumb b{font-weight:500;color:#74879b}.view-modes{display:flex;background:#eef2f7;border:1px solid #e6ecf3;padding:3px;border-radius:5px}.view-modes button{background:none;border:0;padding:4px 10px;color:#9aa8b9;font-size:9px;border-radius:3px}.view-modes button.active{background:white;color:#4c7eb9;box-shadow:0 1px 3px #172b4510}.stage{position:relative;flex:1;overflow:hidden;min-height:250px;background:#f0f3f7}.stage>canvas{width:100%;height:100%;display:block;cursor:grab;touch-action:none}.stage>canvas.dragging{cursor:grabbing!important}.labels{position:absolute;inset:0;pointer-events:none}.device-label{position:absolute;transform:translate(-50%,-100%);white-space:nowrap;font-size:10px;border:1px solid #d4e0ed;background:#fffffff2;border-radius:4px;padding:4px 8px;box-shadow:0 2px 7px #39566f09;color:#607d99;pointer-events:auto;cursor:pointer;display:flex;align-items:center;gap:6px}.device-label:after{content:'';position:absolute;width:1px;height:13px;background:#a7bfd7;left:50%;top:100%}.device-label i{width:5px;height:5px;border-radius:2px;background:#6a9cd4}.device-label.node{font-size:8px;padding:3px 5px;color:#439984;border-color:#b6dbd0;background:#f9fffcf2}.device-label.node i{background:#41b18d}.device-label.selected{border-color:#69a3f1;color:#2875d9;box-shadow:0 0 0 3px #448bee0b}.stage-title{position:absolute;left:22px;top:20px;display:flex;align-items:center;gap:8px;color:#778b9f;font-size:10px;pointer-events:none}.live-dot{width:5px;height:5px;border-radius:50%;background:#729bc0}.stage-sub{color:#a5b2c0;font-size:9px;margin-left:3px}.viewport-tools{position:absolute;left:17px;top:58px;background:#fffffff2;border:1px solid #dfe6ef;border-radius:6px;box-shadow:0 2px 7px #2c435309;padding:4px;display:flex;flex-direction:column}.viewport-tools button{border:0;background:none;color:#8397ad;border-radius:3px;width:29px;height:30px;font-size:18px}.viewport-tools button:hover{background:#edf4fc;color:#347ede}.viewport-tools>div{border-top:1px solid #e8edf3;margin:3px}.orientation{position:absolute;right:16px;top:16px;display:flex;align-items:center;gap:3px;font-size:9px;color:#a0aebb}.orientation>span{margin-right:4px}.orientation button{border:1px solid #dce5ef;background:#f9fbfd;color:#95a6b9;font-size:8px;padding:4px 6px;border-radius:3px}.orientation button.active{border-color:#b5cdf0;background:#e8f1ff;color:#4f85cc}.model-callout{position:absolute;top:62px;left:64px;padding:15px 20px 14px 16px;border:1px solid #dde5ef;background:#fffffff0;border-radius:6px;pointer-events:auto;box-shadow:0 4px 18px #182c4205}.model-callout>span{font:7px Consolas,monospace;letter-spacing:1.5px;color:#a4b2c0;display:block}.model-callout strong{display:block;font-size:11px;font-weight:500;color:#70859c;margin:6px 0}.model-callout p{font-size:9px;color:#a4b0bf;line-height:1.8}.model-callout>button{position:absolute;right:7px;top:4px;border:0;background:none;color:#b4bfcd;font-size:15px}.axis-gizmo{position:absolute;bottom:26px;left:18px;width:73px;height:64px;opacity:.75}.axis-gizmo svg{width:100%;height:100%}.stage-help{position:absolute;bottom:13px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:9px;white-space:nowrap;font-size:8px;color:#9fadb9}.stage-help>span{color:#b8c3ce}.mouse-icon{width:9px;height:13px;border:1px solid #9aabba;border-radius:4px;display:block;position:relative}.mouse-icon:after{content:'';width:1px;height:4px;background:#9aabba;position:absolute;left:3px;top:1px}.renderer-badge{position:absolute;right:13px;bottom:12px;font:7px Consolas,monospace;color:#a9b6c3;letter-spacing:.4px}.layer-bar{height:61px;background:#fafcfe;display:flex;align-items:center;border-top:1px solid #dfe7ef;padding:0 22px;gap:11px;flex-shrink:0}.layer-icon{font-size:23px;color:#91a4b8;margin-right:0}.layer-title{min-width:76px;display:flex;flex-direction:column;gap:2px}.layer-title strong{font-size:10px;font-weight:500;color:#74889e}.layer-title>span{font:8px Consolas,monospace;color:#a2afbf}.layer-bar input{flex:1;min-width:50px;accent-color:#4e8ee9;height:3px;cursor:pointer}.layer-step{font-size:12px;width:20px;height:23px;border:0;background:#f0f4f9;border-radius:4px;color:#9caec0}.mini-button{border:1px solid #d6e5fa;background:#edf4ff;padding:5px 7px;color:#6b9ad7;font-size:8px;border-radius:4px}.view-options{height:42px;display:flex;align-items:center;gap:16px;border-top:1px solid #e8edf3;background:#fff;padding:0 22px;flex-shrink:0;font-size:8px;color:#93a3b4;white-space:nowrap}.view-options label{display:flex;align-items:center;gap:4px;cursor:pointer}.view-options input{width:10px;height:10px;accent-color:#6f99d2;margin:0}.legend{display:flex;gap:5px;align-items:center;margin-left:auto;font-size:7px;color:#a6b3c0}.legend i{display:inline-block;width:5px;height:5px;background:#b8c4d0;border-radius:50%;margin-left:6px}.legend i.filled{background:#20a88e}.legend i.selected{background:#488eea}.inspector{border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0;overflow-y:auto;background:#fff}.inspector-head{display:flex;align-items:center;justify-content:space-between;padding:28px 23px 22px;border-bottom:1px solid #eef1f6}.inspector-head h2{font-size:16px;font-weight:600;margin-top:7px}.property-icon{font-size:18px;color:#bcc8d4}.module-summary{padding:21px 23px 17px}.module-summary .summary-icon{width:41px;height:41px;display:flex;align-items:center;justify-content:center;font-size:23px;border:1px solid #dbe7f5;border-radius:7px;color:#6b96c8;background:#f3f8fe;margin-bottom:14px}.module-summary h3{font-size:15px;font-weight:600;letter-spacing:.2px}.module-summary p{font-size:9px;color:#9aaabc;margin-top:5px;line-height:1.8}.module-state{display:inline-flex;align-items:center;font-size:8px;gap:5px;margin-top:12px;border-radius:3px;background:#f2f5f9;padding:3px 6px;color:#9cabbc}.module-state i{width:4px;height:4px;border-radius:50%;background:#bac6d1}.module-state.filled{background:#edf9f4;color:#6d9b8d}.module-state.filled i{background:var(--teal)}.properties{border-top:1px solid #edf1f6;padding:18px 23px}.properties-title{font-size:9px;letter-spacing:.5px;color:#75899f;font-weight:500;margin-bottom:15px}.field{margin:0 0 17px}.field>label{display:flex;align-items:center;justify-content:space-between;font-size:10px;color:#8799ac;margin-bottom:7px}.field small{color:#b1bdcb;font-size:8px}.field input,.field select{width:100%;background:#fbfcfe;border:1px solid #e1e8f1;border-radius:5px;padding:10px 9px;color:#5a708a;font-size:10px;outline:none;transition:border-color .2s}.field input{font-family:Consolas,'Microsoft YaHei',monospace;font-size:9px}.field input:focus,.field select:focus{border-color:#83afea;box-shadow:0 0 0 3px #528fea0b}.field input::placeholder{color:#b6c2cf;font-size:8px}.field input.invalid{border-color:#edc2ad;background:#fffdfb}.field .hint{font-size:8px;line-height:1.8;color:#abb8c6;margin-top:6px}.field .hint.error{color:#cd9a80}.direction-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}.direction-grid button{background:#fbfcfe;border:1px solid #e1e8f1;border-radius:4px;color:#a4b1c0;font-size:9px;height:27px}.direction-grid button.active{background:#edf4ff;border-color:#adcaf0;color:#4c82c5}.module-metadata{border-top:1px solid #edf1f6;padding:19px 23px;color:#a6b3c1}.metadata-row{display:flex;justify-content:space-between;font-size:9px;margin:8px 0}.metadata-row b{font:9px Consolas,monospace;font-weight:normal;color:#7e91a7}.metadata-row.role{display:block;font-size:8px;line-height:1.8}.metadata-row.role b{display:block;word-break:break-all;margin-top:4px;font-size:8px}.inspector-bottom{margin-top:auto;padding:17px 23px;border-top:1px solid #eef2f6;background:#fbfcfe;display:flex;gap:9px;align-items:flex-start;color:#a5b5c6}.inspector-bottom>span{font-size:16px;color:#b6c6d6}.inspector-bottom p{font-size:8px;line-height:1.8;color:#a6b4c3}.section-note{font-size:10px;color:#9caebf;line-height:1.95;background:#f7fafe;padding:12px;border:1px solid #e8eef6;border-radius:5px}.related-button{width:100%;margin-top:12px;border:1px solid #cfe0f6;background:#f1f6ff;padding:9px;border-radius:5px;color:#6b95ce;font-size:9px}.validation-state{display:flex;align-items:center;gap:6px;font-size:8px;color:#a0b0c1;background:#f7fafc;padding:9px;border:1px solid #edf2f6;border-radius:4px}.validation-state.valid{color:#5d9c88;background:#f1faf6;border-color:#def0e6}.statusbar{height:30px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-size:8px;color:#a2afbd;background:#fbfcfe}.statusbar b{font:9px Consolas,monospace;color:#7f93a8;font-weight:normal}.status-divider{color:#d6dfe8;margin:0 12px}.toast{position:fixed;left:50%;bottom:55px;transform:translateX(-50%);z-index:10;padding:11px 18px;border:1px solid #dce7f3;background:#fffffff7;box-shadow:0 5px 25px #2b435318;border-radius:6px;font-size:11px;color:#6c8cac;max-width:90vw}.toast.error{border-color:#f1d2bd;color:#ba9277}dialog{border:1px solid #dae5f1;border-radius:10px;box-shadow:0 20px 100px #263b5229;max-width:510px;padding:32px;color:#506981;background:#fff}dialog::backdrop{background:#263c5150}dialog h2{font-size:22px;margin:10px 0 20px}dialog p{font-size:12px;line-height:1.9;color:#8b9fb3;margin-bottom:14px}dialog>a{display:inline-block;margin:8px 20px 12px 0;font-size:11px}.dialog-close{position:absolute;right:13px;top:9px;background:none;border:0;font-size:23px;color:#aab7c6}.license-note{font-size:9px!important;margin-top:12px}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#d7e0eb;border-radius:4px}@media(min-width:1600px){.workspace{grid-template-columns:260px minmax(300px,1fr) 320px}.side-head,.inspector-head{padding-top:30px}.view-options{font-size:10px}.legend{font-size:9px}.tree-title{font-size:12px}.node-rows .tree-title{font-size:11px}.stage-help{font-size:10px}.field input{font-size:10px}.field>label{font-size:11px}.field .hint{font-size:9px}.module-summary p{font-size:10px}.direction-grid button{font-size:10px}.metadata-row{font-size:10px}.validation-state{font-size:9px}.inspector-bottom p{font-size:9px}.device-label{font-size:12px}.device-label.node{font-size:10px}.tree-role{font-size:9px}.breadcrumb{font-size:11px}.stage-title{font-size:12px}.stage-sub{font-size:10px}}@media(max-width:1100px){.workspace{grid-template-columns:198px minmax(300px,1fr) 250px}.topbar{padding:0 18px;gap:16px}.top-actions{gap:7px}.save-status{display:none}.side-head{padding:23px 17px}.side-head p{font-size:9px}.inspector-head,.module-summary,.properties,.module-metadata{padding-left:18px;padding-right:18px}.view-header{padding:0 14px}.breadcrumb{gap:7px;font-size:9px}.view-modes button{font-size:8px;padding:4px 6px}.view-options{padding:0 12px;gap:10px;font-size:7px}.legend{display:none}.stage-sub{display:none}.model-callout{left:59px;padding:11px 15px}.model-callout p{font-size:8px}.top-divider{display:none}.brand strong>span{font-size:10px}.stage-help{font-size:7px;gap:5px}.renderer-badge{display:none}}@media(max-width:800px){.workspace{grid-template-columns:0 minmax(280px,1fr) 230px}.sidebar{overflow:hidden;border:0}.brand strong>span,.project-name .pill{display:none}.topbar{height:60px;padding:0 14px;gap:20px}.workspace{height:calc(100% - 86px)}.statusbar{height:26px}.statusbar>span:last-child{display:none}.top-actions .quiet{display:none}.project-name{font-size:11px}.button{padding:0 10px}.orientation{gap:2px;right:10px}.orientation>span{display:none}.orientation button{font-size:7px;padding:3px}.model-callout{display:none}.view-header{height:44px}.breadcrumb{display:none}.view-modes{margin-left:auto}.view-options{flex-wrap:wrap;height:52px;gap:6px 10px}.layer-bar{padding:0 12px;gap:7px}.layer-title{min-width:54px}.layer-icon{display:none}.stage-help{display:none}.stage-title{left:14px;font-size:9px}}@media(max-width:540px){.workspace{grid-template-columns:1fr;grid-template-rows:minmax(310px,55%) auto;overflow-y:auto}.main{min-height:360px}.inspector{border-left:0;border-top:1px solid var(--line);overflow:visible}.inspector-head{padding:17px 20px}.inspector-head h2{font-size:14px}.module-summary{padding:15px 20px}.module-summary .summary-icon{display:none}.properties{padding:15px 20px}.module-metadata{padding:15px 20px}.inspector-bottom{display:none}.topbar{gap:14px}.project-name{display:none}.top-actions{margin-left:auto}.statusbar{padding:0 13px}.stage-title{top:13px}.viewport-tools{top:44px;left:10px}.viewport-tools button{width:24px;height:26px}.axis-gizmo{width:50px;left:7px;bottom:10px}.view-options{height:40px}.layer-bar{height:48px}}@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+]=],supported={['7956:3662685464']=true,['8356:432333941']=true,['8356:432333941']=true,['8357:2294998177']=true,['8357:2294998177']=true,['8357:2294998177']=true,['12354:680836750']=true,['15309:92251915']=true,['15309:92251915']=true}},{name='lib/web_page.html',added=false,source=[=[<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BEC V2 · 结构绑定与自动化流程</title><meta name="description" content="用真实GTNH方块结构与贴图查看BEC装配线，旋转、分层、选模块并保存绑定草稿。"><style>:root{--ink:#263342;--muted:#8a95a3;--line:#e5eaf0;--blue:#2e77ee;--teal:#20a88e;--soft:#f5f8fc;--font:'Segoe UI','Microsoft YaHei',sans-serif}*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden}body{font:13px/1.5 var(--font);color:var(--ink);background:#fff}button,input,select{font:inherit}button{cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid #6ba7ff;outline-offset:3px}button{transition:background .15s,color .15s,border .15s}button:hover{filter:brightness(.98)}button:disabled{cursor:not-allowed;opacity:.5}a{color:var(--blue);text-decoration:none}h1,h2,h3,p{margin:0}[hidden]{display:none!important}.topbar{height:70px;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 26px;gap:26px;background:#fff;position:relative;z-index:3}.brand{display:flex;align-items:center;gap:12px;color:var(--ink);white-space:nowrap}.brand strong{font-size:17px;letter-spacing:.3px}.brand strong>span{font-weight:400;color:#9aa5b2;font-size:12px;letter-spacing:1.2px}.brand-icon{position:relative;width:27px;height:30px;display:block}.brand-icon i{position:absolute;width:15px;height:15px;border:2px solid var(--blue);transform:rotate(30deg) skewY(-10deg);border-radius:2px;left:2px;top:4px}.brand-icon i:nth-child(2){left:10px;top:9px;background:white}.brand-icon i:nth-child(3){left:2px;top:14px;background:#eaf2ff}.top-divider{height:25px;border-left:1px solid var(--line)}.project-name{font-size:13px;font-weight:600;white-space:nowrap}.pill{margin-left:12px;padding:3px 7px;font-size:10px;color:#4983d1;background:#edf4ff;border-radius:4px;font-weight:400}.top-actions{margin-left:auto;display:flex;align-items:center;gap:10px}.save-status{font-size:11px;color:#8995a4;margin-right:12px;white-space:nowrap}.save-status i,.statusbar i{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--teal);margin-right:7px;vertical-align:middle}.save-status.busy i{background:#e9ac40}.save-status.error i{background:#e48163}.button{height:34px;padding:0 13px;border:1px solid #dfe6ef;border-radius:5px;background:#fff;color:#687789;font-size:11px}.button.primary{background:var(--blue);border-color:var(--blue);color:white;box-shadow:0 2px 5px #2e77ee16}.workspace{display:grid;grid-template-columns:238px minmax(300px,1fr) 292px;height:calc(100% - 100px)}.sidebar{border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;background:#fff}.side-head{padding:27px 22px 22px}.eyebrow{font-size:8px;font-weight:600;letter-spacing:1.8px;color:#9da8b5;display:block}.side-head h1{font-size:18px;letter-spacing:.3px;font-weight:600;margin-top:7px}.side-head p{font-size:10px;color:#a0a9b5;margin-top:9px;line-height:1.7}.search-box{display:flex;align-items:center;background:#f6f8fb;border:1px solid #edf0f5;border-radius:5px;margin:0 17px 24px;padding:7px 9px;gap:6px}.search-box>span{font-size:19px;line-height:15px;color:#97a4b4}.search-box input{background:none;border:0;outline:none;width:100%;min-width:0;font-size:10px;color:#68788b}.search-box kbd{border:1px solid #e2e7ee;border-radius:3px;font-size:9px;color:#a7b0bd;padding:0 4px}.line-header{display:flex;align-items:center;gap:8px;padding:0 20px 12px;color:#8592a3;font-size:10px}.line-header>b{color:#647487;font-weight:600}.count{margin-left:auto;background:#eff3f8;color:#98a5b4;padding:2px 6px;border-radius:4px;font:9px Consolas,monospace}.tree{overflow-y:auto;flex:1;padding:0 11px 20px}.tree-row{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;text-align:left;padding:10px 11px;border-radius:5px;margin:3px 0;color:#708094;position:relative;min-height:43px}.tree-row:hover{background:#f6f8fc}.tree-row.active{background:#edf4ff;color:#3478db}.tree-row.active:before{content:'';position:absolute;left:-11px;height:24px;width:3px;background:var(--blue);border-radius:0 3px 3px 0}.module-icon{font:17px var(--font);width:25px;height:25px;display:flex;align-items:center;justify-content:center;border:1px solid #dbe3ec;border-radius:5px;color:#8fa1b5;background:#f8fafc;flex-shrink:0}.tree-row.active .module-icon{border-color:#bdd3f4;color:var(--blue);background:#f6faff}.tree-title{font-size:11px;display:block;font-weight:500}.tree-role{font-size:8px;color:#a2acba;display:block;margin-top:2px}.state-dot{width:5px;height:5px;background:#bdc7d3;flex-shrink:0;display:inline-block;border-radius:50%;margin-left:auto}.state-dot.filled{background:var(--teal);box-shadow:0 0 0 3px #20a88e0a}.node-group-button{display:flex;align-items:center;gap:9px;width:100%;background:none;border:0;padding:12px 11px 6px;color:#8393a7;font-size:10px}.node-group-button .count{margin-left:auto}.node-rows{border-left:1px solid #eaf0f7;margin:6px 0 3px 22px;padding-left:9px}.node-rows .tree-row{min-height:33px;padding:7px 9px}.node-rows .tree-title{font-size:10px}.node-rows .tree-role{display:none}.node-rows .module-icon{width:19px;height:19px;font-size:12px}.node-rows .tree-row.active:before{left:-10px;height:18px;width:2px}.side-footer{padding:18px 22px;border-top:1px solid var(--line);background:#fbfcfe}.source-label{display:flex;align-items:center;gap:6px;font-size:10px;color:#8797a9}.verified{display:inline-flex;align-items:center;justify-content:center;border:1px solid #9fb7d2;border-radius:50%;width:12px;height:12px;font-size:8px;color:#6e96be}.side-footer p{font-size:9px;color:#a3adba;line-height:1.8;margin-top:7px}.text-button{background:none;border:0;padding:0;color:#729bd0;font-size:9px;margin-top:7px}.main{display:flex;flex-direction:column;min-height:0;min-width:0;background:#f1f4f8}.view-header{height:51px;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 22px;border-bottom:1px solid #e1e8f0;background:#fafbfd;flex-shrink:0}.breadcrumb{display:flex;align-items:center;gap:10px;font-size:10px;color:#96a2b2;white-space:nowrap}.breadcrumb>span{color:#c0cad6;font-size:9px}.breadcrumb b{font-weight:500;color:#74879b}.view-modes{display:flex;background:#eef2f7;border:1px solid #e6ecf3;padding:3px;border-radius:5px}.view-modes button{background:none;border:0;padding:4px 10px;color:#9aa8b9;font-size:9px;border-radius:3px}.view-modes button.active{background:white;color:#4c7eb9;box-shadow:0 1px 3px #172b4510}.stage{position:relative;flex:1;overflow:hidden;min-height:250px;background:#f0f3f7}.stage>canvas{width:100%;height:100%;display:block;cursor:grab;touch-action:none}.stage>canvas.dragging{cursor:grabbing!important}.labels{position:absolute;inset:0;pointer-events:none}.device-label{position:absolute;transform:translate(-50%,-100%);white-space:nowrap;font-size:10px;border:1px solid #d4e0ed;background:#fffffff2;border-radius:4px;padding:4px 8px;box-shadow:0 2px 7px #39566f09;color:#607d99;pointer-events:auto;cursor:pointer;display:flex;align-items:center;gap:6px}.device-label:after{content:'';position:absolute;width:1px;height:13px;background:#a7bfd7;left:50%;top:100%}.device-label i{width:5px;height:5px;border-radius:2px;background:#6a9cd4}.device-label.node{font-size:8px;padding:3px 5px;color:#439984;border-color:#b6dbd0;background:#f9fffcf2}.device-label.node i{background:#41b18d}.device-label.selected{border-color:#69a3f1;color:#2875d9;box-shadow:0 0 0 3px #448bee0b}.stage-title{position:absolute;left:22px;top:20px;display:flex;align-items:center;gap:8px;color:#778b9f;font-size:10px;pointer-events:none}.live-dot{width:5px;height:5px;border-radius:50%;background:#729bc0}.stage-sub{color:#a5b2c0;font-size:9px;margin-left:3px}.viewport-tools{position:absolute;left:17px;top:58px;background:#fffffff2;border:1px solid #dfe6ef;border-radius:6px;box-shadow:0 2px 7px #2c435309;padding:4px;display:flex;flex-direction:column}.viewport-tools button{border:0;background:none;color:#8397ad;border-radius:3px;width:29px;height:30px;font-size:18px}.viewport-tools button:hover{background:#edf4fc;color:#347ede}.viewport-tools>div{border-top:1px solid #e8edf3;margin:3px}.orientation{position:absolute;right:16px;top:16px;display:flex;align-items:center;gap:3px;font-size:9px;color:#a0aebb}.orientation>span{margin-right:4px}.orientation button{border:1px solid #dce5ef;background:#f9fbfd;color:#95a6b9;font-size:8px;padding:4px 6px;border-radius:3px}.orientation button.active{border-color:#b5cdf0;background:#e8f1ff;color:#4f85cc}.model-callout{position:absolute;top:62px;left:64px;padding:15px 20px 14px 16px;border:1px solid #dde5ef;background:#fffffff0;border-radius:6px;pointer-events:auto;box-shadow:0 4px 18px #182c4205}.model-callout>span{font:7px Consolas,monospace;letter-spacing:1.5px;color:#a4b2c0;display:block}.model-callout strong{display:block;font-size:11px;font-weight:500;color:#70859c;margin:6px 0}.model-callout p{font-size:9px;color:#a4b0bf;line-height:1.8}.model-callout>button{position:absolute;right:7px;top:4px;border:0;background:none;color:#b4bfcd;font-size:15px}.axis-gizmo{position:absolute;bottom:26px;left:18px;width:73px;height:64px;opacity:.75}.axis-gizmo svg{width:100%;height:100%}.stage-help{position:absolute;bottom:13px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:9px;white-space:nowrap;font-size:8px;color:#9fadb9}.stage-help>span{color:#b8c3ce}.mouse-icon{width:9px;height:13px;border:1px solid #9aabba;border-radius:4px;display:block;position:relative}.mouse-icon:after{content:'';width:1px;height:4px;background:#9aabba;position:absolute;left:3px;top:1px}.renderer-badge{position:absolute;right:13px;bottom:12px;font:7px Consolas,monospace;color:#a9b6c3;letter-spacing:.4px}.layer-bar{height:61px;background:#fafcfe;display:flex;align-items:center;border-top:1px solid #dfe7ef;padding:0 22px;gap:11px;flex-shrink:0}.layer-icon{font-size:23px;color:#91a4b8;margin-right:0}.layer-title{min-width:76px;display:flex;flex-direction:column;gap:2px}.layer-title strong{font-size:10px;font-weight:500;color:#74889e}.layer-title>span{font:8px Consolas,monospace;color:#a2afbf}.layer-bar input{flex:1;min-width:50px;accent-color:#4e8ee9;height:3px;cursor:pointer}.layer-step{font-size:12px;width:20px;height:23px;border:0;background:#f0f4f9;border-radius:4px;color:#9caec0}.mini-button{border:1px solid #d6e5fa;background:#edf4ff;padding:5px 7px;color:#6b9ad7;font-size:8px;border-radius:4px}.view-options{height:42px;display:flex;align-items:center;gap:16px;border-top:1px solid #e8edf3;background:#fff;padding:0 22px;flex-shrink:0;font-size:8px;color:#93a3b4;white-space:nowrap}.view-options label{display:flex;align-items:center;gap:4px;cursor:pointer}.view-options input{width:10px;height:10px;accent-color:#6f99d2;margin:0}.legend{display:flex;gap:5px;align-items:center;margin-left:auto;font-size:7px;color:#a6b3c0}.legend i{display:inline-block;width:5px;height:5px;background:#b8c4d0;border-radius:50%;margin-left:6px}.legend i.filled{background:#20a88e}.legend i.selected{background:#488eea}.inspector{border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0;overflow-y:auto;background:#fff}.inspector-head{display:flex;align-items:center;justify-content:space-between;padding:28px 23px 22px;border-bottom:1px solid #eef1f6}.inspector-head h2{font-size:16px;font-weight:600;margin-top:7px}.property-icon{font-size:18px;color:#bcc8d4}.module-summary{padding:21px 23px 17px}.module-summary .summary-icon{width:41px;height:41px;display:flex;align-items:center;justify-content:center;font-size:23px;border:1px solid #dbe7f5;border-radius:7px;color:#6b96c8;background:#f3f8fe;margin-bottom:14px}.module-summary h3{font-size:15px;font-weight:600;letter-spacing:.2px}.module-summary p{font-size:9px;color:#9aaabc;margin-top:5px;line-height:1.8}.module-state{display:inline-flex;align-items:center;font-size:8px;gap:5px;margin-top:12px;border-radius:3px;background:#f2f5f9;padding:3px 6px;color:#9cabbc}.module-state i{width:4px;height:4px;border-radius:50%;background:#bac6d1}.module-state.filled{background:#edf9f4;color:#6d9b8d}.module-state.filled i{background:var(--teal)}.properties{border-top:1px solid #edf1f6;padding:18px 23px}.properties-title{font-size:9px;letter-spacing:.5px;color:#75899f;font-weight:500;margin-bottom:15px}.field{margin:0 0 17px}.field>label{display:flex;align-items:center;justify-content:space-between;font-size:10px;color:#8799ac;margin-bottom:7px}.field small{color:#b1bdcb;font-size:8px}.field input,.field select{width:100%;background:#fbfcfe;border:1px solid #e1e8f1;border-radius:5px;padding:10px 9px;color:#5a708a;font-size:10px;outline:none;transition:border-color .2s}.field input{font-family:Consolas,'Microsoft YaHei',monospace;font-size:9px}.field input:focus,.field select:focus{border-color:#83afea;box-shadow:0 0 0 3px #528fea0b}.field input::placeholder{color:#b6c2cf;font-size:8px}.field input.invalid{border-color:#edc2ad;background:#fffdfb}.field .hint{font-size:8px;line-height:1.8;color:#abb8c6;margin-top:6px}.field .hint.error{color:#cd9a80}.direction-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px}.direction-grid button{background:#fbfcfe;border:1px solid #e1e8f1;border-radius:4px;color:#a4b1c0;font-size:9px;height:27px}.direction-grid button.active{background:#edf4ff;border-color:#adcaf0;color:#4c82c5}.module-metadata{border-top:1px solid #edf1f6;padding:19px 23px;color:#a6b3c1}.metadata-row{display:flex;justify-content:space-between;font-size:9px;margin:8px 0}.metadata-row b{font:9px Consolas,monospace;font-weight:normal;color:#7e91a7}.metadata-row.role{display:block;font-size:8px;line-height:1.8}.metadata-row.role b{display:block;word-break:break-all;margin-top:4px;font-size:8px}.inspector-bottom{margin-top:auto;padding:17px 23px;border-top:1px solid #eef2f6;background:#fbfcfe;display:flex;gap:9px;align-items:flex-start;color:#a5b5c6}.inspector-bottom>span{font-size:16px;color:#b6c6d6}.inspector-bottom p{font-size:8px;line-height:1.8;color:#a6b4c3}.section-note{font-size:10px;color:#9caebf;line-height:1.95;background:#f7fafe;padding:12px;border:1px solid #e8eef6;border-radius:5px}.related-button{width:100%;margin-top:12px;border:1px solid #cfe0f6;background:#f1f6ff;padding:9px;border-radius:5px;color:#6b95ce;font-size:9px}.validation-state{display:flex;align-items:center;gap:6px;font-size:8px;color:#a0b0c1;background:#f7fafc;padding:9px;border:1px solid #edf2f6;border-radius:4px}.validation-state.valid{color:#5d9c88;background:#f1faf6;border-color:#def0e6}.statusbar{height:30px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 22px;font-size:8px;color:#a2afbd;background:#fbfcfe}.statusbar b{font:9px Consolas,monospace;color:#7f93a8;font-weight:normal}.status-divider{color:#d6dfe8;margin:0 12px}.toast{position:fixed;left:50%;bottom:55px;transform:translateX(-50%);z-index:10;padding:11px 18px;border:1px solid #dce7f3;background:#fffffff7;box-shadow:0 5px 25px #2b435318;border-radius:6px;font-size:11px;color:#6c8cac;max-width:90vw}.toast.error{border-color:#f1d2bd;color:#ba9277}dialog{border:1px solid #dae5f1;border-radius:10px;box-shadow:0 20px 100px #263b5229;max-width:510px;padding:32px;color:#506981;background:#fff}dialog::backdrop{background:#263c5150}dialog h2{font-size:22px;margin:10px 0 20px}dialog p{font-size:12px;line-height:1.9;color:#8b9fb3;margin-bottom:14px}dialog>a{display:inline-block;margin:8px 20px 12px 0;font-size:11px}.dialog-close{position:absolute;right:13px;top:9px;background:none;border:0;font-size:23px;color:#aab7c6}.license-note{font-size:9px!important;margin-top:12px}::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#d7e0eb;border-radius:4px}@media(min-width:1600px){.workspace{grid-template-columns:260px minmax(300px,1fr) 320px}.side-head,.inspector-head{padding-top:30px}.view-options{font-size:10px}.legend{font-size:9px}.tree-title{font-size:12px}.node-rows .tree-title{font-size:11px}.stage-help{font-size:10px}.field input{font-size:10px}.field>label{font-size:11px}.field .hint{font-size:9px}.module-summary p{font-size:10px}.direction-grid button{font-size:10px}.metadata-row{font-size:10px}.validation-state{font-size:9px}.inspector-bottom p{font-size:9px}.device-label{font-size:12px}.device-label.node{font-size:10px}.tree-role{font-size:9px}.breadcrumb{font-size:11px}.stage-title{font-size:12px}.stage-sub{font-size:10px}}@media(max-width:1100px){.workspace{grid-template-columns:198px minmax(300px,1fr) 250px}.topbar{padding:0 18px;gap:16px}.top-actions{gap:7px}.save-status{display:none}.side-head{padding:23px 17px}.side-head p{font-size:9px}.inspector-head,.module-summary,.properties,.module-metadata{padding-left:18px;padding-right:18px}.view-header{padding:0 14px}.breadcrumb{gap:7px;font-size:9px}.view-modes button{font-size:8px;padding:4px 6px}.view-options{padding:0 12px;gap:10px;font-size:7px}.legend{display:none}.stage-sub{display:none}.model-callout{left:59px;padding:11px 15px}.model-callout p{font-size:8px}.top-divider{display:none}.brand strong>span{font-size:10px}.stage-help{font-size:7px;gap:5px}.renderer-badge{display:none}}@media(max-width:800px){.workspace{grid-template-columns:0 minmax(280px,1fr) 230px}.sidebar{overflow:hidden;border:0}.brand strong>span,.project-name .pill{display:none}.topbar{height:60px;padding:0 14px;gap:20px}.workspace{height:calc(100% - 86px)}.statusbar{height:26px}.statusbar>span:last-child{display:none}.top-actions .quiet{display:none}.project-name{font-size:11px}.button{padding:0 10px}.orientation{gap:2px;right:10px}.orientation>span{display:none}.orientation button{font-size:7px;padding:3px}.model-callout{display:none}.view-header{height:44px}.breadcrumb{display:none}.view-modes{margin-left:auto}.view-options{flex-wrap:wrap;height:52px;gap:6px 10px}.layer-bar{padding:0 12px;gap:7px}.layer-title{min-width:54px}.layer-icon{display:none}.stage-help{display:none}.stage-title{left:14px;font-size:9px}}@media(max-width:540px){.workspace{grid-template-columns:1fr;grid-template-rows:minmax(310px,55%) auto;overflow-y:auto}.main{min-height:360px}.inspector{border-left:0;border-top:1px solid var(--line);overflow:visible}.inspector-head{padding:17px 20px}.inspector-head h2{font-size:14px}.module-summary{padding:15px 20px}.module-summary .summary-icon{display:none}.properties{padding:15px 20px}.module-metadata{padding:15px 20px}.inspector-bottom{display:none}.topbar{gap:14px}.project-name{display:none}.top-actions{margin-left:auto}.statusbar{padding:0 13px}.stage-title{top:13px}.viewport-tools{top:44px;left:10px}.viewport-tools button{width:24px;height:26px}.axis-gizmo{width:50px;left:7px;bottom:10px}.view-options{height:40px}.layer-bar{height:48px}}@media(prefers-reduced-motion:reduce){*{transition:none!important}}
 
 .view-options{flex-wrap:wrap;min-height:54px;height:auto;padding-top:8px;padding-bottom:8px;row-gap:6px}.peripheral-heading{margin-top:12px;border-top:1px solid var(--line);padding-top:14px}.peripheral-heading+.tree-row{margin-top:4px}.tree-role{display:block;max-width:165px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
@@ -570,6 +1084,8 @@ input,textarea{caret-color:#236ee8;cursor:text}input:focus,textarea:focus{outlin
 .pick-component{border:1px solid #bcd5f4;background:#edf4ff;color:#236ee8;padding:6px 10px;border-radius:5px;margin-top:6px}.component-choice{display:block;width:100%;text-align:left;border:1px solid #d7e3f3;border-radius:6px;padding:10px;margin:8px 0;background:#fff}.component-choice strong,.component-choice code,.component-choice small{display:block}.component-choice code{font-size:12px;user-select:text}.component-choice small{color:#73839a}#component-picker footer{gap:6px;flex-wrap:wrap}#picker-status{color:#315f94}
 
 #patterns-log{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.7 Consolas,monospace;max-height:260px;overflow:auto;background:#f5f8fc;padding:10px;border-radius:5px}#patterns-status{color:#315f94}#patterns-dialog footer{gap:6px;flex-wrap:wrap}.pattern-busy input,.pattern-busy .direction-grid button,.pattern-busy .pick-component,.pattern-busy .clear-address,.pattern-busy .ochd-select{pointer-events:none;opacity:.55}
+#cache-panel{display:none;padding:26px 5%;overflow:auto;flex:1;background:#f6f9ff}body.cache-view .workspace{display:none}body.cache-view #cache-panel{display:block}#cache-panel h1{font-size:24px;margin:0 0 10px}#cache-panel p{line-height:1.7}.cache-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:14px 0}.cache-actions label{display:flex;align-items:center;gap:12px}#cache-panel input{border:1px solid #d7e1f0;border-radius:7px;padding:10px;width:170px;background:white;color:#24364c}.cache-row{display:grid;grid-template-columns:minmax(220px,1fr) 230px 180px 70px;gap:16px;align-items:center;padding:12px 18px;background:white;border-bottom:1px solid #e6edf7}.cache-row small{display:block;color:#8a9db5;margin-top:5px}#cache-log{white-space:pre-wrap;color:#7186a3;font-size:12px}#cache-feedback{color:#2876ef}
+.runtime-running #cache-panel input,.pattern-busy #cache-panel input{pointer-events:auto;opacity:1}
 </style></head><body>
 <header class="topbar"><a class="brand" href="#"><span class="brand-icon"><i></i><i></i><i></i></span><strong>BEC<span> / STUDIO</span></strong></a><div class="top-divider"></div><span class="project-name">装配线 01 <span class="pill">配置原型</span></span><div class="top-actions"><span id="save-status" class="save-status"><i></i>本地草稿已就绪</span><button class="button quiet" id="import-btn">↥ 导入草稿</button><button class="button primary" id="export-btn">↧ 导出配置</button><input id="import-file" type="file" accept="application/json,.json" hidden></div></header>
 <div class="workspace"><aside class="sidebar"><div class="side-head"><span class="eyebrow">PROJECT EXPLORER</span><h1>装配线结构</h1><p>以实际设备为入口，完成每一处绑定。</p></div><div class="search-box"><span>⌕</span><input id="tree-search" placeholder="查找设备或地址" aria-label="查找设备或地址"><kbd>/</kbd></div><div class="line-header"><span>⌄</span><b>设备组 01</b><span id="binding-count" class="count">0 / 31</span></div><div id="structure-tree" class="tree"></div><div class="side-footer"><div class="source-label"><span class="verified">✓</span><span>GTNH 官方结构数据</span></div><p>GregTech 5.09.54.133<br>方块形状与材质来自原始资源</p><button class="text-button" id="source-button">查看数据来源 ↗</button></div></aside>
@@ -908,32 +1424,30 @@ $('export-btn').onclick=function(){flush();var a=document.createElement('a'),url
 window.addEventListener('pagehide',flush);document.addEventListener('keydown',function(e){if(e.key==='/'&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)){e.preventDefault();$('tree-search').focus();}});
 window.BEC_APP={scene:scene,select:select,getDraft:function(){return JSON.parse(JSON.stringify(draft));},flush:flush,setLayer:setLayer,importDraft:function(v){draft=safeDraft(v);flush();renderInspector();}};
 })();
-</script><script>// DOM dropdowns render in the same offscreen texture; native popup windows do not.
-(function(){'use strict';
+</script><script>(function(){'use strict';
 var open=null;
 function close(){if(!open)return;open.menu.remove();open.button.setAttribute('aria-expanded','false');open=null;}
 function enhance(select){
- if(select.dataset.ochdSelect)return;select.dataset.ochdSelect='1';select.classList.add('ochd-native-select');select.tabIndex=-1;
- var button=document.createElement('button');button.type='button';button.className='ochd-select';button.setAttribute('role','combobox');button.setAttribute('aria-haspopup','listbox');button.setAttribute('aria-expanded','false');
- var label=select.closest('label')||document.querySelector('label[for="'+select.id+'"]');button.setAttribute('aria-label',label?label.textContent.trim():'选择配置');select.parentNode.insertBefore(button,select.nextSibling);
- function refresh(){var option=select.options[select.selectedIndex],text=option?option.textContent:'请选择';if(button.textContent!==text)button.textContent=text;button.disabled=select.disabled;}
- select._ochdRefresh=refresh;select.addEventListener('change',refresh);refresh();
- function show(){close();var menu=document.createElement('div');menu.className='ochd-select-menu';menu.setAttribute('role','listbox');var chosen=Math.max(0,select.selectedIndex);
-  function highlight(index){chosen=Math.max(0,Math.min(select.options.length-1,index));Array.from(menu.children).forEach(function(row,i){row.classList.toggle('highlight',i===chosen);});if(menu.children[chosen])menu.children[chosen].scrollIntoView({block:'nearest'});}
-  function choose(index){if(select.options[index].disabled)return;select.selectedIndex=index;refresh();close();button.focus();select.dispatchEvent(new Event('change',{bubbles:true}));}
-  Array.from(select.options).forEach(function(option,index){var row=document.createElement('button');row.type='button';row.className='ochd-select-option';row.textContent=option.textContent;row.setAttribute('role','option');row.setAttribute('aria-selected',String(index===select.selectedIndex));row.disabled=option.disabled;row.onclick=function(){choose(index);};menu.appendChild(row);});
-  document.body.appendChild(menu);var r=button.getBoundingClientRect(),height=Math.min(230,menu.scrollHeight);menu.style.left=Math.min(innerWidth-r.width-8,r.left)+'px';menu.style.width=r.width+'px';menu.style.top=(r.bottom+height>innerHeight-8?Math.max(8,r.top-height-4):r.bottom+4)+'px';
-  button.setAttribute('aria-expanded','true');open={menu:menu,button:button,select:select,highlight:highlight,choose:choose,index:function(){return chosen;}};highlight(chosen);
- }
- button.onclick=function(){if(open&&open.button===button)close();else show();};
- button.onkeydown=function(e){if(e.key==='Escape'){close();return;}if(e.key==='Tab'){close();return;}if(['ArrowDown','ArrowUp','Home','End','Enter',' '].indexOf(e.key)<0)return;e.preventDefault();var wasOpen=open&&open.button===button;if(!wasOpen)show();if(e.key==='ArrowDown')open.highlight(open.index()+1);else if(e.key==='ArrowUp')open.highlight(open.index()-1);else if(e.key==='Home')open.highlight(0);else if(e.key==='End')open.highlight(select.options.length-1);else if(wasOpen)open.choose(open.index());};
+if(select.dataset.ochdSelect)return;select.dataset.ochdSelect='1';select.classList.add('ochd-native-select');select.tabIndex=-1;
+var button=document.createElement('button');button.type='button';button.className='ochd-select';button.setAttribute('role','combobox');button.setAttribute('aria-haspopup','listbox');button.setAttribute('aria-expanded','false');
+var label=select.closest('label')||document.querySelector('label[for="'+select.id+'"]');button.setAttribute('aria-label',label?label.textContent.trim():'选择配置');select.parentNode.insertBefore(button,select.nextSibling);
+function refresh(){var option=select.options[select.selectedIndex],text=option?option.textContent:'请选择';if(button.textContent!==text)button.textContent=text;button.disabled=select.disabled;}
+select._ochdRefresh=refresh;select.addEventListener('change',refresh);refresh();
+function show(){close();var menu=document.createElement('div');menu.className='ochd-select-menu';menu.setAttribute('role','listbox');var chosen=Math.max(0,select.selectedIndex);
+function highlight(index){chosen=Math.max(0,Math.min(select.options.length-1,index));Array.from(menu.children).forEach(function(row,i){row.classList.toggle('highlight',i===chosen);});if(menu.children[chosen])menu.children[chosen].scrollIntoView({block:'nearest'});}
+function choose(index){if(select.options[index].disabled)return;select.selectedIndex=index;refresh();close();button.focus();select.dispatchEvent(new Event('change',{bubbles:true}));}
+Array.from(select.options).forEach(function(option,index){var row=document.createElement('button');row.type='button';row.className='ochd-select-option';row.textContent=option.textContent;row.setAttribute('role','option');row.setAttribute('aria-selected',String(index===select.selectedIndex));row.disabled=option.disabled;row.onclick=function(){choose(index);};menu.appendChild(row);});
+document.body.appendChild(menu);var r=button.getBoundingClientRect(),height=Math.min(230,menu.scrollHeight);menu.style.left=Math.min(innerWidth-r.width-8,r.left)+'px';menu.style.width=r.width+'px';menu.style.top=(r.bottom+height>innerHeight-8?Math.max(8,r.top-height-4):r.bottom+4)+'px';
+button.setAttribute('aria-expanded','true');open={menu:menu,button:button,select:select,highlight:highlight,choose:choose,index:function(){return chosen;}};highlight(chosen);
+}
+button.onclick=function(){if(open&&open.button===button)close();else show();};
+button.onkeydown=function(e){if(e.key==='Escape'){close();return;}if(e.key==='Tab'){close();return;}if(['ArrowDown','ArrowUp','Home','End','Enter',' '].indexOf(e.key)<0)return;e.preventDefault();var wasOpen=open&&open.button===button;if(!wasOpen)show();if(e.key==='ArrowDown')open.highlight(open.index()+1);else if(e.key==='ArrowUp')open.highlight(open.index()-1);else if(e.key==='Home')open.highlight(0);else if(e.key==='End')open.highlight(select.options.length-1);else if(wasOpen)open.choose(open.index());};
 }
 function refresh(){if(open&&!open.select.isConnected)close();document.querySelectorAll('select').forEach(function(select){enhance(select);select._ochdRefresh();});}
 document.addEventListener('pointerdown',function(e){if(open&&!open.menu.contains(e.target)&&e.target!==open.button)close();});
 document.addEventListener('scroll',function(e){if(open&&!open.menu.contains(e.target))close();},true);window.addEventListener('resize',close);
 new MutationObserver(refresh).observe(document.body,{childList:true,subtree:true});window.BEC_REFRESH_SELECTS=refresh;refresh();
-})();
-</script><script>(function(){'use strict';
+})();</script><script>(function(){'use strict';
 var $=function(id){return document.getElementById(id);},app=window.BEC_APP,last=null,online=false,receivedAt=0,receiving=false,queue={},inflight=false,waiting=null,failed=false,group=1,switching=null,currentSave=null,actionPending=null,actionMessage=null,picking=null,pickerPending=false,pickerSerial=0,patternPending=false;
 var order=['detect','nanites','gate','supply','convert','produce','finish'],titles={idle:'等待订单',detect:'读取配方',nanites:'蜂群检查',gate:'韦门确认',supply:'原液备料',convert:'凝聚物转换',produce:'配方运行',finish:'批次收尾',fault:'保护暂停'};
 function list(v){return Array.isArray(v)?v:[];}
@@ -943,17 +1457,17 @@ function status(s,bad){$('save-status').textContent=s;$('save-status').classList
 function saving(){return inflight||!!waiting||!!Object.keys(queue).length;}
 function showAction(message,bad){actionMessage={text:message,bad:!!bad};refreshActions();}
 function refreshActions(){
- var patternBusy=last&&last.patterns&&last.patterns.status==='running';var running=last&&last.mode==='running',reason=!online?'OC 未连接，暂不能启动。':running?'自动化运行中。':patternBusy?'样板处理中，请在样板处理窗口等待完成或停止。':saving()?'正在保存草稿，请稍候。':!last.configured?'草稿已保存还不等于绑定已应用。请先点击「应用绑定」，校验通过后再启动。':'绑定已应用，可以启动；修改地址后需重新应用绑定。';
- var hint=$('action-feedback');hint.textContent=actionPending?({'apply_bindings':'正在校验并应用绑定…',start:'正在启动自动化…',pause:'正在暂停自动化…'}[actionPending]):actionMessage?actionMessage.text:reason;
- hint.classList.toggle('action-error',!!(actionMessage&&actionMessage.bad&&!actionPending));hint.setAttribute('role',actionMessage&&actionMessage.bad?'alert':'status');
- $('start-run').textContent=running?'运行中':'启动自动化';$('start-run').disabled=!online||running||!!actionPending||patternBusy||saving();$('start-run').title=reason;
- $('apply-config').disabled=!online||running||!!actionPending||patternBusy||saving();$('stop-run').disabled=!online||!running||!!actionPending;
+var patternBusy=last&&last.patterns&&last.patterns.status==='running';var running=last&&last.mode==='running',reason=!online?'OC 未连接，暂不能启动。':running?'自动化运行中。':patternBusy?'样板处理中，请在样板处理窗口等待完成或停止。':saving()?'正在保存草稿，请稍候。':!last.configured?'草稿已保存还不等于绑定已应用。请先点击「应用绑定」，校验通过后再启动。':'绑定已应用，可以启动；修改地址后需重新应用绑定。';
+var hint=$('action-feedback');hint.textContent=actionPending?({'apply_bindings':'正在校验并应用绑定…',start:'正在启动自动化…',pause:'正在暂停自动化…'}[actionPending]):actionMessage?actionMessage.text:reason;
+hint.classList.toggle('action-error',!!(actionMessage&&actionMessage.bad&&!actionPending));hint.setAttribute('role',actionMessage&&actionMessage.bad?'alert':'status');
+$('start-run').textContent=running?'运行中':'启动自动化';$('start-run').disabled=!online||running||!!actionPending||patternBusy||saving();$('start-run').title=reason;
+$('apply-config').disabled=!online||running||!!actionPending||patternBusy||saving();$('stop-run').disabled=!online||!running||!!actionPending;
 }
 function send(name,args){if(!online)return Promise.reject(Error('OC 未连接，未执行操作'));return OC.emit(name,args||{});}
 function key(id,k){var m={'field':'g'+group+'.storage','generator':'g'+group+'.generator1','gate':'g'+group+'.gate','main-me':'mainInterface','workshop-me':'workshopInterface','sub-me':'g'+group+'.subInterface','fluid-transposer':'g'+group+'.transposer','nanite-transposer':'g'+group+'.bee_transposer','load-redstone':'g'+group+'.bee_loadRedstone','return-redstone':'g'+group+'.bee_returnRedstone'};
- if(id.indexOf('node-')===0)return 'n'+id.slice(5)+'.'+(k==='address'?'address':k==='redstone'?'redstone':k);
- if(k==='address')return m[id]||(id.indexOf('generator-')===0?'g'+group+'.generator'+id.slice(10):id.indexOf('bulk-transposer-')===0?'g'+group+'.bulk'+id.slice(16):null);
- return 'g'+group+'.'+(['bankSide','loadSide','returnSide','loadOutputSide','returnOutputSide'].indexOf(k)>=0?'bee_':'')+k;
+if(id.indexOf('node-')===0)return 'n'+id.slice(5)+'.'+(k==='address'?'address':k==='redstone'?'redstone':k);
+if(k==='address')return m[id]||(id.indexOf('generator-')===0?'g'+group+'.generator'+id.slice(10):id.indexOf('bulk-transposer-')===0?'g'+group+'.bulk'+id.slice(16):null);
+return 'g'+group+'.'+(['bankSide','loadSide','returnSide','loadOutputSide','returnOutputSide'].indexOf(k)>=0?'bee_':'')+k;
 }
 function fieldKeys(m){return ['address'].concat(m.kind==='node'?['redstone','group','pauseSide','gate']:(m.sides||[]).map(function(f){return f[0];}));}
 function toValues(draft){var out={};app.scene.modules.forEach(function(m){var v=draft.modules[m.id];if(!v||!m.role)return;fieldKeys(m).forEach(function(k){if(v[k]!=null){var name=key(m.id,k);if(name)out[name]=String(v[k]);}});});return out;}
@@ -962,119 +1476,139 @@ function dirty(draft){if(receiving||switching||!last||last.mode==='running'||las
 window.BEC_BINDING_DIRTY=dirty;
 function pump(){if(inflight||waiting||failed||switching||!online||!last)return;var keys=Object.keys(queue);if(!keys.length){status('草稿已保存到 OC');return;}var k=keys[0],v=queue[k],revision=last.revision;delete queue[k];inflight=true;currentSave={key:k,value:v};status('正在保存到 OC…');send('save_field',{key:k,value:v,revision:revision}).then(function(){inflight=false;currentSave=null;waiting={revision:revision,key:k,value:v};if(last&&(last.revision!==revision||last.values[k]===v)){waiting=null;pump();}}).catch(function(e){inflight=false;currentSave=null;if(!Object.prototype.hasOwnProperty.call(queue,k))queue[k]=v;failed=true;status('保存未确认 · 点击重试',true);$('runtime-notice').textContent=e.message;});}
 function syncModels(d){var scene=app.scene,base=scene.modules.find(function(m){return m.id==='generator';});if(!base)return;var count=Math.min(16,Math.max(4,d.generatorSlots||4));scene.modules=scene.modules.filter(function(m){return m.id.indexOf('generator-')!==0||Number(m.id.slice(10))<=count;});if(!scene.modules.some(function(m){return m.id===scene.selected;}))scene.selected='assembler';
- for(var j=2;j<=count;j++)if(!scene.modules.some(function(m){return m.id==='generator-'+j;})){var m=Object.assign({},base),dx=Math.floor((j-1)/4)*40,dz=((j-1)%4)*26;m.id='generator-'+j;m.title='纠缠器 '+String(j).padStart(2,'0');m.role='groups['+group+'].generators['+j+']';m.p=[base.p[0]+dx,base.p[1],base.p[2]+dz];m.center=[base.center[0]+dx,base.center[1],base.center[2]+dz];m.marker=[base.marker[0]+dx,base.marker[1],base.marker[2]+dz];scene.modules.push(m);}
- scene.modules.forEach(function(m){if(m.role)m.role=m.role.replace(/^groups\[\d+\]/,'groups['+group+']');if(m.kind==='generator')m.role='groups['+group+'].generators['+(m.id==='generator'?1:m.id.slice(10))+']';});scene.runtimeGroup=group;scene.runtimeValues=d.values||{};scene.request();}
+for(var j=2;j<=count;j++)if(!scene.modules.some(function(m){return m.id==='generator-'+j;})){var m=Object.assign({},base),dx=Math.floor((j-1)/4)*40,dz=((j-1)%4)*26;m.id='generator-'+j;m.title='纠缠器 '+String(j).padStart(2,'0');m.role='groups['+group+'].generators['+j+']';m.p=[base.p[0]+dx,base.p[1],base.p[2]+dz];m.center=[base.center[0]+dx,base.center[1],base.center[2]+dz];m.marker=[base.marker[0]+dx,base.marker[1],base.marker[2]+dz];scene.modules.push(m);}
+scene.modules.forEach(function(m){if(m.role)m.role=m.role.replace(/^groups\[\d+\]/,'groups['+group+']');if(m.kind==='generator')m.role='groups['+group+'].generators['+(m.id==='generator'?1:m.id.slice(10))+']';});scene.runtimeGroup=group;scene.runtimeValues=d.values||{};scene.request();}
 function markMachines(){if(!last)return;app.scene.liveStates=last.machines||{};document.querySelectorAll('[data-label],[data-module]').forEach(function(el){el.dataset.live=(last.machines||{})[el.dataset.label||el.dataset.module]||'unknown';});}
 var render=app.scene.onRender;app.scene.onRender=function(s){render(s);markMachines();pickerButtons();};
 function flow(){if(!last)return;var age=online?Math.min(3,(Date.now()-receivedAt)/1000):0,active=last.mode==='running'&&last.phase!=='idle'&&last.phase!=='finish'&&!last.fault;var elapsed=(last.elapsed||0)+(active?age:0);$('flow-elapsed').textContent=time(elapsed);$('flow-current').textContent=titles[last.phase]||last.phase;$('flow-stage-time').textContent='当前步骤 '+time((last.phaseElapsed||0)+(active?age:0));
- $('flow-steps').innerHTML=order.map(function(p,i){var duration=Number((last.flow||{})[p]||0)+(active&&p===last.phase?age:0),current=last.phase===p,done=duration>0&&!current;return '<div class="flow-step '+(current?'current ':done?'done ':'')+(current&&last.fault?'fault':'')+'"><div class="index">'+(done?'✓ ':String(i+1).padStart(2,'0'))+'</div><strong>'+titles[p]+'</strong><time>'+((duration>0||current)?time(duration):'待执行')+'</time></div>';}).join('');
- $('node-status-list').innerHTML=(Array.isArray(last.nodes)?last.nodes:[]).map(function(n){return '<span class="node-chip '+(n.state==='crafting'?'active':'')+'">N'+String(n.slot).padStart(2,'0')+' · '+esc(n.state)+' · '+(n.workAllowed?'允许接单':'关闭接单')+'</span>';}).join('')||'<span class="node-chip">尚未绑定节点</span>';
- var machines=Object.keys(last.machines||{}).filter(function(id){return id==='field'||id==='gate'||id.indexOf('generator')===0;}).map(function(id){var active=last.machines[id]==='active';return '<span class="node-chip '+(active?'active':'')+'">'+(id==='field'?'约束场':id==='gate'?'韦门':id==='generator'?'纠缠器 1':'纠缠器 '+id.split('-')[1])+' · '+(active?'运行中':last.machines[id]==='unknown'?'不可读':'未运行')+'</span>';}).join('');$('node-status-list').innerHTML=machines+$('node-status-list').innerHTML;
- var events=(Array.isArray(last.timeline)?last.timeline:[]).map(function(e){return '+'+time(e.offset)+'  '+(titles[e.phase]||e.phase);});$('runtime-log').textContent=events.concat(Array.isArray(last.logs)?last.logs:[]).join('\n');
+$('flow-steps').innerHTML=order.map(function(p,i){var duration=Number((last.flow||{})[p]||0)+(active&&p===last.phase?age:0),current=last.phase===p,done=duration>0&&!current;return '<div class="flow-step '+(current?'current ':done?'done ':'')+(current&&last.fault?'fault':'')+'"><div class="index">'+(done?'✓ ':String(i+1).padStart(2,'0'))+'</div><strong>'+titles[p]+'</strong><time>'+((duration>0||current)?time(duration):'待执行')+'</time></div>';}).join('');
+$('node-status-list').innerHTML=(Array.isArray(last.nodes)?last.nodes:[]).map(function(n){return '<span class="node-chip '+(n.state==='crafting'?'active':'')+'">N'+String(n.slot).padStart(2,'0')+' · '+esc(n.state)+' · '+(n.workAllowed?'允许接单':'关闭接单')+'</span>';}).join('')||'<span class="node-chip">尚未绑定节点</span>';
+var machines=Object.keys(last.machines||{}).filter(function(id){return id==='field'||id==='gate'||id.indexOf('generator')===0;}).map(function(id){var active=last.machines[id]==='active';return '<span class="node-chip '+(active?'active':'')+'">'+(id==='field'?'约束场':id==='gate'?'韦门':id==='generator'?'纠缠器 1':'纠缠器 '+id.split('-')[1])+' · '+(active?'运行中':last.machines[id]==='unknown'?'不可读':'未运行')+'</span>';}).join('');$('node-status-list').innerHTML=machines+$('node-status-list').innerHTML;
+var events=(Array.isArray(last.timeline)?last.timeline:[]).map(function(e){return '+'+time(e.offset)+'  '+(titles[e.phase]||e.phase);});$('runtime-log').textContent=events.concat(Array.isArray(last.logs)?last.logs:[]).join('\n');
 }
 function data(d){var changed=group!==(d.group||1);last=d;online=d._online!==false;receivedAt=Date.now();group=d.group||1;if(switching===group)switching=null;if(waiting&&(waiting.revision!==d.revision||(d.values||{})[waiting.key]===waiting.value))waiting=null;
- syncModels(d);if(!switching&&!inflight&&!waiting&&!Object.keys(queue).length&&(changed||!/INPUT|TEXTAREA/.test(document.activeElement.tagName)))importValues(d.values||{});
- $('runtime-notice').textContent=(online?'': 'OC 离线，显示最后快照。')+(d.notice||'')+(d.disk&&d.disk.known?' · 磁盘剩余 '+(d.disk.free/1024).toFixed(0)+' KiB / 保留 '+(d.disk.reserve/1024).toFixed(0)+' KiB':' · 磁盘容量不可读');$('runtime-notice').classList.toggle('offline-alert',!online);
- document.body.classList.toggle('runtime-running',d.mode==='running');$('flow-panel').hidden=false;refreshActions();$('global-settings').disabled=d.mode==='running'||!!(d.patterns&&d.patterns.status==='running');document.body.classList.toggle('pattern-busy',!!(d.patterns&&d.patterns.status==='running'));renderPatterns();
- if(!online)status('OC 离线 · 未保存操作',true);else if(failed)status('保存未确认 · 点击重试',true);else if(!inflight&&!waiting&&!Object.keys(queue).length)status('OC 已连接 · 草稿已保存');
- if($('group-select').options.length!==d.groupCount){$('group-select').innerHTML=Array.from({length:d.groupCount||1},function(_,i){return '<option value="'+(i+1)+'">设备组 '+String(i+1).padStart(2,'0')+'</option>';}).join('');}$('group-select').value=group;if(window.BEC_REFRESH_SELECTS)window.BEC_REFRESH_SELECTS();
- markMachines();flow();pump();renderPicker(d.scan);
+syncModels(d);if(!switching&&!inflight&&!waiting&&!Object.keys(queue).length&&(changed||!/INPUT|TEXTAREA/.test(document.activeElement.tagName)))importValues(d.values||{});
+$('runtime-notice').textContent=(online?'': 'OC 离线，显示最后快照。')+(d.notice||'')+(d.disk&&d.disk.known?' · 磁盘剩余 '+(d.disk.free/1024).toFixed(0)+' KiB / 保留 '+(d.disk.reserve/1024).toFixed(0)+' KiB':' · 磁盘容量不可读');$('runtime-notice').classList.toggle('offline-alert',!online);
+document.body.classList.toggle('runtime-running',d.mode==='running');$('flow-panel').hidden=false;refreshActions();$('global-settings').disabled=d.mode==='running'||!!(d.patterns&&d.patterns.status==='running');document.body.classList.toggle('pattern-busy',!!(d.patterns&&d.patterns.status==='running'));renderPatterns();renderCache();
+if(!online)status('OC 离线 · 未保存操作',true);else if(failed)status('保存未确认 · 点击重试',true);else if(!inflight&&!waiting&&!Object.keys(queue).length)status('OC 已连接 · 草稿已保存');
+if($('group-select').options.length!==d.groupCount){$('group-select').innerHTML=Array.from({length:d.groupCount||1},function(_,i){return '<option value="'+(i+1)+'">设备组 '+String(i+1).padStart(2,'0')+'</option>';}).join('');}$('group-select').value=group;if(window.BEC_REFRESH_SELECTS)window.BEC_REFRESH_SELECTS();
+markMachines();flow();pump();renderPicker(d.scan);
 }
 function pickerRole(id,field){if(field==='redstone'||id==='load-redstone'||id==='return-redstone')return 'redstone';if(field==='gate'||id==='gate')return 'gate';if(id.indexOf('node-')===0)return 'node';if(id==='field')return 'storage';if(id.indexOf('generator')===0)return 'generator';if(id==='main-me')return 'mainme';if(id==='sub-me')return 'subme';if(id==='workshop-me')return 'workshop';if(id==='nanite-transposer')return 'items';return 'fluid';}
 function pickerButtons(){
- ['address','redstone','gate'].forEach(function(field){var input=$('field-'+field);if(!input||!input.parentNode)return;var existing=input.parentNode.querySelector('.pick-component');if(existing){existing.disabled=!online||last&&last.mode==='running';return;}var b=document.createElement('button');b.type='button';b.className='pick-component';b.textContent='从 OC 识别 / 选择';b.disabled=!online||last&&last.mode==='running';b.onclick=function(){openPicker(app.scene.selected,field);};input.parentNode.appendChild(b);});
+['address','redstone','gate'].forEach(function(field){var input=$('field-'+field);if(!input||!input.parentNode)return;var existing=input.parentNode.querySelector('.pick-component');if(existing){existing.disabled=!online||last&&last.mode==='running';return;}var b=document.createElement('button');b.type='button';b.className='pick-component';b.textContent='从 OC 识别 / 选择';b.disabled=!online||last&&last.mode==='running';b.onclick=function(){openPicker(app.scene.selected,field);};input.parentNode.appendChild(b);});
 }
 function openPicker(id,field){
- if(pickerPending){showAction('请等待上一次扫描请求返回，再打开选择框。',true);return;}
- if(!online||last.mode==='running'){showAction('先连接 OC 并暂停自动化，再识别绑定。',true);return;}
- if(saving()){showAction('请先等待草稿保存完成。',true);return;}
- picking={id:id,field:field,key:key(id,field),role:pickerRole(id,field)};
- $('component-picker').showModal();var model=app.scene.modules.find(function(m){return m.id===id;});$('picker-title').textContent='识别 / '+(model?model.title:id)+' · '+({address:'设备地址',redstone:'暂停红石',gate:'独立韦门'}[field]||field);scanPicker();
+if(pickerPending){showAction('请等待上一次扫描请求返回，再打开选择框。',true);return;}
+if(!online||last.mode==='running'){showAction('先连接 OC 并暂停自动化，再识别绑定。',true);return;}
+if(saving()){showAction('请先等待草稿保存完成。',true);return;}
+picking={id:id,field:field,key:key(id,field),role:pickerRole(id,field)};
+$('component-picker').showModal();var model=app.scene.modules.find(function(m){return m.id===id;});$('picker-title').textContent='识别 / '+(model?model.title:id)+' · '+({address:'设备地址',redstone:'暂停红石',gate:'独立韦门'}[field]||field);scanPicker();
 }
 function scanPicker(page){
- if(!picking||pickerPending)return;pickerPending=true;$('picker-status').textContent='读取 OC 组件中…';$('picker-results').innerHTML='';
- picking.token=++pickerSerial;var args={role:picking.role,token:picking.token};if(page!=null)args.page=page;
- send('scan_components',args).then(function(){pickerPending=false;}).catch(function(e){pickerPending=false;$('picker-status').textContent='扫描失败：'+e.message;});
+if(!picking||pickerPending)return;pickerPending=true;$('picker-status').textContent='读取 OC 组件中…';$('picker-results').innerHTML='';
+picking.token=++pickerSerial;var args={role:picking.role,token:picking.token};if(page!=null)args.page=page;
+send('scan_components',args).then(function(){pickerPending=false;}).catch(function(e){pickerPending=false;$('picker-status').textContent='扫描失败：'+e.message;});
 }
 function closePicker(){picking=null;$('component-picker').close();}
 function bindingName(k){var n=k.match(/^n(\d+)\.(.+)$/),g=k.match(/^g(\d+)\.(.+)$/),labels={address:'节点组件',redstone:'暂停红石',gate:'韦门',storage:'约束场',subInterface:'原液子网ME接口',transposer:'供液转运器',bee_transposer:'蜂群转运器',bee_loadRedstone:'装入端口红石',bee_returnRedstone:'回收端口红石',mainInterface:'主网ME接口',workshopInterface:'样板工坊ME接口'};if(n)return '节点'+n[1]+' '+(labels[n[2]]||n[2]);if(g)return '组'+g[1]+' '+(labels[g[2]]||g[2].replace('generator','纠缠器').replace('bulk','高速供液口'));return labels[k]||k;}
 function renderPicker(scan){
- pickerButtons();if(!picking||!scan||scan.role!==picking.role||scan.token!==picking.token||pickerPending)return;
- $('picker-status').textContent=scan.status==='scanning'?'扫描中，已检查 '+scan.checked+' 个组件…':scan.status==='failed'?scan.message:'找到 '+scan.total+' 项 · 第 '+(scan.page+1)+' 页'+(scan.baseline?' · 比上次减少 '+scan.removed+' 项':' · 首次扫描作为比较基准')+(scan.message?' · '+scan.message:'');
- $('picker-results').innerHTML=list(scan.rows).map(function(r){return '<button class="component-choice" type="button" data-address="'+esc(r.address)+'"><strong>'+(r.fresh?'新增 / 重新接入 · ':'')+esc(r.kind)+'</strong><code>'+esc(r.address)+'</code><small>'+esc(r.name||'')+(r.used?' · 已填写于 '+esc(r.used.split(', ').map(bindingName).join('、')):' · 尚未填写')+'</small></button>';}).join('')||(scan.status==='done'?'<p>没有匹配设备。当前 OC 组件网络看不到这种设备，检查适配器连接及 P2P。</p>':'');
- $('picker-results').querySelectorAll('button').forEach(function(b){b.onclick=function(){
-  if(!picking||!online||last.mode==='running'||saving()){showAction('状态已改变，请等待保存完成并保持暂停后重新选择。',true);return;}
-  var selected=picking;app.select(selected.id);var input=$('field-'+selected.field);if(!input){$('picker-status').textContent='当前字段不可用，请关闭后重试';return;}
-  input.value=b.dataset.address;input.dispatchEvent(new Event('input',{bubbles:true}));closePicker();showAction('已选择 OC 实际地址，正在保存草稿；方向和节点配对仍需按实物确认。',false);
- };});
- $('picker-prev').disabled=scan.status!=='done'||scan.page===0;$('picker-next').disabled=scan.status!=='done'||(scan.page+1)*6>=scan.total;
- $('picker-prev').onclick=function(){scanPicker(scan.page-1);};$('picker-next').onclick=function(){scanPicker(scan.page+1);};
+pickerButtons();if(!picking||!scan||scan.role!==picking.role||scan.token!==picking.token||pickerPending)return;
+$('picker-status').textContent=scan.status==='scanning'?'扫描中，已检查 '+scan.checked+' 个组件…':scan.status==='failed'?scan.message:'找到 '+scan.total+' 项 · 第 '+(scan.page+1)+' 页'+(scan.baseline?' · 比上次减少 '+scan.removed+' 项':' · 首次扫描作为比较基准')+(scan.message?' · '+scan.message:'');
+$('picker-results').innerHTML=list(scan.rows).map(function(r){return '<button class="component-choice" type="button" data-address="'+esc(r.address)+'"><strong>'+(r.fresh?'新增 / 重新接入 · ':'')+esc(r.kind)+'</strong><code>'+esc(r.address)+'</code><small>'+esc(r.name||'')+(r.used?' · 已填写于 '+esc(r.used.split(', ').map(bindingName).join('、')):' · 尚未填写')+'</small></button>';}).join('')||(scan.status==='done'?'<p>没有匹配设备。当前 OC 组件网络看不到这种设备，检查适配器连接及 P2P。</p>':'');
+$('picker-results').querySelectorAll('button').forEach(function(b){b.onclick=function(){
+if(!picking||!online||last.mode==='running'||saving()){showAction('状态已改变，请等待保存完成并保持暂停后重新选择。',true);return;}
+var selected=picking;app.select(selected.id);var input=$('field-'+selected.field);if(!input){$('picker-status').textContent='当前字段不可用，请关闭后重试';return;}
+input.value=b.dataset.address;input.dispatchEvent(new Event('input',{bubbles:true}));closePicker();showAction('已选择 OC 实际地址，正在保存草稿；方向和节点配对仍需按实物确认。',false);
+};});
+$('picker-prev').disabled=scan.status!=='done'||scan.page===0;$('picker-next').disabled=scan.status!=='done'||(scan.page+1)*6>=scan.total;
+$('picker-prev').onclick=function(){scanPicker(scan.page-1);};$('picker-next').onclick=function(){scanPicker(scan.page+1);};
 }
 function bindingIssues(){
- var v=last&&last.values||{},p='g'+group+'.',issues=[],uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
- function value(k){return String(v[k]||'').trim();}
- function add(label,id,field){issues.push({label:label,id:id,field:field||'address'});}
- function address(k,label,id,required,field){var x=value(k);if(!x&&required)add(label+'：未填写',id,field);else if(x&&!uuid.test(x))add(label+'：地址需为完整 UUID',id,field);}
- address('mainInterface','主网供液 ME 接口','main-me',true);
- address(p+'storage','约束场','field',true);address(p+'subInterface','原液子网 ME 接口','sub-me',true);address(p+'transposer','供液转运器','fluid-transposer',true);
- var generators=0;for(var j=1;j<=Math.max(4,last.generatorSlots||4);j++){var k=p+'generator'+j;if(value(k))generators++;address(k,'纠缠器 '+j,j===1?'generator':'generator-'+j,false);}if(!generators)add('至少填写一台纠缠器','generator');
- address(p+'gate','公共韦门','gate',false);address('workshopInterface','样板工坊 ME 接口','workshop-me',false);
- for(var j=1;j<=10;j++)address(p+'bulk'+j,'高速供液口 '+j,'bulk-transposer-'+j,false);
- var bees=[['transposer','蜂群转运器','nanite-transposer'],['loadRedstone','装入端口红石','load-redstone'],['returnRedstone','回收端口红石','return-redstone']],beeOn=bees.some(function(b){return !!value(p+'bee_'+b[0]);});
- bees.forEach(function(b){address(p+'bee_'+b[0],b[1],b[2],beeOn);});
- if(v[p+'mainSide']===v[p+'subSide'])add('供液主网侧与子网侧不能相同','fluid-transposer');
- if(beeOn){var sides=['bankSide','loadSide','returnSide'].map(function(k){return v[p+'bee_'+k];});if(sides.some(function(x,i){return sides.indexOf(x)!==i;}))add('蜂群箱子、装入端口、回收端口必须是三个不同方向','nanite-transposer');}
- var total=0,localCount=0;for(var i=1;i<=16;i++){var n='n'+i+'.';if(!value(n+'address')&&!value(n+'redstone'))continue;total++;if(Number(v[n+'group'])!==group)continue;localCount++;
- address(n+'address','节点 '+i+' 组件','node-'+i,true);address(n+'redstone','节点 '+i+' 暂停红石','node-'+i,true,'redstone');address(n+'gate','节点 '+i+' 独立韦门','node-'+i,false,'gate');
- if(!value(n+'gate')&&!value(p+'gate'))add('节点 '+i+' 需要韦门：填写独立韦门或本组公共韦门','node-'+i,'gate');}
- if(!total)add('至少填写一组传送节点和暂停红石，空位会自动跳过','node-1');else if(!localCount)add('当前设备组还没有分配传送节点','node-1','group');
- if(!value('recipeDirectory'))add('配方目录：未填写','settings');return issues;
+var v=last&&last.values||{},p='g'+group+'.',issues=[],uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function value(k){return String(v[k]||'').trim();}
+function add(label,id,field){issues.push({label:label,id:id,field:field||'address'});}
+function address(k,label,id,required,field){var x=value(k);if(!x&&required)add(label+'：未填写',id,field);else if(x&&!uuid.test(x))add(label+'：地址需为完整 UUID',id,field);}
+address('mainInterface','主网供液 ME 接口','main-me',true);
+address(p+'storage','约束场','field',true);address(p+'subInterface','原液子网 ME 接口','sub-me',true);address(p+'transposer','供液转运器','fluid-transposer',true);
+var generators=0;for(var j=1;j<=Math.max(4,last.generatorSlots||4);j++){var k=p+'generator'+j;if(value(k))generators++;address(k,'纠缠器 '+j,j===1?'generator':'generator-'+j,false);}if(!generators)add('至少填写一台纠缠器','generator');
+address(p+'gate','公共韦门','gate',false);address('workshopInterface','样板工坊 ME 接口','workshop-me',false);
+for(var j=1;j<=10;j++)address(p+'bulk'+j,'高速供液口 '+j,'bulk-transposer-'+j,false);
+var bees=[['transposer','蜂群转运器','nanite-transposer'],['loadRedstone','装入端口红石','load-redstone'],['returnRedstone','回收端口红石','return-redstone']],beeOn=bees.some(function(b){return !!value(p+'bee_'+b[0]);});
+bees.forEach(function(b){address(p+'bee_'+b[0],b[1],b[2],beeOn);});
+if(v[p+'mainSide']===v[p+'subSide'])add('供液主网侧与子网侧不能相同','fluid-transposer');
+if(beeOn){var sides=['bankSide','loadSide','returnSide'].map(function(k){return v[p+'bee_'+k];});if(sides.some(function(x,i){return sides.indexOf(x)!==i;}))add('蜂群箱子、装入端口、回收端口必须是三个不同方向','nanite-transposer');}
+var total=0,localCount=0;for(var i=1;i<=16;i++){var n='n'+i+'.';if(!value(n+'address')&&!value(n+'redstone'))continue;total++;if(Number(v[n+'group'])!==group)continue;localCount++;
+address(n+'address','节点 '+i+' 组件','node-'+i,true);address(n+'redstone','节点 '+i+' 暂停红石','node-'+i,true,'redstone');address(n+'gate','节点 '+i+' 独立韦门','node-'+i,false,'gate');
+if(!value(n+'gate')&&!value(p+'gate'))add('节点 '+i+' 需要韦门：填写独立韦门或本组公共韦门','node-'+i,'gate');}
+if(!total)add('至少填写一组传送节点和暂停红石，空位会自动跳过','node-1');else if(!localCount)add('当前设备组还没有分配传送节点','node-1','group');
+if(!value('recipeDirectory'))add('配方目录：未填写','settings');return issues;
 }
 function showIssues(issues){
- $('binding-issues-list').innerHTML=issues.map(function(x){return '<button type="button" data-issue-module="'+esc(x.id)+'" data-issue-field="'+esc(x.field)+'">'+esc(x.label)+' → 去填写</button>';}).join('');
- $('binding-issues-list').querySelectorAll('button').forEach(function(b){b.onclick=function(){$('binding-issues').close();if(b.dataset.issueModule==='settings'){settings();return;}document.body.classList.toggle('flow-full',false);app.select(b.dataset.issueModule);var field=$('field-'+b.dataset.issueField);if(field)field.focus();};});
- $('binding-issues').showModal();showAction('当前设备组有 '+issues.length+' 项绑定需要补充或修正，点击清单可跳转。',true);
+$('binding-issues-list').innerHTML=issues.map(function(x){return '<button type="button" data-issue-module="'+esc(x.id)+'" data-issue-field="'+esc(x.field)+'">'+esc(x.label)+' → 去填写</button>';}).join('');
+$('binding-issues-list').querySelectorAll('button').forEach(function(b){b.onclick=function(){$('binding-issues').close();if(b.dataset.issueModule==='settings'){settings();return;}document.body.classList.toggle('flow-full',false);app.select(b.dataset.issueModule);var field=$('field-'+b.dataset.issueField);if(field)field.focus();};});
+$('binding-issues').showModal();showAction('当前设备组有 '+issues.length+' 项绑定需要补充或修正，点击清单可跳转。',true);
 }
 function action(name){
- if(actionPending)return;
- if(saving()){showAction('请先等待草稿保存完成。',true);return;}
- if(name==='start'&&last&&!last.configured){showAction('尚未应用绑定：请先点击「应用绑定」。如果校验失败，这里会显示具体原因。',true);return;}
- if(name==='apply_bindings'){var issues=bindingIssues();if(issues.length){showIssues(issues);return;}}
- actionMessage=null;actionPending=name;refreshActions();
- send(name,{revision:last&&last.revision}).then(function(r){actionPending=null;showAction(r.message||'请求已确认，等待 OC 状态更新。',false);}).catch(function(e){actionPending=null;showAction((name==='apply_bindings'?'应用绑定失败：':name==='start'?'启动失败：':'暂停失败：')+e.message,true);});
+if(actionPending)return;
+if(saving()){showAction('请先等待草稿保存完成。',true);return;}
+if(name==='start'&&last&&!last.configured){showAction('尚未应用绑定：请先点击「应用绑定」。如果校验失败，这里会显示具体原因。',true);return;}
+if(name==='apply_bindings'){var issues=bindingIssues();if(issues.length){showIssues(issues);return;}}
+actionMessage=null;actionPending=name;refreshActions();
+send(name,{revision:last&&last.revision}).then(function(r){actionPending=null;showAction(r.message||'请求已确认，等待 OC 状态更新。',false);}).catch(function(e){actionPending=null;showAction((name==='apply_bindings'?'应用绑定失败：':name==='start'?'启动失败：':'暂停失败：')+e.message,true);});
 }
 function renderPatterns(){
- var p=last&&last.patterns,busy=p&&p.status==='running';$('patterns-status').textContent=p?({running:'进行中',done:'已完成',failed:'处理失败',stopped:'已停止'}[p.status]||p.status)+' · 槽位 '+p.slot+' / 9 · '+p.message:!last||!last.configured?'请先绑定并应用独立的样板工坊 ME 接口。':'先预览工坊接口内的样板，再处理原样板的副本。';
- $('patterns-log').textContent=p?(list(p.rows).join('\n')+'\n'+list(p.logs).join('\n')):'';['patterns-preview','patterns-run'].forEach(function(id){$(id).disabled=!online||!last||last.mode==='running'||!last.configured||busy||patternPending||saving();});$('patterns-stop').disabled=!online||!busy||patternPending;
- $('patterns-open').textContent=busy?'样板处理中':'样板处理';
- $('patterns-target').textContent=last?'工坊接口：'+(last.values.workshopInterface||'未绑定')+' · 配方目录：'+(last.values.recipeDirectory||'未设置'):'';
+var p=last&&last.patterns,busy=p&&p.status==='running';$('patterns-status').textContent=p?({running:'进行中',done:'已完成',failed:'处理失败',stopped:'已停止'}[p.status]||p.status)+' · 槽位 '+p.slot+' / 9 · '+p.message:!last||!last.configured?'请先绑定并应用独立的样板工坊 ME 接口。':'先预览工坊接口内的样板，再处理原样板的副本。';
+$('patterns-log').textContent=p?(list(p.rows).join('\n')+'\n'+list(p.logs).join('\n')):'';['patterns-preview','patterns-run'].forEach(function(id){$(id).disabled=!online||!last||last.mode==='running'||!last.configured||busy||patternPending||saving();});$('patterns-stop').disabled=!online||!busy||patternPending;
+$('patterns-open').textContent=busy?'样板处理中':'样板处理';
+$('patterns-target').textContent=last?'工坊接口：'+(last.values.workshopInterface||'未绑定')+' · 配方目录：'+(last.values.recipeDirectory||'未设置'):'';
 }
 function patternAction(mode){
- if(patternPending)return;if(mode!=='stop'&&saving()){$('patterns-status').textContent='请先等待草稿保存完成。';return;}
- patternPending=true;renderPatterns();$('patterns-status').textContent=mode==='stop'?'正在请求停止…':'正在提交样板操作…';
- send('patterns',{mode:mode,revision:last&&last.revision}).then(function(r){patternPending=false;renderPatterns();$('patterns-status').textContent=r.message||'请求已确认，等待处理状态。';}).catch(function(e){patternPending=false;renderPatterns();$('patterns-status').textContent='未执行：'+e.message;showAction('样板操作失败：'+e.message,true);});
+if(patternPending)return;if(mode!=='stop'&&saving()){$('patterns-status').textContent='请先等待草稿保存完成。';return;}
+patternPending=true;renderPatterns();$('patterns-status').textContent=mode==='stop'?'正在请求停止…':'正在提交样板操作…';
+send('patterns',{mode:mode,revision:last&&last.revision}).then(function(r){patternPending=false;renderPatterns();$('patterns-status').textContent=r.message||'请求已确认，等待处理状态。';}).catch(function(e){patternPending=false;renderPatterns();$('patterns-status').textContent='未执行：'+e.message;showAction('样板操作失败：'+e.message,true);});
 }
-function settings(){if(!last)return;var specs=[['recipeDirectory','配方目录'],['cacheTarget','库存参考目标']];for(var i=1;i<=Math.max(4,last.generatorSlots||4);i++)specs.push(['g'+group+'.generator'+i,'纠缠器 '+i+'（多余可空）']);$('extra-fields').innerHTML=specs.map(function(f){return '<label>'+f[1]+'<input data-config="'+f[0]+'" value="'+esc(last.values[f[0]]||'')+'" maxlength="160" spellcheck="false"></label>';}).join('');$('extra-fields').querySelectorAll('input').forEach(function(input){input.onchange=function(){queue[input.dataset.config]=input.value;pump();};});$('runtime-settings').showModal();}
+function settings(){if(!last)return;var specs=[['recipeDirectory','配方目录']];for(var i=1;i<=Math.max(4,last.generatorSlots||4);i++)specs.push(['g'+group+'.generator'+i,'纠缠器 '+i+'（多余可空）']);$('extra-fields').innerHTML=specs.map(function(f){return '<label>'+f[1]+'<input data-config="'+f[0]+'" value="'+esc(last.values[f[0]]||'')+'" maxlength="160" spellcheck="false"></label>';}).join('');$('extra-fields').querySelectorAll('input').forEach(function(input){input.onchange=function(){queue[input.dataset.config]=input.value;pump();};});$('runtime-settings').showModal();}
 document.querySelector('.top-actions').innerHTML='<span id="save-status" class="save-status">等待 OC 连接</span><button class="button quiet" id="patterns-open">样板处理</button><button class="button quiet" id="global-settings">公共设置</button><button class="button quiet" id="apply-config">应用绑定</button><button class="button primary run-button" id="start-run">启动自动化</button><button class="button quiet stop-button" id="stop-run">暂停</button>';
 var feedback=document.createElement('div');feedback.id='action-feedback';feedback.className='action-feedback';feedback.textContent='等待 OC 连接…';feedback.setAttribute('aria-live','polite');document.body.appendChild(feedback);
-var tabs=document.createElement('nav');tabs.className='runtime-tabs';tabs.innerHTML='<button class="active" data-tab="structure">结构 / 绑定</button><button data-tab="flow">运行流程</button>';document.querySelector('.topbar').insertBefore(tabs,document.querySelector('.top-actions'));
+var tabs=document.createElement('nav');tabs.className='runtime-tabs';tabs.innerHTML='<button class="active" data-tab="structure">结构 / 绑定</button><button data-tab="flow">运行流程</button><button data-tab="cache">缓存管理</button>';document.querySelector('.topbar').insertBefore(tabs,document.querySelector('.top-actions'));
+var cachePending=false,cacheWaiting=null,cacheMessage='',cacheStamp='',cachePanel=document.createElement('section');cachePanel.id='cache-panel';
+cachePanel.innerHTML='<h1>缓存管理</h1><p>只补已登记配方涉及的流体。单项留空使用默认值，设为 0 停补；按转换批量向上取整，实际库存可能略超目标。生产订单优先。</p><div class="cache-actions"><label>默认库存目标（mB） <input id="cache-default" inputmode="numeric" maxlength="10"></label><button id="cache-save-default" class="button">保存默认值</button><button id="cache-enable" class="button primary">启用自动补库</button><button id="cache-disable" class="button">停止补库</button><button id="cache-refresh" class="button">刷新库存</button></div><p id="cache-status" role="status"></p><p id="cache-feedback" role="status"></p><div id="cache-rows"></div><div class="cache-actions"><button id="cache-prev" class="button">上一页</button><span id="cache-page"></span><button id="cache-next" class="button">下一页</button></div><pre id="cache-log"></pre>';document.body.appendChild(cachePanel);
+function cacheAction(mode,name,value,page){
+if(cachePending||!last||!last.cache)return;cachePending=true;cacheWaiting=last.cache.revision;cacheMessage='正在提交…';renderCache();
+send('cache',{mode:mode,name:name,value:value,page:page,revision:last.cache.revision}).then(function(r){cachePending=false;cacheMessage=r.message||'已确认，等待库存更新';renderCache();}).catch(function(e){cachePending=false;cacheMessage='未执行：'+e.message;renderCache();});
+}
+function renderCache(){
+var k=last&&last.cache;if(!k)return;
+$('cache-status').textContent=(k.enabled?'自动补库已启用':'自动补库未启用')+' · '+(last.mode==='running'?'自动化运行中':'启动自动化后开始补库')+' · '+(k.busy?'设备组 '+k.group+' 补库中 · ':'')+k.message;
+$('cache-feedback').textContent=cacheMessage;$('cache-log').textContent=list(k.logs).join('\n');
+if(cacheWaiting!==k.revision&&document.activeElement!==$('cache-default'))$('cache-default').value=k.target;
+var stamp=JSON.stringify([group,k.page,k.rows]);if(stamp!==cacheStamp&&!document.querySelector('#cache-rows input:focus')){
+cacheStamp=stamp;$('cache-rows').innerHTML=list(k.rows).map(function(r,i){return '<div class="cache-row"><div><strong>'+esc(r.label||r.name.replace(/^entangled_/,''))+'</strong><small>'+esc(r.name)+'</small></div><span>'+r.stock+' / '+r.target+' mB</span><input data-cache-index="'+i+'" inputmode="numeric" maxlength="10" placeholder="默认 '+k.target+'" aria-label="'+esc(r.name)+' 单项目标" value="'+(r.override==null?'':r.override)+'"><button class="button" data-cache-save="'+i+'">保存</button></div>';}).join('')||'<p>尚无已登记配方；请先通过样板处理登记需求，再刷新。</p>';
+$('cache-rows').querySelectorAll('[data-cache-save]').forEach(function(b){b.onclick=function(){var i=Number(b.dataset.cacheSave);cacheAction('save',list(last.cache.rows)[i].name,$('cache-rows').querySelector('[data-cache-index="'+i+'"]').value);};});
+}
+$('cache-page').textContent=(k.page+1)+' / '+Math.max(1,Math.ceil(k.total/8));
+['cache-save-default','cache-enable','cache-disable','cache-refresh'].forEach(function(id){$(id).disabled=!online||cachePending;});
+$('cache-prev').disabled=!online||cachePending||k.page===0;$('cache-next').disabled=!online||cachePending||(k.page+1)*8>=k.total;
+$('cache-enable').disabled=!online||cachePending||!!k.blocked||k.enabled;
+}
+$('cache-save-default').onclick=function(){cacheAction('save','default',$('cache-default').value);};$('cache-enable').onclick=function(){cacheAction('enable');};$('cache-disable').onclick=function(){cacheAction('disable');};$('cache-refresh').onclick=function(){cacheAction('refresh',null,null,last&&last.cache&&last.cache.page);};$('cache-prev').onclick=function(){cacheAction('refresh',null,null,last.cache.page-1);};$('cache-next').onclick=function(){cacheAction('refresh',null,null,last.cache.page+1);};
 var flowPanel=document.createElement('section');flowPanel.className='flow-panel';flowPanel.id='flow-panel';flowPanel.innerHTML='<div class="flow-title"><div><h2>自动化流程 <span id="flow-current">等待 OC</span></h2><p id="flow-stage-time">当前步骤 —</p></div><div><div class="elapsed" id="flow-elapsed">0.0s</div><small>当前 / 最近批次总耗时</small></div></div><div class="flow-path" id="flow-steps"></div><div class="flow-bottom"><div><h4>TRANSFER NODES / 接单控制</h4><div class="node-list" id="node-status-list"></div><div class="runtime-legend"><b>绿色：机器回读运行中</b> · <em>金色：当前步骤使用的外设</em><br>外设阶段占用不等同于硬件正在搬运</div></div><div><h4>EXECUTION / 阶段时间线</h4><div id="runtime-log" class="runtime-log" style="white-space:pre-wrap"></div></div></div>';
 document.querySelector('.main').appendChild(flowPanel);var notice=document.createElement('div');notice.id='runtime-notice';notice.className='runtime-notice';notice.textContent='等待 OC 数据，网页预览不控制机器。';document.querySelector('.main').appendChild(notice);
 var patternsDialog=document.createElement('dialog');patternsDialog.id='patterns-dialog';patternsDialog.className='runtime-settings';patternsDialog.innerHTML='<h2>样板处理</h2><p>将原加工样板的副本放入独立工坊 ME 接口。预览只读；处理一次会去除凝聚物输入并保存配方需求。请先暂停生产和纠缠器。</p><p id="patterns-target"></p><div id="patterns-status" role="status" aria-live="polite"></div><pre id="patterns-log"></pre><footer><button id="patterns-preview" class="button">只读预览</button><button id="patterns-run" class="button primary">处理一次</button><button id="patterns-stop" class="button">停止处理</button><button id="patterns-close" class="button">关闭</button></footer>';document.body.appendChild(patternsDialog);$('patterns-open').onclick=function(){$('patterns-dialog').showModal();renderPatterns();};$('patterns-close').onclick=function(){$('patterns-dialog').close();};$('patterns-preview').onclick=function(){patternAction('preview');};$('patterns-run').onclick=function(){patternAction('run');};$('patterns-stop').onclick=function(){patternAction('stop');};
 var pickerDialog=document.createElement('dialog');pickerDialog.id='component-picker';pickerDialog.className='runtime-settings';pickerDialog.innerHTML='<h2 id="picker-title">从 OC 选择设备</h2><p>只读取组件。点击候选地址填入草稿，不启动机器。</p><p>同类机器位置识别：暂停自动化后，仅断开目标适配器的 OC 信号分支，扫描一次；接回原线再「重新扫描」。新增/重新接入项就是候选。不要拆机器或适配器，也不要断整条共用主线。若出现多项新增，逐项确认，不按 UUID 排列猜位置。</p><div id="picker-status"></div><div id="picker-results"></div><footer><button id="picker-prev" class="button">上一页</button><button id="picker-next" class="button">下一页</button><button id="picker-refresh" class="button">重新扫描</button><button id="picker-close" class="button primary">关闭</button></footer>';document.body.appendChild(pickerDialog);$('picker-refresh').onclick=function(){scanPicker();};$('picker-close').onclick=closePicker;
 var issuesDialog=document.createElement('dialog');issuesDialog.id='binding-issues';issuesDialog.className='runtime-settings binding-issues';issuesDialog.innerHTML='<h2>绑定检查 / 当前设备组</h2><p>点击下列项目跳转填写。这里只检查填写内容；通过后还会由 OC 校验设备是否在线、方法和机器状态。</p><div id="binding-issues-list"></div><p>空传送节点会跳过。额外纠缠器、高速供液口、样板工坊可留空；自动换蜂的三项地址须全部填写或全部留空。每个节点须有独立韦门或使用本组公共韦门。</p><footer><button id="close-issues" class="button primary">返回修改</button></footer>';document.body.appendChild(issuesDialog);$('close-issues').onclick=function(){$('binding-issues').close();};
 var dialog=document.createElement('dialog');dialog.id='runtime-settings';dialog.className='runtime-settings';dialog.innerHTML='<h2>公共配置</h2><p>填写后自动暂存。应用绑定通过设备校验后，才能启动。</p><label>当前模型对应 <select id="group-select"></select></label><div id="extra-fields"></div><footer><button id="close-settings" class="button primary">完成</button></footer>';document.body.appendChild(dialog);
-document.querySelectorAll('[data-tab]').forEach(function(b){b.onclick=function(){document.querySelectorAll('[data-tab]').forEach(function(x){x.classList.toggle('active',x===b);});document.body.classList.toggle('flow-full',b.dataset.tab==='flow');app.scene.request();};});
+document.querySelectorAll('[data-tab]').forEach(function(b){b.onclick=function(){document.querySelectorAll('[data-tab]').forEach(function(x){x.classList.toggle('active',x===b);});document.body.classList.toggle('flow-full',b.dataset.tab==='flow');document.body.classList.toggle('cache-view',b.dataset.tab==='cache');if(b.dataset.tab==='cache')renderCache();app.scene.request();};});
 
- document.querySelector('.inspector-bottom p').textContent='草稿由 OC 自动保存，支持 Ctrl+V。应用绑定前不控制机器。';$('model-callout').querySelector('p').innerHTML='点击机器填写地址，自动暂存到 OC。<br>拖动旋转 · 滚轮缩放 · 右键平移';document.querySelector('.pill').textContent='V2 / OCHD';
+document.querySelector('.inspector-bottom p').textContent='草稿由 OC 自动保存，支持 Ctrl+V。应用绑定前不控制机器。';$('model-callout').querySelector('p').innerHTML='点击机器填写地址，自动暂存到 OC。<br>拖动旋转 · 滚轮缩放 · 右键平移';document.querySelector('.pill').textContent='V2 / OCHD';
 document.querySelector('.stage-title').innerHTML='<span class="live-dot"></span>结构与机器状态<span class="stage-sub">/ 实际回读 + 阶段标记</span>';
 $('save-status').onclick=function(){if(failed){failed=false;pump();}};$('apply-config').onclick=function(){action('apply_bindings');};$('start-run').onclick=function(){action('start');};$('stop-run').onclick=function(){action('pause');};$('global-settings').onclick=settings;$('close-settings').onclick=function(){$('runtime-settings').close();};$('group-select').onchange=function(){if(inflight||waiting||Object.keys(queue).length){this.value=group;return;};switching=Number(this.value);send('select_group',{group:switching}).then(function(){$('runtime-settings').close();}).catch(function(e){switching=null;$('runtime-notice').textContent=e.message;});};
- window.BEC_CONTROL={receive:data,values:toValues,openPicker:openPicker,issues:bindingIssues,queue:function(){return queue;}};
+window.BEC_CONTROL={receive:data,values:toValues,openPicker:openPicker,issues:bindingIssues,queue:function(){return queue;}};
 if(window.OC&&OC.onData)OC.onData(data);else{$('runtime-notice').textContent='浏览器预览：未连接 OC，所有机器操作禁用。';$('start-run').disabled=$('stop-run').disabled=$('apply-config').disabled=true;}
 setInterval(function(){flow();if(last&&Date.now()-receivedAt>7000){online=false;status('OC 数据已过期',true);refreshActions();}},250);
-})();
-</script></body></html>
-]=],supported={['223881:1516270899']=true,['226106:568371390']=true,['231820:3886138659']=true,['232777:4208215465']=true,['239085:3601861998']=true,['239131:4115017095']=true,['245579:582996710']=true}}}
+})();</script></body></html>
+]=],supported={['223881:1516270899']=true,['226106:568371390']=true,['231820:3886138659']=true,['232777:4208215465']=true,['239085:3601861998']=true,['239131:4115017095']=true,['245579:582996710']=true,['249319:940837747']=true,['249319:940837747']=true}}}
 
 local fs=require('filesystem');local root='/home/bec_v2/'
 local function read(p)local f=io.open(p,'r');if not f then return end;local s=f:read('*a');f:close();return s end
@@ -1082,8 +1616,8 @@ local function normal(s)return s and s:gsub('\r\n','\n')end
 local function signature(s)local a,b=1,0;for i=1,#s do a=(a+s:byte(i))%65521;b=(b+a)%65521 end;return string.format('%d:%.0f',#s,b*65536+a)end
 local old,identical,bytes={},true,0
 for i,row in ipairs(rows)do
- local target=root..row.name;old[i]=assert(read(target),'缺少V2程序: '..target)
- local text=normal(old[i]);assert(text==row.source or row.supported[signature(text)],'未知本地程序，保留未覆盖: '..target)
+ local target=root..row.name;old[i]=read(target);assert(old[i]or row.added,'缺少V2程序: '..target)
+ local text=normal(old[i]);assert(row.added and text==nil or text==row.source or text and row.supported[signature(text)],'未知本地程序，保留未覆盖: '..target)
  if text~=row.source then identical=false end
  if row.name:sub(-4)=='.lua'then assert(load(row.source,'@'..target,'t',_ENV),'新程序语法无效')end
  bytes=bytes+#row.source
@@ -1103,7 +1637,7 @@ for i,row in ipairs(rows)do assert(read(root..row.name)==old[i],'更新期间程
 local backed,installed={},{}
 local ok,reason=pcall(function()
  for i,row in ipairs(rows)do local target=root..row.name
-  assert(fs.rename(target,target..'.before-patterns-'..n),'备份失败');backed[i]=true
+  if old[i]then assert(fs.rename(target,target..'.before-patterns-'..n),'备份失败');backed[i]=true end
   assert(fs.rename(target..'.patterns-new-'..n,target),'替换失败');installed[i]=true
   assert(read(target)==row.source,'安装回读失败')
  end

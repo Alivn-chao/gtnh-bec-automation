@@ -20,6 +20,7 @@ assert(binding and binding:find('BEC_BULK_SLOTS_10',1,true),'十口网页需要�
 local session=read('/home/bec_v2/lib/web_session.lua');local entry=read('/home/bec_v2/web.lua')
 assert(session and session:find('BEC_COMPONENT_PICKER_1',1,true)and entry and entry:find('scan_components',1,true),'当前网页需要组件识别后端，请先运行 update_discovery.lua；原网页未改')
 assert(session and session:find('BEC_WEB_PATTERNS_1',1,true)and entry:find("'patterns'",1,true),'当前网页需要样板处理后端，请先运行 update_patterns.lua；原网页未改')
+assert(session:find('BEC_WEB_CACHE_1',1,true)and entry:find("'cache'",1,true),'请先运行 update_cache.lua 安装缓存管理后端；原网页未改')
 local previous=assert(read(target),'需要已安装V2网页；不要用于V1')
 if normal(previous)==SOURCE then print('网页启动反馈修复已安装。');return end
 assert(SUPPORTED[signature(normal(previous))],'网页有未知本地修改，保留原文件，不覆盖')

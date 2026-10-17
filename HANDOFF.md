@@ -1,3 +1,13 @@
+# 2026-10-17 网页缓存管理（第三页签）
+
+用户要求在“结构 / 绑定”“运行流程”旁加入“缓存管理”，像V1自定义流体缓存。已实现web/control.js/css新第三页：默认mB目标、每种流体覆盖/空继承/0停补、保存反馈、启用/停止补库、库存/目标、8行分页和状态日志；运行中输入可编辑。移除网页公共设置中的仅参考cacheTarget入口，正式配置字段保留兼容。
+
+runtime/cache.lua直接移植reinstall/files/bec_cache.lua，保留V1申请/持续收料/整批取整/转换/优先订单/CPU忙等待方法，只改路径与V2guard/yield注入，移除V1单节点生产日志假设。新lib/cache.lua独立cache.config（version1,target,overrides,enabled，默认disabled）和state/group-N/cache.journal，统一组锁/共享主网供液锁与E engine互斥。空闲整组暂停输出15但nodeWork开启以识别物理新单；生产来时确认已提交AE、转换已搬原液后让位。未知缓存操作禁止重放/启动生产。退出关闭全部纠缠器保留记录；停止按钮在已确认边界收尾。cache snapshot按8行，19中文标签，最大64登记类型。H.start才实际运行缓存，enabled独立持久，配置修改下一轮生效。
+
+build_cache_update.py/update_cache.lua新增5文件更新器，两个新增文件可缺省，原文件精确签名，临时写/flush/读回、备份与回滚，所有地址/草稿/配方/日志/cache.config保留。其他web更新器补cache依赖，read updater16程序；HTML-only加BEC_WEB_CACHE_1+cache事件guard。完整安装24文件。OCHD包261771B<262144（余量很小）；仅strip网页两个JS文件整行注释/行首空格，原授权文本保留。
+
+167 Python/Lua+20原核心模拟、27JS通过；13缓存测试使用实际V1 worker+V2 manager/engine，含CPU忙等待只申请1次、物理订单让位、部分已搬原液完成再放锁、旧未确认生产/cache记录禁止重放、关闭后阻断。新更新器8个rename故障恢复原文件并移出新增文件；验证当前执行路径和安装包全文签名后释放/home/bec_cache_update.lua临时包，保留一切程序备份/用户文件，低空间和被替换临时文件用例通过。真实CEF原生输入/点击验证缓存页、默认值、单项0、启停错误反馈和运行中可编辑；审阅outputs/cache-management.png（演示快照，非实际游戏）。真实Minecraft验收待用户。发布目标不可变tag bec-v2-cache-manager-2026-10-17，用户Q退出后wget update_cache.lua到/home/bec_cache_update.lua执行再lua /home/bec_v2/main.lua web，进缓存管理设定/启用后启动自动化；不用换客户端或清日志。
+
 2026-10-17 用户明确要求网页样板处理按钮（不回OC终端）。web allowlist patterns preview/run/stop；session P协程仅在完整槽位后yield，严格只允许正式已应用配置、独立工坊；cfg变化/低空间/运行器任务仍在时拒绝，逐槽机器暂停状态复核，停止/Q在槽间退出；snapshot有模式/状态/槽位/9槽结果+6条日志。runtime patterns加可选hooks/raiseErrors，原CLI兼容，原始保存/去凝聚物/回读/还原事务保留。lib patterns仅在沙箱env捕获print，不改全局；UI顶部样板处理弹窗预览/处理一次/停止，错误显示，任务期间锁绑定/生产启动。修空Lua表可能成对象时picker和patterns数组渲染；build_web体积核算补真实scan/pattern事件。6文件update_patterns精确签名支持438及旧版，stage/flush/回读/备份/全rollback/512KiB，旧updaters同时包两patterns后端防HTML新事件缺实现。142Python/Lua+20核心、24JS、实际CEF点击/事件/结果/错误/锁定验证，非Minecraft实机。发布bec-v2-web-patterns-2026-10-17。命令WEB_PATTERNS.md。
 
 2026-10-17 组件地址识别：用户不会获取/区分多台机器UUID，且此前助手把终端纠缠器bf33误转bf83（不是额外2/3/4），不要再从截图猜UUID。新增地址框旁从OC识别/选择；web允许scan_components，session每step4个只读methods，按用途筛选、getName固定读纠缠器、每页6项/最多2048组件512匹配、按前次同类结果标新增/重新接入、显示已填位置；完整地址选择走原save_field并令牌拒过期扫描快照。不能仅凭UUID推物理位置，暂停后只断目标OC信号分支扫描/接回重扫，新增1项定位；不拆适配器不拆机器，不开关或搬运。config错误加组号/纠缠器号/地址。4文件精确签名update_discovery.lua备份回滚512KiB保护；HTML单文件升级guard后端能力；bulk更新同步web4文件防缺事件；full/read包同步。130Python/Lua+20原核心、19JS和实际CEF原生扫描选择并save_field完整地址验证通过，非Minecraft实机。发布bec-v2-component-picker-2026-10-17。
