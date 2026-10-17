@@ -963,7 +963,9 @@ function M.environment(cfg,index,engine)
    assert(entry,'生产组缺少节点快照')
    local p=type(current)=='table'and next(current)and c.invoke(address,'getParallelRecipesInProgress')or nil
    local consumed=c.invoke(address,'getConsumedCondensate')or {}
-   local needed=c.invoke(address,'getRequiredTier');needed=type(needed)=='table'and needed.tier or needed
+   local demand=c.invoke(address,'getRequiredTier')
+   local family=type(demand)=='table'and demand.name or nil
+   local needed=type(demand)=='table'and demand.tier or demand
    -- A batch can finish between these separate OC getters. Accept that edge
    -- only after reading idle AND closed next-batch permission. Keep the old
    -- requirement and consumption proof; never infer completion from nil tier.
@@ -987,9 +989,15 @@ function M.environment(cfg,index,engine)
    for key,value in pairs(consumed)do entry.consumed[key]=math.max(entry.consumed[key] or 0,value)end
    if state~='idle' then
     snapshot.allIdle=false
-    assert(type(needed)=='number'and needed==entry.tier,'组内配方蜂群等级变化，保持整组暂停')
+    -- BEC_V2_DYNAMIC_NANITES_1: tier is a live recipe phase, not recipe identity.
+    -- Members can cross phase boundaries on different ticks. The controller
+    -- pauses the whole cohort and supplies its maximum live requirement;
+    -- normalized fluids, batch size and completed-member checks stay above.
+    -- Do not overwrite entry.tier: old cohort snapshots remain recoverable.
+    assert(type(needed)=='number'and needed>=1 and needed==math.floor(needed),'组内蜂群需求等级不可读，保持整组暂停')
     assert(state~='unpowered' and state~='assembler-offline','组内节点不可用: '..cfg.nodes[i].name..' / '..state)
-    if type(needed)=='number' then snapshot.requiredTier=math.max(snapshot.requiredTier,needed) end
+    if needed>snapshot.requiredTier then snapshot.requiredTier=needed;snapshot.requiredFamily=family
+    elseif needed==snapshot.requiredTier and snapshot.requiredFamily~=family then snapshot.requiredFamily=nil end
    elseif task.released or entry.finished or next(entry.consumed) then
     c.invoke(cfg.nodes[i].redstone,'setOutput',cfg.nodes[i].pauseSide,15)
     for key,value in pairs(entry.required)do assert((entry.consumed[key] or 0)>=value,'节点空闲但未消耗完需求，暂停核对')end
@@ -1056,7 +1064,7 @@ function M.environment(cfg,index,engine)
    if m=='getRequiredCondensate' then return nodeSnapshot().required end
    if m=='getConsumedCondensate' then return nodeSnapshot().consumed end
    if m=='getParallelRecipesInProgress' then return nodeSnapshot().parallel end
-   if m=='getRequiredTier' then local value=nodeSnapshot().requiredTier;return value>0 and {tier=value} or nil end
+   if m=='getRequiredTier' then local value=nodeSnapshot();return value.requiredTier>0 and {tier=value.requiredTier,name=value.requiredFamily} or nil end
    if m=='getMinParallel' or m=='getMaxParallel' then
     local total=0;for _,i in ipairs(members)do total=total+c.invoke(cfg.nodes[i].address,m)end;return total
    end
@@ -1412,7 +1420,7 @@ local sides = require("sides") local event = require("event") local mode = (...)
 local MAIN = "3afdc4cf-04e3-4ae9-8be6-e753c23a249d" local SUB = "86311657-33d1-41b5-a0d9-0aee7b5c2c50" local TRANS = "66fb280f-080d-4623-8d54-0dffd5cd5aad" local STORAGE = "237a9cac-118a-4b74-8755-0d0b0ad216c0"
 local NODE = "b04787f9-5423-4b03-8549-c786d4ef38d0" local GATE_ADDRESS = "cf2a0c4a-ab8d-4958-b1df-253094d6690c" local RS, GEN, GATE, armed, record local stopping=false
 local NANITES=assert(loadfile("/home/bec_nanites.lua","t",_ENV),"缺少蜂群模块")()
-local lastNaniteTier
+local lastNaniteTier,lastNaniteFamily
 local mapping = { entangled_infinity = "molten.infinity", entangled_chromaticglass = "molten.chromaticglass", entangled_transcendentmetal = "molten.transcendentmetal",
 entangled_dimshiftedsuperfluid = "dimensionallyshiftedsuperfluid", entangled_neutronium="molten.neutronium",entangled_cosmicneutronium="molten.cosmicneutronium", entangled_bedrockium="molten.bedrockium",entangled_celestialtungsten="molten.celestialtungsten", entangled_hypogen="molten.hypogen",entangled_phononmedium="phononmedium",
 entangled_quarkgluonplasma="quarkgluonplasma",entangled_spacetime="molten.spacetime", entangled_time="molten.temporalfluid",entangled_space="molten.spatialfluid", entangled_cosmicsolder="boundlesscosmicsolder", entangled_mhdcsm="molten.magnetohydrodynamicallyconstrainedstarmatter",
@@ -1451,7 +1459,8 @@ local f = assert(io.open(JOURNAL, "r")) local old = f:read("*a"); f:close() writ
 writeVerified(JOURNAL, ser.serialize(record, false)) end local function pause(value) call(RS, "setOutput", sides.top, value)
 assert(call(RS, "getOutput", sides.top) == value, "红石输出回读不符") end local function generator(enabled) call(GEN, "setWorkAllowed", enabled)
 assert(call(GEN, "isWorkAllowed") == enabled, "纠缠装置启停回读不符") end local function switchNanites()
-local needed=call(NODE,"getRequiredTier");needed=type(needed)=="table" and needed.tier or needed
+local demand=call(NODE,"getRequiredTier");local family=type(demand)=="table"and demand.name or nil
+local needed=type(demand)=="table" and demand.tier or demand
 if type(needed)~="number" then return end
 if BEC_V2_PHASE then BEC_V2_PHASE("nanites")end
 local started=computer.uptime();print("检查蜂群 / 准备换盘")
@@ -1459,7 +1468,7 @@ NANITES.ensure({tick=tick,stopping=function() return stopping end})
 print(string.format("蜂群检查/换盘完成：%.2f 秒",computer.uptime()-started))
 local provided=call(NODE,"getProvidedTier")
 assert(type(provided)=="table" and provided.tier>=needed and integer(call(NODE,"getAvailableNanites"))>=64,"蜂群等级或数量不足，保持暂停")
-lastNaniteTier=needed
+lastNaniteTier=needed;lastNaniteFamily=family
 end local function gateFilters(required) assert(type(required)=="table","门过滤需求不可读")
 local result={} for name,n in pairs(required) do assert(mapping[name] and integer(n)>0,"门过滤需求无效: "..tostring(name)) result[#result+1]=name
 end table.sort(result) assert(#result>0,"禁止写入全空过滤；全空会放行全部凝聚物") return result
@@ -1572,9 +1581,10 @@ unchanged();generator(false) record.plan=nil;record.lastState=nil;save("watching
 if BEC_V2_PHASE then BEC_V2_PHASE("producing")end pause(0) print("整批流体齐备，已连续放行；本组同配方节点已同时放行。按 Q 停止。") local releasedAt=computer.uptime() local deadline=releasedAt+600
 local lastStock=field() local lastRequired=record.required local nextQueueCheck=0 while not stopping do
 local v=call(NODE,"getState") local stock=field() local req=call(NODE,"getRequiredCondensate") verifyGate(filters)
-local needed=call(NODE,"getRequiredTier");needed=type(needed)=="table" and needed.tier or needed
+local demand=call(NODE,"getRequiredTier");local family=type(demand)=="table"and demand.name or nil
+local needed=type(demand)=="table" and demand.tier or demand
 local supplied=call(NODE,"getProvidedTier")
-if type(needed)=="number" and (needed~=lastNaniteTier or type(supplied)~="table" or supplied.tier<needed) then
+if type(needed)=="number" and (needed~=lastNaniteTier or family~=lastNaniteFamily or type(supplied)~="table" or supplied.tier<needed) then
 pause(15);waitUntil(10,function() local s=call(NODE,"getState");return s=="paused-immediate" or s=="nanite-tier-too-low" end)
 switchNanites();if stopping then break end;verifyGate(filters);pause(0);deadline=computer.uptime()+600;v=call(NODE,"getState")
 end
@@ -2363,6 +2373,10 @@ end
 local function needed()
  local v=call(NODE,'getRequiredTier');return type(v)=='table' and v.tier or v
 end
+-- V1 whole-cell selection rule: prefer the exact phase family when available.
+local function requiredFamily()
+ local v=call(NODE,'getRequiredTier');return type(v)=='table'and v.name or nil
+end
 local function hive()
  local n=call(NODE,'getAvailableNanites');assert(whole(n),'蜂群仓数量无效')
  local p=call(NODE,'getProvidedTier')
@@ -2377,6 +2391,7 @@ local function guard()
  assert(s=='paused-immediate' or s=='nanite-tier-too-low' or
   s=='idle' and call(NODE,'isWorkAllowed')==false,'节点状态不适合换蜂：'..tostring(s))
  assert(needed()==record.requiredTier,'换蜂过程中配方等级变化，保留现场')
+ assert(not record.requiredFamily or requiredFamily()==record.requiredFamily,'换蜂过程中蜂群类型需求变化，保留现场')
  if context and context.check then context.check() end
  if context and context.stopping and context.stopping() then error('换蜂已暂停，保留现场') end
 end
@@ -2459,13 +2474,15 @@ local function pack(cells,key)
  for _,disk in ipairs(candidates) do picked[#picked+1]=disk;n=n+disk.count end
  return picked,n
 end
-local function choose(cells,need)
+local function choose(cells,need,family)
  local seen,best={},nil
  for _,disk in ipairs(cells) do if disk.item and not seen[disk.item.key] then
   local item=disk.item;seen[item.key]=true
   local picked,n=pack(cells,item.key)
-  if item.tier>=need and n>=MIN and (not best or item.tier<best.item.tier or item.tier==best.item.tier and n>best.count) then
-   best={item=item,count=n,picked=picked}
+  local exact=item.tier==need and item.family==family
+  if item.tier>=need and n>=MIN and (not best or exact and not best.exact
+   or exact==best.exact and (item.tier<best.item.tier or item.tier==best.item.tier and n>best.count)) then
+   best={item=item,count=n,picked=picked,exact=exact}
   end
  end end
  return best
@@ -2564,14 +2581,16 @@ function M.ensure(ctx)
  context=ctx;local size=discover()
  local old=oldRecord();assert(not old or old.stage=='done','旧蜂群IO未完成，保留盘和日志，不自动重放')
  emptyPorts()
- local cells=bank(size);local h,p=hive();local best=choose(cells,need)
+ local family=requiredFamily()
+ local cells=bank(size);local h,p=hive();local best=choose(cells,need,family)
  local known=old and sameBinding(old.binding)and old.holding
  -- A saturated node reading cannot prove the current raw quantity. Recover to
  -- read the actual quantity before another operation, even with an old record.
  if not (known and known.count==h and h<DISPLAY_CAP and p and known.family==p.name and known.tier==p.tier) then known=nil end
  local sameFamily=0
  if p then for _,disk in ipairs(cells) do if disk.item and disk.item.family==p.name then sameFamily=sameFamily+disk.count end end end
- local keeping=h>0 and p.tier>=need and h+sameFamily>=MIN and (not best or best.item.tier>=p.tier)
+ local keeping=h>0 and p.tier>=need and h+sameFamily>=MIN
+  and (not best or best.item.tier>=p.tier and not(best.exact and p.name~=family))
  local extra={}
  if keeping then
   if known then extra=pack(cells,known.key)
@@ -2582,10 +2601,10 @@ function M.ensure(ctx)
   local hasEmpty=false;for _,disk in ipairs(cells) do if disk.empty then hasEmpty=true;break end end
   assert(hasEmpty,'缺少可接收新类型的空数字奇点盘，旧蜂群未搬运')
  end
- record={version=2,kind='cell-io',binding=binding,requiredTier=need,holding=known,stage='prepared'}
+ record={version=2,kind='cell-io',binding=binding,requiredTier=need,requiredFamily=family,holding=known,stage='prepared'}
  guard();archive();save('prepared')
  local ok,result=xpcall(function()
-  if h>0 and (not keeping or not known) then recover(cells);cells=bank(size);best=choose(cells,need);assert(best,'回收后没有可装入蜂群') end
+  if h>0 and (not keeping or not known) then recover(cells);cells=bank(size);best=choose(cells,need,family);assert(best,'回收后没有可装入蜂群') end
   local picked
   if keeping and known then picked=extra else picked=best.picked end
   for _,disk in ipairs(picked) do loadCell(disk) end

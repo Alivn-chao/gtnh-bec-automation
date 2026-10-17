@@ -3,7 +3,7 @@ local sides = require("sides") local event = require("event") local mode = (...)
 local MAIN = "3afdc4cf-04e3-4ae9-8be6-e753c23a249d" local SUB = "86311657-33d1-41b5-a0d9-0aee7b5c2c50" local TRANS = "66fb280f-080d-4623-8d54-0dffd5cd5aad" local STORAGE = "237a9cac-118a-4b74-8755-0d0b0ad216c0"
 local NODE = "b04787f9-5423-4b03-8549-c786d4ef38d0" local GATE_ADDRESS = "cf2a0c4a-ab8d-4958-b1df-253094d6690c" local RS, GEN, GATE, armed, record local stopping=false
 local NANITES=assert(loadfile("/home/bec_nanites.lua","t",_ENV),"缺少蜂群模块")()
-local lastNaniteTier
+local lastNaniteTier,lastNaniteFamily
 local mapping = { entangled_infinity = "molten.infinity", entangled_chromaticglass = "molten.chromaticglass", entangled_transcendentmetal = "molten.transcendentmetal",
 entangled_dimshiftedsuperfluid = "dimensionallyshiftedsuperfluid", entangled_neutronium="molten.neutronium",entangled_cosmicneutronium="molten.cosmicneutronium", entangled_bedrockium="molten.bedrockium",entangled_celestialtungsten="molten.celestialtungsten", entangled_hypogen="molten.hypogen",entangled_phononmedium="phononmedium",
 entangled_quarkgluonplasma="quarkgluonplasma",entangled_spacetime="molten.spacetime", entangled_time="molten.temporalfluid",entangled_space="molten.spatialfluid", entangled_cosmicsolder="boundlesscosmicsolder", entangled_mhdcsm="molten.magnetohydrodynamicallyconstrainedstarmatter",
@@ -42,7 +42,8 @@ local f = assert(io.open(JOURNAL, "r")) local old = f:read("*a"); f:close() writ
 writeVerified(JOURNAL, ser.serialize(record, false)) end local function pause(value) call(RS, "setOutput", sides.top, value)
 assert(call(RS, "getOutput", sides.top) == value, "红石输出回读不符") end local function generator(enabled) call(GEN, "setWorkAllowed", enabled)
 assert(call(GEN, "isWorkAllowed") == enabled, "纠缠装置启停回读不符") end local function switchNanites()
-local needed=call(NODE,"getRequiredTier");needed=type(needed)=="table" and needed.tier or needed
+local demand=call(NODE,"getRequiredTier");local family=type(demand)=="table"and demand.name or nil
+local needed=type(demand)=="table" and demand.tier or demand
 if type(needed)~="number" then return end
 if BEC_V2_PHASE then BEC_V2_PHASE("nanites")end
 local started=computer.uptime();print("检查蜂群 / 准备换盘")
@@ -50,7 +51,7 @@ NANITES.ensure({tick=tick,stopping=function() return stopping end})
 print(string.format("蜂群检查/换盘完成：%.2f 秒",computer.uptime()-started))
 local provided=call(NODE,"getProvidedTier")
 assert(type(provided)=="table" and provided.tier>=needed and integer(call(NODE,"getAvailableNanites"))>=64,"蜂群等级或数量不足，保持暂停")
-lastNaniteTier=needed
+lastNaniteTier=needed;lastNaniteFamily=family
 end local function gateFilters(required) assert(type(required)=="table","门过滤需求不可读")
 local result={} for name,n in pairs(required) do assert(mapping[name] and integer(n)>0,"门过滤需求无效: "..tostring(name)) result[#result+1]=name
 end table.sort(result) assert(#result>0,"禁止写入全空过滤；全空会放行全部凝聚物") return result
@@ -163,9 +164,10 @@ unchanged();generator(false) record.plan=nil;record.lastState=nil;save("watching
 if BEC_V2_PHASE then BEC_V2_PHASE("producing")end pause(0) print("整批流体齐备，已连续放行；本组同配方节点已同时放行。按 Q 停止。") local releasedAt=computer.uptime() local deadline=releasedAt+600
 local lastStock=field() local lastRequired=record.required local nextQueueCheck=0 while not stopping do
 local v=call(NODE,"getState") local stock=field() local req=call(NODE,"getRequiredCondensate") verifyGate(filters)
-local needed=call(NODE,"getRequiredTier");needed=type(needed)=="table" and needed.tier or needed
+local demand=call(NODE,"getRequiredTier");local family=type(demand)=="table"and demand.name or nil
+local needed=type(demand)=="table" and demand.tier or demand
 local supplied=call(NODE,"getProvidedTier")
-if type(needed)=="number" and (needed~=lastNaniteTier or type(supplied)~="table" or supplied.tier<needed) then
+if type(needed)=="number" and (needed~=lastNaniteTier or family~=lastNaniteFamily or type(supplied)~="table" or supplied.tier<needed) then
 pause(15);waitUntil(10,function() local s=call(NODE,"getState");return s=="paused-immediate" or s=="nanite-tier-too-low" end)
 switchNanites();if stopping then break end;verifyGate(filters);pause(0);deadline=computer.uptime()+600;v=call(NODE,"getState")
 end

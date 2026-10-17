@@ -274,3 +274,8 @@ getConsumedCondensate 在空闲时仍保留上一单的消耗记录，不能当�
 2026-10-09：新样板新流体需求用户举例UMV部件装配线。读取BECRecipes/MaterialsInit源码（work忽略快照）：Space/SpaceTime/DSS，空间材料名spatialFluid非space。支持19已知映射和1000批量四类型，缓存唯一解析真实主网候选名，无主网库存/样板且场不足时精确报告，不盲下单。动态缓存UI5秒读取.dat+场已有列表，8行/页N翻页；C/S既有生产入口保留。高级流体转换等待修正为总批数*180秒上界。交付主控制200行/缓存132左右/缓存UI168左右，更新这3文件，其他不换。26缓存/10缓存UI/53生产/12生产UI模拟通过；本次只扩展登记缓存，通用UMV生产及蜂群切换未完成。
 
 2026-10-09：用户明确常规UI自动补缓存、配置UI按Q仅返回常规UI不中断补库。实现生产serve idleCache读取配置/默认144000；工作段按最低库存选择一种最多16000mB，当前段完成后优先订单。cacheworker新增background-stock允许生产cache-working持久阶段和节点红石阻塞；单协程互斥，正常Q留下已确认raw段可再完成，未确认AE请求/transfer拒绝盲重复。UI改为工作协程+前台事件循环，C内嵌配置而非停机切文件；配置Q消耗并回主UI，主UIQ真正停。E/Enter保存/B启用默认，P只读；独立cacheUI启动默认转统一service并打开缓存视图，standalone用于旧模拟。7全链条紧凑交付源/53生产/26缓存/12UI/10缓存UI模拟通过。交付四文件均小于257行，启动run。后台游戏验收待用户；未放宽通用UMV生产或蜂群切换。
+# 2026-10-17 V2 运行中阶段换蜂修复
+
+最新用户截图：同一配方进度1385/6000，金T3/30720，需求超时空T4，下一阶段碳T1；Web在bridge.lua:54“组内配方蜂群等级变化”保护暂停。用户要求修复并对照验证较好的V1。已对照reinstall/files/bec_auto.lua serviceNaniteStage及bec_nanites.lua requiredFamily/choose/keeping；V2 controller本来已有运行中换蜂，但bridge把entry.tier开工快照当常量阻断。现bridge允许当前阶段正整数等级动态变化，对未完成成员取实时最大等级，同最高等级需求种类一致才返回name，不覆写旧快照；保持配方/批量/完成证明检查。controller跟踪同等级name变化；cell选择沿用V1种类优先，换盘期间固定等级/明确种类需求，保留V2整组暂停/全部纠缠器停机/IO守恒/未确认日志禁止重放。未直接移植V1单节点passive实时搬盘。
+
+新增build_dynamic_update.py/update_dynamic_nanites.lua仅3文件，精确版本签名，备份回读、空间余量及六处rename故障回滚，无硬件控制、无config/recipe/state修改；重建install/manifest/update_reads。149Python/Lua+20原核心模拟、24JS通过，包含旧版复现并直接在同一个interrupted cohort/watching journal上加载新版恢复，T3→T4→T1完成且39392Gold/19612Trans回盘。真实游戏待用户。发布说明reinstall_v2/DYNAMIC_NANITES.md，计划不可变tag bec-v2-stage-nanites-2026-10-17。这次报错不要再让用户清空总线或删journal；Q退出更新后重开Web点启动自动化即可核对恢复。

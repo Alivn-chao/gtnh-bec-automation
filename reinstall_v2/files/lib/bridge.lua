@@ -27,7 +27,9 @@ function M.environment(cfg,index,engine)
    assert(entry,'生产组缺少节点快照')
    local p=type(current)=='table'and next(current)and c.invoke(address,'getParallelRecipesInProgress')or nil
    local consumed=c.invoke(address,'getConsumedCondensate')or {}
-   local needed=c.invoke(address,'getRequiredTier');needed=type(needed)=='table'and needed.tier or needed
+   local demand=c.invoke(address,'getRequiredTier')
+   local family=type(demand)=='table'and demand.name or nil
+   local needed=type(demand)=='table'and demand.tier or demand
    -- A batch can finish between these separate OC getters. Accept that edge
    -- only after reading idle AND closed next-batch permission. Keep the old
    -- requirement and consumption proof; never infer completion from nil tier.
@@ -51,9 +53,15 @@ function M.environment(cfg,index,engine)
    for key,value in pairs(consumed)do entry.consumed[key]=math.max(entry.consumed[key] or 0,value)end
    if state~='idle' then
     snapshot.allIdle=false
-    assert(type(needed)=='number'and needed==entry.tier,'组内配方蜂群等级变化，保持整组暂停')
+    -- BEC_V2_DYNAMIC_NANITES_1: tier is a live recipe phase, not recipe identity.
+    -- Members can cross phase boundaries on different ticks. The controller
+    -- pauses the whole cohort and supplies its maximum live requirement;
+    -- normalized fluids, batch size and completed-member checks stay above.
+    -- Do not overwrite entry.tier: old cohort snapshots remain recoverable.
+    assert(type(needed)=='number'and needed>=1 and needed==math.floor(needed),'组内蜂群需求等级不可读，保持整组暂停')
     assert(state~='unpowered' and state~='assembler-offline','组内节点不可用: '..cfg.nodes[i].name..' / '..state)
-    if type(needed)=='number' then snapshot.requiredTier=math.max(snapshot.requiredTier,needed) end
+    if needed>snapshot.requiredTier then snapshot.requiredTier=needed;snapshot.requiredFamily=family
+    elseif needed==snapshot.requiredTier and snapshot.requiredFamily~=family then snapshot.requiredFamily=nil end
    elseif task.released or entry.finished or next(entry.consumed) then
     c.invoke(cfg.nodes[i].redstone,'setOutput',cfg.nodes[i].pauseSide,15)
     for key,value in pairs(entry.required)do assert((entry.consumed[key] or 0)>=value,'节点空闲但未消耗完需求，暂停核对')end
@@ -120,7 +128,7 @@ function M.environment(cfg,index,engine)
    if m=='getRequiredCondensate' then return nodeSnapshot().required end
    if m=='getConsumedCondensate' then return nodeSnapshot().consumed end
    if m=='getParallelRecipesInProgress' then return nodeSnapshot().parallel end
-   if m=='getRequiredTier' then local value=nodeSnapshot().requiredTier;return value>0 and {tier=value} or nil end
+   if m=='getRequiredTier' then local value=nodeSnapshot();return value.requiredTier>0 and {tier=value.requiredTier,name=value.requiredFamily} or nil end
    if m=='getMinParallel' or m=='getMaxParallel' then
     local total=0;for _,i in ipairs(members)do total=total+c.invoke(cfg.nodes[i].address,m)end;return total
    end
