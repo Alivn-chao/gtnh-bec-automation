@@ -96,6 +96,7 @@ return function(C,B,W,options)
   assert(type(args)=='table','页面参数必须为对象')
   assert(type(request)=='number'and request==math.floor(request)and request>0,'请求编号无效')
   if name=='cache'then
+   if args.mode=='page'then assert(args.group==nil or args.group==H.group,'设备组已变化，忽略旧分页请求')end
    if args.mode=='enable'then cleanDraft();C.validate(cfg,true)end
    H.notice=cache().action(args);return H.notice
   elseif name=='patterns'then

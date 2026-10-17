@@ -1,3 +1,5 @@
+缓存提交时翻页和输入保留：已读取页面可立即浏览，保存与分页独立；见 [CACHE_BROWSE.md](CACHE_BROWSE.md)。
+
 缓存设置提交慢、屏幕信息滞后：保存回执与机器读取解耦，分批刷新并复用控制器实际读数，小更新见 [DISPLAY_LATENCY.md](DISPLAY_LATENCY.md)。
 
 缓存部分搬运返回引发保护暂停：实际回执记账修复，以及本次空间流体补96收尾工具，见 [CACHE_PARTIAL.md](CACHE_PARTIAL.md)。保留原日志，不重下AE申请。

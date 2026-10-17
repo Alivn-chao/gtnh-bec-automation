@@ -64,6 +64,8 @@ return function(C,B,cfg,storage)
  end
  function K.observeStock(group,stock)if type(stock)=='table'then displayedStock[group]=stock end end
  function K.action(args)
+  -- BEC_CACHE_BROWSE_1: viewing pages is independent of settings writes.
+  if args.mode=='page'then local page=tonumber(args.page);assert(integer(page,0),'分页无效');K.page=math.min(page,math.max(0,math.ceil(#names/8)-1));return '已读取缓存分页'end
   if args.mode=='refresh'then scan(true);local page=tonumber(args.page)or 0;assert(integer(page,0),'分页无效');K.page=math.min(math.floor(page),math.max(0,math.ceil(#names/8)-1));return '已刷新缓存目录；库存随状态更新'end
   assert(args.revision==B.revision(raw or ''),'缓存设置已变化，等待最新数据后重试')
   assert(B.read(path)==raw,'缓存设置被其他程序修改，请重新打开网页')

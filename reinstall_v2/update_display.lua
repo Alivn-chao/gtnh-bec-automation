@@ -1,5 +1,5 @@
 -- BEC_V2_DISPLAY_UPDATE_1
-local SELF_SIGNATURE='49993:2873049326'
+local SELF_SIGNATURE='50377:2370821874'
 print('BEC display latency update; Q to exit the old UI first')
 local rows={{name='lib/cache.lua',source=[=[-- V1 cache worker, scheduled under the same V2 group and shared-fluid leases.
 local c=require('component');local clock=require('computer');local fs=require('filesystem');local ser=require('serialization')
@@ -67,6 +67,8 @@ return function(C,B,cfg,storage)
  end
  function K.observeStock(group,stock)if type(stock)=='table'then displayedStock[group]=stock end end
  function K.action(args)
+  -- BEC_CACHE_BROWSE_1: viewing pages is independent of settings writes.
+  if args.mode=='page'then local page=tonumber(args.page);assert(integer(page,0),'分页无效');K.page=math.min(page,math.max(0,math.ceil(#names/8)-1));return '已读取缓存分页'end
   if args.mode=='refresh'then scan(true);local page=tonumber(args.page)or 0;assert(integer(page,0),'分页无效');K.page=math.min(math.floor(page),math.max(0,math.ceil(#names/8)-1));return '已刷新缓存目录；库存随状态更新'end
   assert(args.revision==B.revision(raw or ''),'缓存设置已变化，等待最新数据后重试')
   assert(B.read(path)==raw,'缓存设置被其他程序修改，请重新打开网页')
@@ -312,6 +314,7 @@ return function(C,B,W,options)
   assert(type(args)=='table','页面参数必须为对象')
   assert(type(request)=='number'and request==math.floor(request)and request>0,'请求编号无效')
   if name=='cache'then
+   if args.mode=='page'then assert(args.group==nil or args.group==H.group,'设备组已变化，忽略旧分页请求')end
    if args.mode=='enable'then cleanDraft();C.validate(cfg,true)end
    H.notice=cache().action(args);return H.notice
   elseif name=='patterns'then

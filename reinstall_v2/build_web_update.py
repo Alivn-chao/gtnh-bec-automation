@@ -22,6 +22,7 @@ assert(session and session:find('BEC_COMPONENT_PICKER_1',1,true)and entry and en
 assert(session and session:find('BEC_WEB_PATTERNS_1',1,true)and entry:find("'patterns'",1,true),'当前网页需要样板处理后端，请先运行 update_patterns.lua；原网页未改')
 assert(session:find('BEC_WEB_CACHE_1',1,true)and entry:find("'cache'",1,true),'请先运行 update_cache.lua 安装缓存管理后端；原网页未改')
 assert(entry:find("module('web_transport')",1,true),'请先运行 update_connection.lua 安装连接心跳后端；原网页未改')
+local cache=read('/home/bec_v2/lib/cache.lua');assert(cache and cache:find('BEC_CACHE_BROWSE_1',1,true),'请先运行 update_browse.lua 安装独立分页后端；原网页未改')
 local previous=assert(read(target),'需要已安装V2网页；不要用于V1')
 if normal(previous)==SOURCE then print('网页启动反馈修复已安装。');return end
 assert(SUPPORTED[signature(normal(previous))],'网页有未知本地修改，保留原文件，不覆盖')

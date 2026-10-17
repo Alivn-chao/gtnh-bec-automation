@@ -11,6 +11,7 @@ OLD={n:subprocess.check_output(['git','show','d26100c:reinstall_v2/files/'+n],cw
 
 def make():
  l=fixture()
+ for n in NAMES[:2]:l.globals().files['/home/bec_v2/'+n]=None
  for n,text in OLD.items():l.globals().files['/home/bec_v2/'+n]=text
  l.globals().files['/home/bec_v2/cache.config']='custom-targets-keep'
  l.globals().files['/home/bec_v2/state/group-1/cache.journal']='submitted-keep'

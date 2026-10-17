@@ -10,7 +10,7 @@ function fixture(){
  const elements=new Map(),sent=[];
  function el(id){if(!elements.has(id))elements.set(id,{textContent:'',innerHTML:'',disabled:false,dataset:{},options:[],value:'',classList:{toggle(){}},querySelector:()=>el('child'),querySelectorAll:()=>[],appendChild(){},insertBefore(){},addEventListener(){},setAttribute(){},showModal(){},close(){}});return elements.get(id);}
  const imports=[],scene={modules:[{id:'node-1',kind:'node',role:'node'},{id:'generator',kind:'generator',role:'generator',p:[164,6,6],center:[180,15,15],marker:[164,15,15]}],onRender(){},request(){}},app={scene,importDraft(d){imports.push(d);},getDraft(){return{};}};
- const context={window:{BEC_APP:app},document:{getElementById:el,querySelector:el,querySelectorAll:()=>[],createElement:el,body:el('body'),activeElement:{tagName:'INPUT'}},OC:{emit(name,args){return new Promise((resolve,reject)=>sent.push({name,args,resolve,reject}));},onData(){}},setInterval(){},Date,Promise,console};
+ const context={window:{BEC_APP:app},document:{getElementById:el,querySelector:s=>s==='#cache-rows input:focus'?null:el(s),querySelectorAll:()=>[],createElement:el,body:el('body'),activeElement:{tagName:'INPUT'}},OC:{emit(name,args){return new Promise((resolve,reject)=>sent.push({name,args,resolve,reject}));},onData(){}},setInterval(){},Date,Promise,console};
  context.window.OC=context.OC;vm.createContext(context);vm.runInContext(source,context);
  const snapshot=(revision,values={},extra={})=>context.window.BEC_CONTROL.receive(Object.assign({revision,values:Object.assign({'n1.address':'','n1.redstone':'','n1.group':'1','n1.pauseSide':'1'},values),group:1,groupCount:1,mode:'binding',configured:true},extra));
  const edit=value=>context.window.BEC_BINDING_DIRTY({modules:{'node-1':{address:value}}});
@@ -99,5 +99,17 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
  assert.equal(f.el('start-run').disabled,true);
  f.snapshot('2',valid,{mode:'running',reply:{token:req.args._token,ok:true,message:'启动已完成'}});await flush();
  assert.equal(f.el('start-run').textContent,'运行中');assert.match(f.el('action-feedback').textContent,/启动已完成/);
- console.log('Page save races, feedback, picker, patterns, cache and receipt/completion: 33 scenarios passed');
+ f=fixture();cache={revision:'c1',enabled:false,target:4000000,busy:false,message:'idle',logs:[],page:0,total:16,rows:[{name:'first',label:'第一页',stock:1,target:4000000}]};
+ f.snapshot('1',valid,{cache});f.el('cache-next').onclick();assert.equal(f.sent[0].args.mode,'page');
+ f.snapshot('2',valid,{cache:Object.assign({},cache,{page:1,rows:[{name:'second',label:'第二页',stock:2,target:4000000}]})});f.sent[0].resolve({});await flush();
+ f.el('cache-save-default').onclick();const save=f.sent[1];assert.equal(f.el('cache-prev').disabled,false,'save must not lock previous page');
+ f.el('cache-prev').onclick();assert.equal(f.el('cache-page').textContent,'1 / 2');assert.match(f.el('cache-rows').innerHTML,/第一页/);assert.equal(f.sent[2].args.mode,'page');
+ f.sent[2].resolve({message:'page'});await flush();assert.match(f.el('cache-feedback').textContent,/正在提交/,'page ack must not finish pending save');assert.equal(f.el('cache-save-default').disabled,true);
+ f.snapshot('3',valid,{cache:Object.assign({},cache,{page:1,rows:[{name:'second',label:'迟到第二页',stock:3,target:4000000}]})});assert.equal(f.el('cache-page').textContent,'1 / 2','late page response cannot change user selection');
+ save.resolve({message:'保存完成'});await flush();assert.match(f.el('cache-feedback').textContent,/保存完成/);
+ f.el('cache-next').onclick();assert.match(f.el('cache-rows').innerHTML,/迟到第二页/,'loaded page opens immediately');
+ f.snapshot('4',valid,{cache,_online:false});f.el('cache-prev').onclick();assert.match(f.el('cache-rows').innerHTML,/第一页/,'offline browsing of loaded pages stays available');
+ f=fixture();f.snapshot('1',valid,{cache});f.el('cache-default').value='987654';f.el('cache-default').oninput.call(f.el('cache-default'));f.snapshot('2',valid,{cache:Object.assign({},cache,{target:555})});assert.equal(f.el('cache-default').value,'987654','unsubmitted default edit survives snapshots');
+ f=fixture();f.snapshot('1',valid);f.edit('pending-address');f.el('group-select').value=2;f.el('group-select').onchange.call(f.el('group-select'));assert.equal(f.sent.length,1);assert.match(f.el('action-feedback').textContent,/地址还在保存/);
+ console.log('Page save races, feedback, picker, patterns, cache and browsing: 38 scenarios passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});
