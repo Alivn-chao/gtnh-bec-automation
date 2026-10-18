@@ -17,14 +17,44 @@ for k, v in pairs(a) do if b[k] ~= v then return false end end for k, v in pairs
 local function network(a) local rows, result = call(a, "getFluidsInNetwork"), {} assert(type(rows) == "table", "网络库存不可读") for _, f in pairs(rows) do
 assert(type(f) == "table", "流体条目无效") local n = integer(f.amount or f.size or 0) if n > 0 then assert(type(f.name) == "string", "流体名称缺失")
 result[f.name] = (result[f.name] or 0) + n end end return result
-end local matchedOutputs, perRecipe local function checkRecipe(required,parallel) parallel=parallel or integer(call(NODE,"getParallelRecipesInProgress"))
+end
+-- BEC_V3_PERFORMANCE_1: one catalogue per worker/batch. A new worker (including
+-- resume) reloads disk; pattern editing is excluded while a worker is active.
+local recipeIndex
+local function recipeKey(needs)
+ local names,parts={},{}
+ for name in pairs(needs)do names[#names+1]=name end
+ table.sort(names)
+ for _,name in ipairs(names)do parts[#parts+1]=#name..":"..name.."="..string.format("%.0f",needs[name])end
+ return table.concat(parts,";")
+end
+local function indexedRecipes(needs)
+ if not recipeIndex then
+  local index={}
+  if fs.exists("/home/bec/recipes")then
+   for file in fs.list("/home/bec/recipes")do if file:match("%.dat$")then
+    local f=assert(io.open("/home/bec/recipes/"..file,"r"));local r=ser.unserialize(f:read("*a"));f:close()
+    assert(type(r)=="table","登记配方损坏: "..file)
+    if r.state=="converted"then
+     local amounts={}
+     for _,fluid in ipairs(r.condensates or {})do amounts[fluid.name]=(amounts[fluid.name]or 0)+integer(fluid.amount or fluid.size)end
+     local key=recipeKey(amounts);index[key]=index[key]or {};index[key][#index[key]+1]={outputs=r.outputs,file=file}
+    end
+   end end
+  end
+  recipeIndex=index
+ end
+ local matches={}
+ for _,r in ipairs(recipeIndex[recipeKey(needs)]or {})do
+  assert(type(r.outputs)=="table"and #r.outputs==1,"登记产物无效: "..r.file)
+  matches[#matches+1]=r.outputs[1]
+ end
+ return matches
+end
+local matchedOutputs, perRecipe local function checkRecipe(required,parallel,snapshot) parallel=parallel or integer(call(NODE,"getParallelRecipesInProgress"))
 assert(parallel>0 and type(required)=="table","当前配方并行/需求不可读") local normalized={} for name,n in pairs(required) do assert(mapping[name] and integer(n)>0 and n%parallel==0,"配方需求无法按并行拆分: "..tostring(name))
-normalized[name]=n/parallel end local matches={} if fs.exists("/home/bec/recipes") then
-for file in fs.list("/home/bec/recipes") do if file:match("%.dat$") then local f=assert(io.open("/home/bec/recipes/"..file,"r"));local r=ser.unserialize(f:read("*a"));f:close() assert(type(r)=="table","登记配方损坏: "..file)
-if r.state=="converted" then local needs={} for _,fluid in ipairs(r.condensates or {}) do needs[fluid.name]=(needs[fluid.name] or 0)+integer(fluid.amount or fluid.size) end if same(needs,normalized) then
-assert(type(r.outputs)=="table" and #r.outputs==1,"登记产物无效: "..file) matches[#matches+1]=r.outputs[1] end end
-end end end if #matches>0 then
-local provided=call(NODE,"getProvidedTier") if c.methods(NODE).getRequiredTier~=nil then local needed=call(NODE,"getRequiredTier") local tier=type(needed)=="table" and needed.tier or needed
+normalized[name]=n/parallel end local matches=indexedRecipes(normalized) if #matches>0 then
+if snapshot or c.methods(NODE).getRequiredTier~=nil then local needed;if snapshot then needed=snapshot.requiredTier else needed=call(NODE,"getRequiredTier")end local tier=type(needed)=="table" and needed.tier or needed
 assert(type(tier)=="number","所需蜂群等级不可读") end  matchedOutputs,perRecipe=matches,normalized
 return parallel end local amount=type(required)=="table" and required.entangled_chromaticglass assert(type(amount)=="number" and amount>0 and amount%288==0
 and required.entangled_transcendentmetal==amount, "未验证的配方需求，保持暂停") local recipes=amount/288 assert(parallel==nil or parallel==recipes,"实际并行与凝聚物需求不符") local count=0; for _ in pairs(required) do count=count+1 end
@@ -42,12 +72,16 @@ local f = assert(io.open(JOURNAL, "r")) local old = f:read("*a"); f:close() writ
 writeVerified(JOURNAL, ser.serialize(record, false)) end local function pause(value) call(RS, "setOutput", sides.top, value)
 assert(call(RS, "getOutput", sides.top) == value, "红石输出回读不符") end local function generator(enabled) call(GEN, "setWorkAllowed", enabled)
 assert(call(GEN, "isWorkAllowed") == enabled, "纠缠装置启停回读不符") end local function switchNanites()
-local demand=call(NODE,"getRequiredTier");local family=type(demand)=="table"and demand.name or nil
+local demand;if not NANITES.handlesPhase then demand=call(NODE,"getRequiredTier")end local family=type(demand)=="table"and demand.name or nil
 local needed=type(demand)=="table" and demand.tier or demand
-if type(needed)~="number" then return end
+if not NANITES.handlesPhase and type(needed)~="number" then return end
 if BEC_V2_PHASE then BEC_V2_PHASE("nanites")end
 local started=computer.uptime();print("检查蜂群 / 准备换盘")
 NANITES.ensure({tick=tick,stopping=function() return stopping end})
+if NANITES.handlesPhase then
+ demand=NANITES.lastRequirement;if not demand then return end
+ needed,family=demand.tier,demand.name
+end
 print(string.format("蜂群检查/换盘完成：%.2f 秒",computer.uptime()-started))
 local provided=call(NODE,"getProvidedTier")
 assert(type(provided)=="table" and provided.tier>=needed and integer(call(NODE,"getAvailableNanites"))>=64,"蜂群等级或数量不足，保持暂停")
@@ -81,7 +115,7 @@ assert(type(required) == "table" and type(consumed) == "table", "订单需求不
 local remaining, total = {}, 0 for name, amount in pairs(required) do assert(mapping[name], "不支持的凝聚物: " .. tostring(name)) amount = integer(amount)
 local used = integer(consumed[name] or 0) assert(used <= amount, "已消耗数量超过需求") remaining[name] = amount - used; total = total + amount end
 assert(total > 0, "订单没有有效需求") for name, amount in pairs(consumed) do assert(integer(amount) == 0 or required[name], "消耗记录与当前订单不符") end
-checkRecipe(required,parallel) return required, remaining end local function queuedRecipes() return 0 end local function batchTarget(required,remaining)
+checkRecipe(required,parallel,snapshot) return required, remaining end local function queuedRecipes() return 0 end local function batchTarget(required,remaining)
 local parallel=checkRecipe(required) local count=math.max(parallel,queuedRecipes()) local target={} for name,amount in pairs(required) do
 target[name]=remaining[name]+perRecipe[name]*(count-parallel) assert(target[name]<=2147483647,"整批需求过大") end return target,count
 end local function unchanged() local req, remaining = current() assert(same(req, record.required) and same(remaining, record.remaining), "暂停订单发生变化，停止")
@@ -149,7 +183,25 @@ end end assert(same(network(SUB),expected),"整批子网原液不符") record.pl
 return expected end local function completedIdle(state)
 if state~="idle" or not BEC_V2_COHORT_IDLE then return false end
 assert(BEC_V2_COHORT_IDLE());return true
-end local function serve() local waiting={idle=true,["assembler-offline"]=true,unpowered=true,["nanite-tier-too-low"]=true}
+end
+local function stockedBatch(target)
+ if record.pending or record.configOwned or next(record.transfers or {})then return false end
+ for _,job in ipairs(record.requests or {})do if job.state~="done"then return false end end
+ local stock=field()
+ for name,amount in pairs(stock)do assert(amount==0 or mapping[name],"约束场有未知凝聚物")end
+ for name,need in pairs(target)do if (stock[name]or 0)<need then return false end end
+ return next(network(SUB))==nil
+end
+local function productionSnapshot()
+ if type(BEC_V2_NODE_SNAPSHOT)=="function"then return BEC_V2_NODE_SNAPSHOT()end
+ local v={state=call(NODE,"getState"),required=call(NODE,"getRequiredCondensate")}
+ local demand=call(NODE,"getRequiredTier")
+ v.requiredTier=type(demand)=="table"and demand.tier or demand
+ v.requiredFamily=type(demand)=="table"and demand.name or nil
+ v.parallel=call(NODE,"getParallelRecipesInProgress");v.consumed=call(NODE,"getConsumedCondensate")
+ return v
+end
+local function serve() local waiting={idle=true,["assembler-offline"]=true,unpowered=true,["nanite-tier-too-low"]=true}
 local round=0 while not stopping do local nanitesChecked=false;pause(15); generator(false) local state=call(NODE,"getState")
 if stopping then break end state=call(NODE,"getState")
 if state=="idle" and BEC_V2_COHORT_IDLE then assert(BEC_V2_COHORT_IDLE());print("本批节点已完成，消耗核对通过；结束旧批次并交回设备组调度。") break end
@@ -162,28 +214,41 @@ for i=1,20 do tick(0.25);unchanged() local nextTarget,nextCount=batchTarget(reco
 target,count=nextTarget,nextCount end assert(stable,"主网任务清单持续变化，保持暂停") if stopping then break end
 record.batchCount=count print("本组当前配方 "..count.." 份；当前实际并行 "..checkRecipe(record.required) .."；一次准备整批所需流体。") round=round+1;record.round=round;record.transfers={};record.target=target;record.plan=nil;record.topups={}
 waitUntil(10,function() return call(GEN,"isMachineActive")==false end) emptyConfig();tanks(4,nil);tanks(5,nil) local filters=configureGate(record.required) unchanged()
-if stopping then break end local expected=prepareStreaming(target) if stopping then break end for i=1,20 do unchanged();assert(same(network(SUB),expected),"原液不稳定");os.sleep(0.25) end
+if stopping then break end local cached=stockedBatch(target)
+if cached then
+ record.expected={};record.secured={};record.plan=nil;save("stream-prepared")
+ print("凝聚物库存满足本批需求；子网为空，无需搬液和纠缠。")
+else
+local expected=prepareStreaming(target) if stopping then break end for i=1,20 do unchanged();assert(same(network(SUB),expected),"原液不稳定");os.sleep(0.25) end
 save("converting");generator(true) local conversionLimit=180 for name,need in pairs(target) do conversionLimit=conversionLimit+math.ceil(need/(units[name] or 144))*180 end waitUntil(conversionLimit,function()
 local stock=field() for name,need in pairs(target) do if (stock[name] or 0)<need then return false end end return true end,unchanged)
+end
 unchanged();generator(false) record.plan=nil;record.lastState=nil;save("watching") if not stopping then verifyGate(filters);unchanged()
+if cached then
+ emptyConfig();tanks(4,nil);tanks(5,nil);assert(stockedBatch(target),"快速放行前库存或子网变化，保持暂停")
+ if BEC_V3_RELEASE_SUPPLY then BEC_V3_RELEASE_SUPPLY()end
+end
 if BEC_V2_PHASE then BEC_V2_PHASE("producing")end pause(0) print("整批流体齐备，已连续放行；本组同配方节点已同时放行。按 Q 停止。") local releasedAt=computer.uptime() local deadline=releasedAt+600
 local lastStock=field() local lastRequired=record.required local nextQueueCheck=0 while not stopping do
-local v=call(NODE,"getState") local stock=field() local req=call(NODE,"getRequiredCondensate") verifyGate(filters)
-local demand=call(NODE,"getRequiredTier");local family=type(demand)=="table"and demand.name or nil
-local needed=type(demand)=="table" and demand.tier or demand
+-- One full group sample per decision, plus a separate fresh sample at the
+-- refill boundary. Never reuse it after a pause, swap, release, or yield.
+local sample=productionSnapshot();local v,req=sample.state,sample.required
+local stock=field();verifyGate(filters)
+local needed,family=sample.requiredTier,sample.requiredFamily
 local supplied=call(NODE,"getProvidedTier")
 if type(needed)=="number" and (needed~=lastNaniteTier or family~=lastNaniteFamily or type(supplied)~="table" or supplied.tier<needed) then
 pause(15);local completed=false;waitUntil(10,function() local s=call(NODE,"getState");completed=completedIdle(s);return s=="paused-immediate" or s=="nanite-tier-too-low"or completed,s end,nil,"换蜂前暂停/完成核对")
 if completed then print("换蜂暂停期间本批已完成，消耗核对通过；无需再换蜂。");stopping=true;break end
-switchNanites();if stopping then break end;verifyGate(filters);pause(0);releasedAt=computer.uptime();deadline=releasedAt+600;if BEC_V2_PHASE then BEC_V2_PHASE("producing")end;v=call(NODE,"getState")
+switchNanites();if stopping then break end;verifyGate(filters);pause(0);releasedAt=computer.uptime();deadline=releasedAt+600;if BEC_V2_PHASE then BEC_V2_PHASE("producing")end
+sample=productionSnapshot();v,req=sample.state,sample.required;stock=field()
 end
-local parallel if req~=nil then parallel=integer(call(NODE,"getParallelRecipesInProgress")) local matching=parallel>0
+local parallel if req~=nil then parallel=integer(sample.parallel) local matching=parallel>0
 for name,n in pairs(req) do if not perRecipe[name] or n~=perRecipe[name]*parallel then matching=false end end for name in pairs(perRecipe) do if req[name]==nil then matching=false end end if not matching then pause(15);break end if not same(gateFilters(req),filters) then pause(15);break end
-lastRequired=req end if v=="idle" then local consumed=call(NODE,"getConsumedCondensate")
+lastRequired=req end if v=="idle" then local consumed=sample.consumed
 assert(type(consumed)=="table","节点空闲后消耗记录不可读") for name,need in pairs(lastRequired) do assert(integer(consumed[name] or 0)>=need, "节点进入空闲但凝聚物未消耗完，可能故障关闭: "..name.."；需求 "..need.."，已消耗 "..tostring(consumed[name] or 0))
 end stopping=true;break end if waiting[v] then break end
 assert(v=="crafting" or (v=="paused-immediate" and computer.uptime()-releasedAt<(BEC_V2_RELEASE_GRACE or 3)), "节点运行异常: "..tostring(v)) local refill=false if computer.uptime()>=nextQueueCheck and req~=nil then
-local consumed=call(NODE,"getConsumedCondensate") assert(type(consumed)=="table","当前消耗记录不可读") local fresh=call(NODE,"getRequiredCondensate") if type(fresh)~="table" or not same(req,fresh) or parallel~=call(NODE,"getParallelRecipesInProgress") then pause(15);break end
+local freshSample=productionSnapshot();local consumed=freshSample.consumed;assert(type(consumed)=="table","当前消耗记录不可读") local fresh=freshSample.required if type(fresh)~="table" or not same(req,fresh) or parallel~=freshSample.parallel then pause(15);break end
 local count=math.max(1,queuedRecipes()) for name,amount in pairs(req) do local need=perRecipe[name]*math.max(parallel,count)-integer(consumed[name] or 0) if (stock[name] or 0)<need then refill=true end
 end nextQueueCheck=computer.uptime()+1 end if refill then break end
 if not same(stock,lastStock) then deadline=computer.uptime()+600;lastStock=stock end assert(computer.uptime()<deadline,"当前配方运行超时") tick(0.1) end

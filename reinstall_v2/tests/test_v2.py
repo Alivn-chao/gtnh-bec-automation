@@ -163,7 +163,14 @@ for tick=1,3 do E.step();s.now=s.now+1 end
 assert(not E.groupOwner[1]);assert(C.read(C.path('state/group-1/cohort.dat')).stage=='interrupted')
 ''')
 check('generator failure never releases nodes', '''
-s.failGenerator=true;E=factory(cfg,C,Bridge,false)
+-- Require actual conversion: a stock hit deliberately never starts a generator.
+s.failGenerator=true;s.stock={}
+local c=require('component');local invoke=c.invoke
+c.invoke=function(a,m,...)
+ if a=='sub'and m=='getFluidsInNetwork'then return {{name='molten.chromaticglass',amount=576},{name='molten.transcendentmetal',amount=576}}end
+ return invoke(a,m,...)
+end
+E=factory(cfg,C,Bridge,false)
 for tick=1,300 do E.step();s.now=s.now+0.1 end
 assert(releaseCount==0);assert(E.tasks[1].fault);assert(outputs['rs1-']==15 and outputs['rs2-']==15)
 assert(not generators.gen1 and not generators.gen2)

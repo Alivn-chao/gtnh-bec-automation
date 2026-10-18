@@ -1,0 +1,51 @@
+{
+  "baseline": "a293a34",
+  "kind": "Lua simulation; zero component-call latency, not real game speed",
+  "rows": [
+    {
+      "nodes": 1,
+      "v2": {
+        "node_reads": 398,
+        "first_release_seconds": 6.5,
+        "simulation_seconds": 7.1,
+        "generator_starts": 2
+      },
+      "v3": {
+        "node_reads": 170,
+        "first_release_seconds": 0.5,
+        "simulation_seconds": 1.1,
+        "generator_starts": 0
+      }
+    },
+    {
+      "nodes": 2,
+      "v2": {
+        "node_reads": 939,
+        "first_release_seconds": 6.5,
+        "simulation_seconds": 7.6,
+        "generator_starts": 2
+      },
+      "v3": {
+        "node_reads": 358,
+        "first_release_seconds": 0.5,
+        "simulation_seconds": 1.5,
+        "generator_starts": 0
+      }
+    },
+    {
+      "nodes": 16,
+      "v2": {
+        "node_reads": 7323,
+        "first_release_seconds": 6.5,
+        "simulation_seconds": 7.6,
+        "generator_starts": 2
+      },
+      "v3": {
+        "node_reads": 2710,
+        "first_release_seconds": 0.5,
+        "simulation_seconds": 1.5,
+        "generator_starts": 0
+      }
+    }
+  ]
+}

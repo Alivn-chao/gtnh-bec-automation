@@ -269,11 +269,13 @@ function M.preview()
  emptyPorts()
 end
 function M.ensure(ctx)
+ M.lastRequirement=nil;context=ctx
  prepStarted=clock.uptime();firstMoveStarted=false
- local initial=cfg.inspect and cfg.inspect()
+ local initial=cfg.inspectInitial and cfg.inspectInitial()or cfg.inspect and cfg.inspect()
  local need=initial and initial.requiredTier or needed();if not whole(need) or need<1 then return false end
- if cfg.checkSharedHive then cfg.checkSharedHive()end
- context=ctx;local size=discover()
+ if not cfg.inspectInitial and cfg.checkSharedHive then cfg.checkSharedHive()end
+ if context and context.stopping then assert(not context.stopping(),'换蜂已暂停，保留现场')end
+ local size=discover()
  local old=oldRecord();assert(not old or old.stage=='done','旧蜂群IO未完成，保留盘和日志，不自动重放')
  emptyPorts()
  local family;if initial then family=initial.requiredFamily else family=requiredFamily()end
@@ -290,7 +292,11 @@ function M.ensure(ctx)
  if keeping then
   if known then extra=pack(cells,known.key)
   else for _,disk in ipairs(cells) do if disk.item and disk.item.family==p.name then extra={disk};break end end end
-  if #extra==0 then return false end
+  if #extra==0 then
+   M.lastRequirement={tier=need,name=family}
+   print('现有蜂群满足需求，无需搬盘；共享仓、盘库与IO已核对。')
+   return false
+  end
  else assert(best,'硬盘盒缺少满足T'..need..'的至少64个蜂群') end
  if h>0 and (not keeping or not known) then
   local hasEmpty=false;for _,disk in ipairs(cells) do if disk.empty then hasEmpty=true;break end end
@@ -311,6 +317,8 @@ function M.ensure(ctx)
  end,debug.traceback)
  local cut,cutError=pcall(off)
  assert(cut,tostring(cutError));assert(ok,tostring(result)..'\n保留现场，不重试。')
+ M.lastRequirement={tier=need,name=family}
  return result
 end
+M.handlesPhase=true
 return M

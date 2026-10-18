@@ -209,13 +209,16 @@ function M.environment(cfg,index,engine)
   return c.invoke(a,m,table.unpack(args))
  end
  local env=setmetatable({}, {__index=_G});env._ENV=env
- -- Explicit logical read only: always scans every member anew, never memoizes
- -- across a yield, component call, or hardware mutation. This is not an OC API
- -- or an atomic server-side snapshot.
+ -- Every invocation scans all members anew. The controller may use the fields
+ -- together within one decision, but resamples after yielding or changing
+ -- hardware. These separate OC reads are not an atomic server-side snapshot.
  env.BEC_V2_PHASE=function(stage)if engine.phase then engine.phase(index,stage)end end
  -- OC reads across a cohort can exceed the original single-node 3-second grace.
  env.BEC_V2_RELEASE_GRACE=30
  env.BEC_V2_NODE_SNAPSHOT=nodeSnapshot
+ -- A stock hit never starts generators (the old supply-lock release point).
+ -- Called only after empty-inlet/subnet and live stock checks, before release.
+ env.BEC_V3_RELEASE_SUPPLY=function()engine.release(index)end
  env.BEC_V2_COHORT_IDLE=function()
   local value=nodeSnapshot()
   assert(value.allIdle,'批次节点状态已改变，保留现场核对')
@@ -266,6 +269,13 @@ function M.environment(cfg,index,engine)
   env.BEC_CELL_IO.path=C.path('state/group-'..n.group..'/nanites-cell.journal')
   env.BEC_CELL_IO.checkGroup=cellGuard
   env.BEC_CELL_IO.inspect=cellInspection
+  -- BEC_V3_PERFORMANCE_1: initial inspection already proves group pause and
+  -- generator shutdown; check hive agreement without repeating that proof.
+  env.BEC_CELL_IO.inspectInitial=function()
+   local value=cellInspection()
+   assert(sharedHiveReady(),'组内蜂群仓读数不同，核对是否共用同一收容网')
+   return value
+  end
   env.BEC_CELL_IO.checkSharedHive=function()cellGuard(true)end
   env.BEC_CELL_IO.sharedHiveReady=sharedHiveReady
  end
