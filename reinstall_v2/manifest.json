@@ -3,6 +3,10 @@
     "bytes": 12616,
     "sha256": "88f7cacef408c5c4e888a15690d29994ef7484d1e143c92aac4830b4e4a294f8"
   },
+  "disk_cleanup.lua": {
+    "bytes": 8598,
+    "sha256": "c0eab8ce15410368a6d7452392df1f93c387446b01ad764c62681a6d79036cce"
+  },
   "lib/bridge.lua": {
     "bytes": 17823,
     "sha256": "92020f15438574a6a2e42b54c50254197e39e439ba4b3f19af571cf093a114d2"
@@ -76,8 +80,8 @@
     "sha256": "b7e4c89013c9f2b879078d387e4ef7f8f5560d6979f4661f5d6caa42c0821f68"
   },
   "runtime/controller.lua": {
-    "bytes": 37578,
-    "sha256": "88cf5a772822a8c9d3fb337466149a6f9d5517e9a4cd8287c3bf629af66c50f4"
+    "bytes": 38228,
+    "sha256": "7571d7a3113f21e7f9a5f002113f100ebf85d752557a0220d69641d96201c117"
   },
   "runtime/nanites.lua": {
     "bytes": 9966,
