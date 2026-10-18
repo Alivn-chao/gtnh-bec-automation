@@ -1,3 +1,11 @@
+# 2026-10-18 V3 缓存翻页与保存响应
+
+用户截图运行补库配方36，反馈首次下一页和保存缓存值等待很久。根因：transport心跳仅接收ack，实际H.handle等外层循环；前端只缓存访问过的分页。新增T.canServe/T.serve受限执行队首cache page/save，catalogueReady才允许，无正在处理/待发回执/退出才执行；T.handling与polling防C.write嵌套服务，不绕过FIFO机器动作。cache worker日志处pulse覆盖逐个配方扫描。前端接收全目录紧凑四元组，本地首次分页/离线浏览，单项0与默认false区分，save附group防旧组请求。H.snapshot估算目录额外值数/字节，超470值或14000B丢弃catalogue退快速服务器分页，留面板512/16KiB回执余量。库存仍展示用，不参与控制判断。
+
+新reinstall_v3/update_cache_response.lua约46KB，五文件cache/session/transport/web/html；从0e3926a精确签名更新（a293这五文件相同），HTML只下发差异中段，在OC重建并签名核对。保留全部配置/配方/日志，备份.before-v3-cache-N，10个rename故障点全回滚；无GC、临时包删除失败、CRLF均支持。不重建旧V2安装包。第一轮V3三模块update.lua不变；新安装V3须两个包依次装，已装第一轮只装cache响应包。Q正常退出后wget到/home/bec_v3_cache_update.lua、lua运行、原main.lua web重开，README已有命令。
+
+142项Python/Lua+20核心+41JS通过；旧版180次*0.2秒读期间save仍排队，新版首个回调边界落盘且1模拟秒内完成回执，真实cache工作器配方日志注入请求通过；flush/冲突失败、FIFO、不嵌套、待发回执不覆盖、16节点19/64目录包限制有测试。非Minecraft实机验证。原outputs/未跟踪内容保持不提交。
+
 # 2026-10-18 V3 第一阶段提速分支
 
 用户授权按性能审查实施，并创建 V3 分支。当前分支 codex/bec-v3-performance，从 V2 a293a34 建立。第一轮仅改 runtime/controller.lua、runtime/nanites_cell.lua、lib/bridge.lua：生产阶段合并整组读取、每工作器批次配方索引（新批/恢复重建）、库存足够且无子网原液/未知操作时跳过供液扫描及20轮等待/纠缠启动并在放行前重读验证、初始换蜂共享检查去重并返回已验证阶段；保留全IO槽/盘库/补蜂/饱和数量恢复保护。库存命中必须通过 BEC_V3_RELEASE_SUPPLY 释放原本由 generator(true) 释放的共享供液锁，避免占锁整个生产期。未实现下一单预取或流水供液。

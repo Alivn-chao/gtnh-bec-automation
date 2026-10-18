@@ -13,6 +13,13 @@ local panel=c.proxy(address);local H=module('web_session')(C,B,W)
 local T=module('web_transport')(panel,event,W,address);C.pulse=T.pulse
 T.snapshot=function()return H.snapshot(true)end
 T.observe=H.observe
+T.canServe=H.canServeFast
+local function handle(request)
+ local success,message=pcall(function()return H.handle(request.name,request.args,request.request)end)
+ if not success then H.notice=tostring(message)end
+ T.publish(H.snapshot(true),{token=request.token,name=request.name,ok=success,message=tostring(message):sub(1,400)})
+end
+T.serve=handle
 local ok,err=xpcall(function()
  while true do local accepted,reason=panel.setWebApp(package);assert(accepted~=nil,reason);if accepted then break end;event.pull(.6)end
  print('OCHD 已显示结构绑定与流程图。右键屏幕操作；OC 按 Q 退出并暂停。')
@@ -22,9 +29,7 @@ local ok,err=xpcall(function()
   T.poll(.05)
   local request=T.take()
   if request then
-   local success,message=pcall(function()return H.handle(request.name,request.args,request.request)end)
-   if not success then H.notice=tostring(message)end
-   T.publish(H.snapshot(true),{token=request.token,name=request.name,ok=success,message=tostring(message):sub(1,400)})
+   T.handling=true;handle(request);T.handling=false
    nextPush=clock.uptime()+.6
   end
   if T.stopping then break end

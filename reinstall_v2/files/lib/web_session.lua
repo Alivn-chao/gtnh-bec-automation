@@ -92,11 +92,15 @@ return function(C,B,W,options)
   local formal={};for _,f in ipairs(B.v2Fields(cfg))do formal[f.key]=f.value end
   for _,f in ipairs(fields())do assert(f.value==formal[f.key],'草稿尚未应用，请先应用绑定')end
  end
+ -- BEC_V3_CACHE_RESPONSE_1: no hardware controls or binding edits in this lane.
+ function H.canServeFast(request)
+  return request.name=='cache'and type(request.args)=='table'and K and K.canServeFast(request.args)
+ end
  function H.handle(name,args,request)
   assert(type(args)=='table','页面参数必须为对象')
   assert(type(request)=='number'and request==math.floor(request)and request>0,'请求编号无效')
   if name=='cache'then
-   if args.mode=='page'then assert(args.group==nil or args.group==H.group,'设备组已变化，忽略旧分页请求')end
+   if args.mode=='page'or args.mode=='save'then assert(args.group==nil or args.group==H.group,'设备组已变化，忽略旧缓存请求')end
    if args.mode=='enable'then cleanDraft();C.validate(cfg,true)end
    H.notice=cache().action(args);return H.notice
   elseif name=='patterns'then
@@ -269,6 +273,19 @@ return function(C,B,W,options)
    out.nodes[#out.nodes+1]={slot=n.slot or i,state=state,workAllowed=allowed==true,name=n.name}
    out.machines['node-'..(n.slot or i)]=state=='crafting'and 'active'or state=='offline'and 'unknown'or 'idle'
   end end
+  -- Leave room for transport metadata/completion within OCHD's 512-value,
+  -- 16-KiB snapshot limits. Large catalogues retain the fast server page path.
+  if out.cache and out.cache.catalogue then
+   local function quoted(s)return #s+2+select(2,s:gsub('[%z\1-\31\\"]',''))*5 end
+   local function cost(v)
+    if type(v)~='table'then return 1,type(v)=='string'and quoted(v)or #tostring(v)end
+    local nodes,bytes=1,2
+    for k,x in pairs(v)do local n,b=cost(x);nodes=nodes+n;bytes=bytes+quoted(tostring(k))+b+2 end
+    return nodes,bytes
+   end
+   local nodes,bytes=cost(out)
+   if nodes>470 or bytes>14000 then out.cache.catalogue=nil end
+  end
   return out
  end
  function H.close()

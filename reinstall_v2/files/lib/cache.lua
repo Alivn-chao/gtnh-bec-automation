@@ -57,6 +57,8 @@ return function(C,B,cfg,storage)
   names={};for name in pairs(found)do names[#names+1]=name end;table.sort(names);assert(#names<=64,'登记缓存类型超过64种');catalogueReady=true
  end
  function K.invalidateCatalogue()catalogueReady=false end
+ -- Only these small settings/page operations may run between worker reads.
+ function K.canServeFast(args)return catalogueReady and (args.mode=='page'or args.mode=='save')end
  function K.catalogueStep()scan()end
  function K.refreshStock(group)
   local ok,stock=pcall(c.invoke,cfg.groups[group].storage,'getStoredCondensate')
@@ -137,7 +139,7 @@ return function(C,B,cfg,storage)
    for _,t in ipairs(E.tasks)do if t.co and t.waitKind=='lock'then return true end end
    return false
   end
-  env.print=function(...)local rows={...};for i,v in ipairs(rows)do rows[i]=tostring(v)end;log(table.concat(rows,' '))end
+  env.print=function(...)local rows={...};for i,v in ipairs(rows)do rows[i]=tostring(v)end;log(table.concat(rows,' '));if C.pulse then C.pulse()end end
   local sleeping={};for k,v in pairs(os)do sleeping[k]=v end
   sleeping.sleep=function(seconds)coroutine.yield(clock.uptime()+(seconds or .1))end;env.os=sleeping
   env.require=function(name)
@@ -203,8 +205,14 @@ return function(C,B,cfg,storage)
  end
  function K.snapshot(group,fast)
   if not fast then local ok,err=pcall(scan);if not ok then K.message=tostring(err):sub(1,300)end;K.refreshStock(group)end
-  local out={revision=B.revision(raw or ''),enabled=settings.enabled,target=settings.target,busy=K.busy,group=K.group or group,blocked=K.blocked~=nil,message=K.message,logs=K.logs,page=K.page,total=#names,rows={}}
+  local out={revision=B.revision(raw or ''),enabled=settings.enabled,target=settings.target,busy=K.busy,group=K.group or group,blocked=K.blocked~=nil,message=K.message,logs=K.logs,page=K.page,total=#names,rows={},catalogue={}}
   local stock=displayedStock[group]or {}
+  -- Compact tuples let the browser show an unvisited page without an OC round
+  -- trip. Production never consumes this display-only catalogue or inventory.
+  for _,name in ipairs(names)do local value=settings.overrides[name]
+   if value==nil then value=false end
+   out.catalogue[#out.catalogue+1]={name,labels[name:gsub('^entangled_','')]or name,stock[name]or 0,value}
+  end
   for i=K.page*8+1,math.min(#names,K.page*8+8)do local name=names[i];local override=settings.overrides[name]
    out.rows[#out.rows+1]={name=name,label=labels[name:gsub('^entangled_','')]or name,stock=stock[name]or 0,target=override~=nil and override or settings.target,override=override}
   end

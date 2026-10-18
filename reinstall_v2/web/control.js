@@ -136,7 +136,7 @@ cachePanel.innerHTML='<h1>缓存管理</h1><p>只补已登记配方流体，生�
 function cacheState(){var k=last.cache,u=cacheUI[group];if(!u)u=cacheUI[group]={page:k.page,pages:{},edits:{},total:k.total};return u;}
 function cacheBrowse(page){
  if(!last||!last.cache)return;var u=cacheState();u.page=Math.max(0,Math.min(page,Math.max(0,Math.ceil(u.total/8)-1)));cacheStamp='';cacheView();
- if(online){cacheReadNext={group:group,page:u.page};cacheReadPage();}
+ if(online&&!Array.isArray(last.cache.catalogue)){cacheReadNext={group:group,page:u.page};cacheReadPage();}
 }
 function cacheReadPage(){
  if(cacheRead||!cacheReadNext||!online)return;var q=cacheReadNext;cacheReadNext=null;if(q.group!==group)return;cacheRead=true;
@@ -144,14 +144,16 @@ function cacheReadPage(){
 }
 function cacheAction(mode,name,value,page){
  if(cacheWait||!last||!last.cache)return;cacheWait=true;cacheWaiting=last.cache.revision;cacheMessage='正在提交…';cacheView();
- var args={mode:mode,name:name,value:value,page:page,revision:last.cache.revision},request=send('cache',args);cacheTok=args._token;
+ var args={mode:mode,name:name,value:value,page:page,group:group,revision:last.cache.revision},request=send('cache',args);cacheTok=args._token;
  request.then(function(r){cacheWait=false;cacheMessage=r.message||'已确认，等待库存更新';cacheView();}).catch(function(e){cacheWait=false;cacheMessage='未执行：'+e.message;cacheView();});
 }
 function cacheView(){
  var k=last&&last.cache;if(!k)return;
  $('cache-status').textContent=(!online?'离线，显示最后状态 · ':last.transportBusy?'OC正在读取，显示上次机器状态 · ':'')+(k.enabled?'自动补库已启用':'自动补库未启用')+' · '+(last.mode==='running'?'自动化运行中':'启动自动化后开始补库')+' · '+(k.busy?'设备组 '+k.group+' 补库中 · ':'')+k.message;
  var u=cacheState();if(u.total!==k.total){u.pages={};u.total=k.total;u.page=Math.min(u.page,Math.max(0,Math.ceil(k.total/8)-1));}u.pages[k.page]=list(k.rows);
- list(k.rows).forEach(function(r){if(u.edits[r.name]===String(r.override==null?'':r.override))delete u.edits[r.name];});
+ var allRows=Array.isArray(k.catalogue)?k.catalogue.map(function(r){return {name:r[0],label:r[1],stock:r[2],override:r[3]===false?null:r[3],target:r[3]===false?k.target:r[3]};}):null;
+ if(allRows){u.pages={};for(var page=0;page<Math.ceil(allRows.length/8);page++)u.pages[page]=allRows.slice(page*8,page*8+8);}
+ (allRows||list(k.rows)).forEach(function(r){if(u.edits[r.name]===String(r.override==null?'':r.override))delete u.edits[r.name];});
  $('cache-feedback').textContent=cacheMessage+(cachePageMessage?' · '+cachePageMessage:'');$('cache-log').textContent=list(k.logs).join('\n');
  if(u.defaultEdit===String(k.target))delete u.defaultEdit;
  if(u.defaultEdit!=null)$('cache-default').value=u.defaultEdit;else if(cacheWaiting!==k.revision&&document.activeElement!==$('cache-default'))$('cache-default').value=k.target;

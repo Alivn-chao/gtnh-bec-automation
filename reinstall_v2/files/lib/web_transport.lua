@@ -18,6 +18,15 @@ return function(panel,event,W,address)
   if T.observe and address then T.observe(address,method,value)end
   if polling then return end;polling=true
   for i=1,8 do local e={event.pull(0)};if not e[1]then break end;receive(e)end
+  -- BEC_V3_CACHE_RESPONSE_1: serve at most the queue head between worker calls.
+  -- Keep FIFO, do not overwrite an undelivered completion, and never nest a
+  -- handler inside another handler (C.write itself pulses during persistence).
+  local request=T.queue[1]
+  if request and not T.stopping and not T.handling and not T.pending and T.canServe and T.serve and T.canServe(request)then
+   table.remove(T.queue,1);T.handling=true
+   local ok,err=pcall(T.serve,request);T.handling=false
+   assert(ok,err);T.next=0
+  end
   local now=clock.uptime()
   if force or now>=T.next then
    local data=T.pending or(T.snapshot and T.snapshot())or T.last
