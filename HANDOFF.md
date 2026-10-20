@@ -1,3 +1,7 @@
+# 2026-10-20 下载超时运行旧包
+
+用户截图wget fastly c63d7be连接超时，后执行磁盘旧bec_v3_large_update.lua打印通用已安装，随后仍原290错误；不能当新补丁实机失败。更新器仅加明确SURPLUS RECOVERY r2版本提示、下载目标改新名bec_v3_surplus_update.lua避免误跑旧包，事务仍仅替换相同控制器，不改现场。仅wget成功才lua执行；备用CDN入口cdn.jsdelivr.net。更新器4项事务测试通过。
+
 # 2026-10-20 转换恢复拒绝已有盈余库存
 
 玩家装3ed7e69后截图controller.lua290转换恢复库存不符molten.hypogen：子网0、约束场4163184、目标1284480。旧converting恢复强制liquid+condensate==need，即便正常库存命中本来允许库存足量也拒绝盈余。新恢复仅增加liquid==0且condensate>=need接受路径，仍要求单位对齐、全部旧请求done、搬运确认、无pending、整组暂停纠缠停机、当前配方和批量核对；非零原液的总量检查保持。接受后原日志归档，新一轮真实库存抵扣，既有盈余保留，不按缺口重复下单。无法从截图判断盈余具体来源，未声称历史多搬。update_large支持bf1和已安装3ed7e69精确控制器，配对engine/bridge保持。新增实际9节点旧converting错误复现/新恢复无申请搬液/未确认与不足及非整批拒绝/残留原液拒绝/旧补丁升级用例；完整结果见本次提交。报告队列已满保留5份只是有界报告提示，非停机根因。

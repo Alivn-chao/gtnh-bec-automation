@@ -1,6 +1,6 @@
 -- BEC_V3_LARGE_UPDATE_1
-local SELF_SIGNATURE='45106:794871725'
-print('BEC V3 large totals, same-cohort parallel; Q to exit the old UI first')
+local SELF_SIGNATURE='45099:2576596443'
+print('BEC V3 SURPLUS RECOVERY r2 / Q to exit the old UI first')
 local rows={{name='runtime/controller.lua',source=[=[-- BEC_V3_LARGE_BATCH_1: long-sized totals; bounded per-call fluid requests.
 local c = require("component") local ser = require("serialization") local computer = require("computer") local fs = require("filesystem")
 local sides = require("sides") local event = require("event") local mode = (...) or "preview" local JOURNAL = "/home/bec_auto.journal"
@@ -321,7 +321,7 @@ for i,row in ipairs(rows)do
 end
 -- Release only this exact, already-loaded temporary download. The program
 -- backups and every state/configuration file are retained.
-local self='/home/bec_v3_large_update.lua'
+local self='/home/bec_v3_surplus_update.lua'
 do
  local downloaded=read(self)
  local payload=downloaded and downloaded:match('^%-%- BEC_V3_LARGE_UPDATE_1\nlocal SELF_SIGNATURE=[^\n]*\n(.*)$')
@@ -330,7 +330,7 @@ do
  end
  downloaded=nil;payload=nil;if type(collectgarbage)=='function'then pcall(collectgarbage,'collect')end
 end
-if identical then print('V3大总量并行修复已安装，无需重复更新。');return end
+if identical then print('SURPLUS RECOVERY r2：本版已安装，无需重复更新。');return end
 local disk=assert(fs.get(root));assert(disk.spaceTotal()-disk.spaceUsed()>=bytes+524288,'磁盘空间不足：更新后需保留512KiB')
 local n=1
 while true do

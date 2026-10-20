@@ -1,5 +1,9 @@
 # V3 第一阶段提速预览
 
+## 下载超时后不要执行旧更新器
+
+若wget显示Connection timed out，后续同名lua可能运行磁盘残留旧包。改用新的下载文件名 `/home/bec_v3_surplus_update.lua`，只有下载成功后再执行。当前包首行打印 `BEC V3 SURPLUS RECOVERY r2`；旧包的通用“大总量并行修复已安装”不能证明包含恢复盈余修复。cdn.jsdelivr.net为备用入口，fastly.jsdelivr.net/raw.githubusercontent.com也可用，实际连通取决于游戏端网络。
+
 ## 2026-10-20：恢复时凝聚物库存多于本批需求
 
 截图 `controller.lua:290: 转换恢复库存不符: molten.hypogen`：子网0，凝聚物4,163,184，本批目标1,284,480。错误发生在旧converting记录的恢复检查，旧逻辑要求库存恰好等于需求，拒绝了多余库存；不是这次重新下单或搬液超额的证据。
@@ -17,8 +21,8 @@
 已有V3在OC按 **Q** 正常退出网页，回到OpenOS执行：
 
 ```sh
-wget -f https://fastly.jsdelivr.net/gh/Alivn-chao/gtnh-bec-automation@fix/v3-cache-production/reinstall_v3/update_large.lua /home/bec_v3_large_update.lua
-lua /home/bec_v3_large_update.lua
+wget -f https://cdn.jsdelivr.net/gh/Alivn-chao/gtnh-bec-automation@fix/v3-cache-production/reinstall_v3/update_large.lua /home/bec_v3_surplus_update.lua
+lua /home/bec_v3_surplus_update.lua
 lua /home/bec_v2/main.lua web
 ```
 
