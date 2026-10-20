@@ -1,3 +1,7 @@
+# 2026-10-20 V3 生产被缓存 crafting 守卫暂停
+
+用户截图lib/cache.lua46/102缓存保护、剩余1307KiB、当前蜂群T3/需求T5。读取远端codex/bec-v3-performance最新499d433，隔离工作树work/bec-v3-cache-fix、修复分支fix/v3-cache-production。旧K.step确认idle后E.nodeWork(true)，缓存持锁时开新接单，模拟可复现相同crafting报错。现改缓存期nodeWork(false)，运行器入口逐节点重新idle核对，若边界已有订单则不加载运行器/不写缓存日志/不搬液或下单，干净交回锁；guard增加isWorkAllowed=false，外部重开仍保护。AE优先/已申请原液收尾/未知操作不重放保持。不改生产/蜂群数据，不将饱和30720当实物。新增20KB单lib/cache.lua更新器update_cache_admission.lua，已知499d/0e392基线、CAS/flush/readback/备份/回滚/512KiB余量；未知程序拒覆盖。README命令。149Python/Lua+20核心+41JS通过，未实机运行；旧缓存若仍未确认需看原cache.journal，不能删日志。已有源码包按V3 run_tests重建，不重建旧V2安装器。
+
 # 2026-10-18 V3 缓存翻页与保存响应
 
 用户截图运行补库配方36，反馈首次下一页和保存缓存值等待很久。根因：transport心跳仅接收ack，实际H.handle等外层循环；前端只缓存访问过的分页。新增T.canServe/T.serve受限执行队首cache page/save，catalogueReady才允许，无正在处理/待发回执/退出才执行；T.handling与polling防C.write嵌套服务，不绕过FIFO机器动作。cache worker日志处pulse覆盖逐个配方扫描。前端接收全目录紧凑四元组，本地首次分页/离线浏览，单项0与默认false区分，save附group防旧组请求。H.snapshot估算目录额外值数/字节，超470值或14000B丢弃catalogue退快速服务器分页，留面板512/16KiB回执余量。库存仍展示用，不参与控制判断。

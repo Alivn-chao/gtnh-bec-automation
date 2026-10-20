@@ -1,5 +1,5 @@
 -- BEC_V3_CACHE_RESPONSE_UPDATE_1
-local SELF_SIGNATURE='46297:2646247237'
+local SELF_SIGNATURE='47048:1413985909'
 print('BEC V3 cache response update; Q to exit the old UI first')
 local function sig(s)local a,b=1,0;for i=1,#s do a=(a+s:byte(i))%65521;b=(b+a)%65521 end;return string.format('%d:%.0f',#s,b*65536+a)end
 local rows={{name='lib/cache.lua',source=[=[-- V1 cache worker, scheduled under the same V2 group and shared-fluid leases.
@@ -97,12 +97,22 @@ return function(C,B,cfg,storage)
   local g=cfg.groups[group];local leader
   for i,n in ipairs(cfg.nodes)do if n.group==group then leader=leader or i end end
   assert(leader,'缓存设备组没有节点');local n=cfg.nodes[leader]
+  -- State reads and workAllowed writes are separate server callbacks. An idle
+  -- node may already have admitted an order before the cache closed admission.
+  -- Yield the leases BEFORE loading the cache runtime or creating its journal.
+  for _,member in ipairs(cfg.nodes)do if member.group==group then
+   if c.invoke(member.address,'getState')~='idle'then
+    log('节点已接单或不再空闲，缓存尚未搬液/下单，交回生产调度。')
+    return true
+   end
+  end end
   local function guard()
    assert(E.fluidOwner==ctx.token and E.groupOwner[group]==ctx.token,'缓存资源锁变化')
    assert(B.read(C.path('config.dat'))==ctx.formal,'缓存期间绑定变化，保留记录')
    local disk=storage.status();assert(disk.known and disk.ok,'缓存期间磁盘不足，保留记录')
    for _,member in ipairs(cfg.nodes)do if member.group==group then
     assert(c.invoke(member.redstone,'getOutput',member.pauseSide)==15,'缓存期间节点暂停信号变化')
+    assert(c.invoke(member.address,'isWorkAllowed')==false,'缓存期间节点接单许可被重新开启')
     local s=c.invoke(member.address,'getState');assert(s=='idle'or s=='paused-immediate'or s=='nanite-tier-too-low','缓存期间节点状态异常：'..tostring(s))
    end end
   end
@@ -197,9 +207,11 @@ return function(C,B,cfg,storage)
    for _,a in ipairs(g.generators)do if c.invoke(a,'isWorkAllowed')or c.invoke(a,'isMachineActive')then safe=false end end
    if safe and members>0 then
     K.assertReady();prune(group);local disk=storage.status();if not disk.known or not disk.ok then return end
-    -- Keep immediate pause asserted, but allow idle nodes to admit a new order
-    -- so the V1 priority check can see physical inputs as well as AE queues.
-    for i,n in ipairs(cfg.nodes)do if n.group==group then c.invoke(n.redstone,'setOutput',n.pauseSide,15);E.nodeWork(i,true)end end
+    -- Cache owns the same physical supply path as production. Closing work
+    -- permission prevents a new recipe from racing guard() as crafting while
+    -- the immediate-pause signal is still being processed. AE priority checks
+    -- remain active; admission is reopened by E only after clean lease release.
+    for i,n in ipairs(cfg.nodes)do if n.group==group then c.invoke(n.redstone,'setOutput',n.pauseSide,15);E.nodeWork(i,false)end end
     active={group=group,token='cache-'..group,formal=B.read(C.path('config.dat'))}
     E.groupOwner[group]=active.token;E.fluidOwner=active.token
     active.co=coroutine.create(function()return worker(group,E,active)end)

@@ -103,7 +103,7 @@ K.close();K=factoryCache(C,B,cfg,disk)
  def test_arriving_production_waits_for_request_and_confirmed_conversion(self):
   l=setup();l.execute(AE+'''cpuBusy=false
 for i=1,100 do K.step(E,true);world.advance(.05);if requests==1 then break end end
-assert(requests==1 and K.busy and E.fluidOwner=='cache-1'and world.workAllowed==true)
+assert(requests==1 and K.busy and E.fluidOwner=='cache-1'and world.workAllowed==false)
 world.finished=false
 steps(200)
 ''')

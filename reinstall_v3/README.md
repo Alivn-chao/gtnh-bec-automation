@@ -1,5 +1,25 @@
 # V3 第一阶段提速预览
 
+## 2026-10-20：做配方时被缓存保护暂停
+
+截图错误 `lib/cache.lua:102: 缓存期间节点状态异常：crafting` 可由旧缓存调度复现：确认节点 idle 后，却在持有设备组/共享供液锁时开启节点接单；新订单进入后，缓存守卫看到 crafting 并保护暂停。截图磁盘剩余1307KiB，高于512KiB保留线，不是该条磁盘保护报错。截图中的蜂群T3/当前需求T5是暂停后的现场状态，不能据此认定蜂群盘丢失，也不能把30720饱和读数当实物总量。
+
+本次缓存持锁期间关闭节点新接单许可；若订单恰在最后一次idle检查与关闭许可间进入，加载缓存运行器、写缓存日志、搬液或AE下单之前直接交回控制权。原AE队列生产优先检查仍保留，已申请/搬入原液按旧守恒流程收尾；暂停信号、节点状态、外部重开接单和未确认操作保护不移除。
+
+已有V3先在OC按Q正常退出网页，再运行单文件补丁（约20KB）：
+
+```sh
+wget -f https://raw.githubusercontent.com/Alivn-chao/gtnh-bec-automation/fix/v3-cache-production/reinstall_v3/update_cache_admission.lua /home/bec_v3_cache_admission_update.lua
+lua /home/bec_v3_cache_admission_update.lua
+lua /home/bec_v2/main.lua web
+```
+
+仅替换 `/home/bec_v2/lib/cache.lua`，识别V3 `499d433` / `0e3926a` 对应已知版本，支持CRLF；原程序备份 `.before-v3-cache-admission-N`，flush/回读/替换失败回滚，并保留512KiB空间。不控制机器，不修改蜂群/生产/缓存日志，不清空缓存记录，也不自动重放任何未确认请求。无需重装或重新绑定。
+
+重新打开会从磁盘重新核对状态，旧进程内存中的K.blocked不带入新进程；**如果仍提示缓存操作未确认，保留 `state/group-1/cache.journal`（相应设备组）、生产和蜂群日志进行核对，不能删日志强制启动**。此补丁阻止后续竞争，不自动修复历史不明搬运。
+
+验证：149项Python/Lua测试、20个原核心场景、41个网页场景通过；4项新增运行回归复现旧crafting错误、正常补库不重开接单、边界订单无搬液/下单让位、外部重开许可仍停机保留日志；单文件更新幂等/已知版本/两处改名失败回滚/低空间/flush/CRLF有覆盖。尚未Minecraft实机验收。
+
 分支 `codex/bec-v3-performance`，基于 V2 网页版 `a293a34`。重点缩短配方读取、换蜂检查和库存充足订单的开工等待。已通过 Lua 5.2 模拟，尚未 Minecraft 实机验收。
 
 ## 缓存翻页、保存慢的追加修复
