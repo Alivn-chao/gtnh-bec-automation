@@ -1,4 +1,5 @@
 import unittest
+import subprocess
 from pathlib import Path
 from test_web_update import fixture
 from build_large_update import baseline,NAME
@@ -23,6 +24,10 @@ class LargeUpdateTests(unittest.TestCase):
    l=self.make();l.execute("local fs=require('filesystem');local rename=fs.rename;local n=0;fs.rename=function(a,b)n=n+1;if n=="+str(failure)+"then return false end;return rename(a,b)end")
    with self.assertRaisesRegex(Exception,'旧程序已恢复'):l.execute(SCRIPT)
    self.assertEqual(l.globals().files['/home/bec_v2/'+NAME],baseline())
+ def test_upgrades_already_installed_large_total_patch(self):
+  l=self.make();l.globals().files['/home/bec_v2/'+NAME]=subprocess.check_output(['git','show','3ed7e69:reinstall_v2/files/'+NAME],cwd=ROOT).decode()
+  l.execute(SCRIPT)
+  self.assertEqual(l.globals().files['/home/bec_v2/'+NAME],NEW)
  def test_low_space_flush_unknown_and_core_mismatch_refuse_update(self):
   for change in ['used=4100000','failFlush=true',"files['/home/bec_v2/runtime/controller.lua']='custom'","files['/home/bec_v2/lib/bridge.lua']='custom'"]:
    l=self.make();l.execute(change);before=l.globals().files['/home/bec_v2/'+NAME]

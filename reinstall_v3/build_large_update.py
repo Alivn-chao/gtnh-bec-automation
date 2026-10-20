@@ -11,7 +11,8 @@ NAME='runtime/controller.lua';BASE='bf1ae6f'
 def baseline(name=NAME):return subprocess.check_output(['git','show',BASE+':reinstall_v2/files/'+name],cwd=ROOT).decode('utf-8')
 def build():
  text=(ROOT/'reinstall_v2/files'/NAME).read_text(encoding='utf-8')
- row='{name='+repr(NAME)+',source='+literal(text)+',supported={['+repr(signature(baseline()))+']=true}}'
+ prior=subprocess.check_output(['git','show','3ed7e69:reinstall_v2/files/'+NAME],cwd=ROOT).decode('utf-8')
+ row='{name='+repr(NAME)+',source='+literal(text)+',supported={['+repr(signature(baseline()))+']=true,['+repr(signature(prior))+']=true}}'
  tree=ast.parse((ROOT/'reinstall_v2/build_cache_update.py').read_text(encoding='utf-8'))
  body=next(ast.literal_eval(n.value)for n in tree.body if isinstance(n,ast.Assign)and any(isinstance(t,ast.Name)and t.id=='body'for t in n.targets))
  body=body.replace('/home/bec_cache_update.lua','/home/bec_v3_large_update.lua')

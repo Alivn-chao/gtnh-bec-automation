@@ -1,5 +1,5 @@
 -- BEC_V3_PERFORMANCE_UPDATE_1
-local SELF_SIGNATURE='79699:3782390357'
+local SELF_SIGNATURE='79895:99683093'
 print('BEC V3 performance preview; Q to exit the old UI first')
 local rows={{name='runtime/controller.lua',source=[=[-- BEC_V3_LARGE_BATCH_1: long-sized totals; bounded per-call fluid requests.
 local c = require("component") local ser = require("serialization") local computer = require("computer") local fs = require("filesystem")
@@ -290,7 +290,8 @@ local req,remaining=current(true) resolveRawNames(old.target) local target=old.t
 local count;target,count=batchTarget(req,remaining) assert(type(old.batchCount)=="number" and count<=old.batchCount, "恢复时订单增加或旧批量缺失，暂停核对") for name,need in pairs(target) do assert(need<=integer(old.target[name]),"恢复需求超过旧整批目标") end
 print("实际并行/消耗已变化，按 AE 剩余订单扣除节点已消耗量核对库存。") end local sub,stock=network(SUB),field() for name,value in pairs(target) do
 local raw=mapping[name] local need=integer(value) local liquid,condensate=integer(sub[raw] or 0),integer(stock[name] or 0) local unit=units[name] or 144
-assert(liquid%unit==0 and condensate%unit==0 and (liquid+condensate==need or (mode=="restock" and liquid+condensate<need)), "转换恢复库存不符: "..raw.."；子网 "..liquid.." + 凝聚物 "..condensate.."，目标 "..need) if liquid+condensate<need then print(raw.." 当前缺口 "..(need-liquid-condensate).." mB；归档旧操作后重新备料。") end
+local stocked=liquid==0 and condensate>=need
+assert(liquid%unit==0 and condensate%unit==0 and (stocked or liquid+condensate==need or (mode=="restock" and liquid+condensate<need)), "转换恢复库存不符: "..raw.."；子网 "..liquid.." + 凝聚物 "..condensate.."，目标 "..need) if stocked and condensate>need then print(raw.." 原液已清空，凝聚物足量；保留多余库存 "..(condensate-need).." mB。") end if liquid+condensate<need then print(raw.." 当前缺口 "..(need-liquid-condensate).." mB；归档旧操作后重新备料。") end
 end for raw in pairs(sub) do local allowed=false;for _,known in pairs(mapping) do if known==raw then allowed=true end end assert(allowed,"转换恢复子网有无关原液")
 end for name,n in pairs(stock) do assert(n==0 or mapping[name],"转换恢复有无关凝聚物") end print("转换恢复核对通过，抵扣当前库存；已完成的旧申请和搬运记录保留归档。") end
 end assert(stopped or preTransfer or watching or crafted or prepared or converting or streaming,"该阶段存在未确认操作，不能自动恢复") archiveJournal(contents,".before-resume-") else

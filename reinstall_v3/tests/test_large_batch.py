@@ -56,6 +56,17 @@ c.invoke=function(a,m,...)
 end
 '''
 
+CONVERTING=r'''
+local total={};for _,i in ipairs(original.members)do
+ for name,n in pairs(nodes['node'..i].required)do total[name]=(total[name]or 0)+n end
+end
+C.write(C.path('state/group-1/cohort.dat'),original)
+path=C.path('state/node-6/production.journal')
+saved={version=1,kind='continuous',stage='converting',required=total,remaining=total,target=total,
+ batchCount=2230,expected={},transfers={},requests={},configOwned=false}
+s.stock.entangled_hypogen=4163184
+'''
+
 class LargeBatchTests(unittest.TestCase):
  def cohort(self,old=False):
   l=fixture()
@@ -102,5 +113,31 @@ assert(E.tasks[1].fault and #requests==2 and s.files[path]==before)
 ''')
  def test_quantities_above_lua_exact_integer_limit_are_rejected(self):
   l=self.cohort();l.execute("s.stock.entangled_bedrockium=9007199254740992;E=factory(cfg,C,Bridge,false);runAll();assert(E.tasks[6].fault and releaseCount==0);assert(table.concat(E.logs,' / '):find('精确整数范围',1,true))")
+
+ def test_old_recovery_rejects_real_hypogen_surplus(self):
+  l=self.cohort();l.globals().s.files['/home/bec_v2/runtime/controller.lua']=subprocess.check_output(['git','show','3ed7e69:reinstall_v2/files/runtime/controller.lua'],cwd=ROOT).decode()
+  l.execute(CONVERTING+"C.write(path,saved);E=factory(cfg,C,Bridge,false);E.resumeNode(6);runAll();assert(E.tasks[6].fault and releaseCount==0);assert(table.concat(E.logs,' / '):find('转换恢复库存不符: molten.hypogen',1,true))")
+
+ def test_converted_surplus_resumes_nine_nodes_without_supply(self):
+  l=self.cohort();l.execute(CONVERTING+"C.write(path,saved);E=factory(cfg,C,Bridge,false);E.resumeNode(6);runAll();assert(not E.tasks[6].fault,table.concat(E.logs,' / '));assert(releaseCount==9);local r=C.read(path);assert(#r.transfers==0 and #r.requests==0);assert(table.concat(E.logs,' / '):find('保留多余库存 2878704',1,true))")
+
+ def test_surplus_does_not_bypass_unconfirmed_requests_or_moves(self):
+  for change in ["saved.pending={raw='molten.hypogen',amount=144}","saved.requests={{raw='molten.hypogen',amount=144,state='submitted'}}","saved.transfers={{raw='molten.hypogen',amount=144,ok=false}}"]:
+   l=self.cohort();l.execute(CONVERTING+change+";C.write(path,saved);local before=s.files[path];E=factory(cfg,C,Bridge,false);E.resumeNode(6);runAll();assert(E.tasks[6].fault and releaseCount==0);assert(s.files[path]==before)")
+
+ def test_recovery_shortage_and_misaligned_surplus_remain_blocked(self):
+  for amount in [1284336,4163185]:
+   l=self.cohort();l.execute(CONVERTING+"s.stock.entangled_hypogen="+str(amount)+";C.write(path,saved);local before=s.files[path];E=factory(cfg,C,Bridge,false);E.resumeNode(6);runAll();assert(E.tasks[6].fault and releaseCount==0);assert(s.files[path]==before)")
+
+ def test_surplus_with_residual_raw_fluid_still_blocks(self):
+  l=self.cohort();l.execute(CONVERTING+r'''
+local c=require('component');local invoke=c.invoke
+c.invoke=function(a,m,...)
+ if a=='sub'and m=='getFluidsInNetwork'then return {{name='molten.hypogen',amount=144}}end
+ return invoke(a,m,...)
+end
+C.write(path,saved);local before=s.files[path];E=factory(cfg,C,Bridge,false);E.resumeNode(6);runAll()
+assert(E.tasks[6].fault and releaseCount==0);assert(s.files[path]==before)
+''')
 
 if __name__=='__main__':unittest.main()
