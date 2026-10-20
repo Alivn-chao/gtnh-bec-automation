@@ -1,3 +1,7 @@
+# 2026-10-20 新现场：整批需求过大，待真实数量
+
+用户图节点6 controller.lua120整批需求过大，换蜂后保护。已核对V3 batchTarget queuedRecipes=0，检查单种凝聚物本批合计remaining<=2147483647，不是V1的AE队列膨胀，不直接套order_window。新增reinstall_v3/diagnose_batch.lua只读打印savedcohort成员、节点parallel/最大剩余、单机/本组合计超限种类，不修改任何机器/日志，不搬液/申请；3项模拟覆盖合计超限、单机超限及consumed抵扣、异常getter不猜数。已提供下载运行，等待玩家输出再设计分段供液；当前此错误尚未修复，不取消当前批、不删日志、不盲目提高上限。
+
 # 2026-10-20 V3 生产被缓存 crafting 守卫暂停
 
 用户截图lib/cache.lua46/102缓存保护、剩余1307KiB、当前蜂群T3/需求T5。读取远端codex/bec-v3-performance最新499d433，隔离工作树work/bec-v3-cache-fix、修复分支fix/v3-cache-production。旧K.step确认idle后E.nodeWork(true)，缓存持锁时开新接单，模拟可复现相同crafting报错。现改缓存期nodeWork(false)，运行器入口逐节点重新idle核对，若边界已有订单则不加载运行器/不写缓存日志/不搬液或下单，干净交回锁；guard增加isWorkAllowed=false，外部重开仍保护。AE优先/已申请原液收尾/未知操作不重放保持。不改生产/蜂群数据，不将饱和30720当实物。新增20KB单lib/cache.lua更新器update_cache_admission.lua，已知499d/0e392基线、CAS/flush/readback/备份/回滚/512KiB余量；未知程序拒覆盖。README命令。149Python/Lua+20核心+41JS通过，未实机运行；旧缓存若仍未确认需看原cache.journal，不能删日志。已有源码包按V3 run_tests重建，不重建旧V2安装器。
