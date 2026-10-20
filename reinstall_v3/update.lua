@@ -1,7 +1,8 @@
 -- BEC_V3_PERFORMANCE_UPDATE_1
-local SELF_SIGNATURE='79372:2602447166'
+local SELF_SIGNATURE='79699:3782390357'
 print('BEC V3 performance preview; Q to exit the old UI first')
-local rows={{name='runtime/controller.lua',source=[=[local c = require("component") local ser = require("serialization") local computer = require("computer") local fs = require("filesystem")
+local rows={{name='runtime/controller.lua',source=[=[-- BEC_V3_LARGE_BATCH_1: long-sized totals; bounded per-call fluid requests.
+local c = require("component") local ser = require("serialization") local computer = require("computer") local fs = require("filesystem")
 local sides = require("sides") local event = require("event") local mode = (...) or "preview" local JOURNAL = "/home/bec_auto.journal"
 local MAIN = "3afdc4cf-04e3-4ae9-8be6-e753c23a249d" local SUB = "86311657-33d1-41b5-a0d9-0aee7b5c2c50" local TRANS = "66fb280f-080d-4623-8d54-0dffd5cd5aad" local STORAGE = "237a9cac-118a-4b74-8755-0d0b0ad216c0"
 local NODE = "b04787f9-5423-4b03-8549-c786d4ef38d0" local GATE_ADDRESS = "cf2a0c4a-ab8d-4958-b1df-253094d6690c" local RS, GEN, GATE, armed, record local stopping=false
@@ -15,7 +16,7 @@ entangled_quarkgluonplasma=1000,entangled_cosmicsolder=1000} local function call
 end local function resolve(prefix, kind) local address, count = nil, 0 for a, t in c.list() do
 if a:sub(1, #prefix) == prefix and t == kind then address, count = a, count + 1 end end
 assert(count == 1, "目标组件缺失或不唯一: " .. prefix) return address end local function integer(v)
-assert(type(v) == "number" and v >= 0 and v == math.floor(v), "库存/需求数量无效") return v end local function same(a, b)
+assert(type(v) == "number" and v >= 0 and v <= 9007199254740991 and v == math.floor(v), "库存/需求数量无效或超出Lua精确整数范围") return v end local function same(a, b)
 for k, v in pairs(a) do if b[k] ~= v then return false end end for k, v in pairs(b) do if a[k] ~= v then return false end end return true end
 local function network(a) local rows, result = call(a, "getFluidsInNetwork"), {} assert(type(rows) == "table", "网络库存不可读") for _, f in pairs(rows) do
 assert(type(f) == "table", "流体条目无效") local n = integer(f.amount or f.size or 0) if n > 0 then assert(type(f.name) == "string", "流体名称缺失")
@@ -120,7 +121,8 @@ local used = integer(consumed[name] or 0) assert(used <= amount, "已消耗数�
 assert(total > 0, "订单没有有效需求") for name, amount in pairs(consumed) do assert(integer(amount) == 0 or required[name], "消耗记录与当前订单不符") end
 checkRecipe(required,parallel,snapshot) return required, remaining end local function queuedRecipes() return 0 end local function batchTarget(required,remaining)
 local parallel=checkRecipe(required) local count=math.max(parallel,queuedRecipes()) local target={} for name,amount in pairs(required) do
-target[name]=remaining[name]+perRecipe[name]*(count-parallel) assert(target[name]<=2147483647,"整批需求过大") end return target,count
+assert(count-parallel<=math.floor((9007199254740991-integer(remaining[name]))/perRecipe[name]),"整批需求超出Lua精确整数范围")
+target[name]=integer(remaining[name]+perRecipe[name]*(count-parallel)) end return target,count
 end local function unchanged() local req, remaining = current() assert(same(req, record.required) and same(remaining, record.remaining), "暂停订单发生变化，停止")
 end local function resolveRawNames(target) local main,sub,stock=network(MAIN),network(SUB),field() for kind,need in pairs(target) do
 if kind=="entangled_space" or kind=="entangled_time" then local stem=kind=="entangled_space" and "spatialfluid" or "temporalfluid" local candidates={[stem]=true,["molten."..stem]=true,["fluid."..stem]=true,["fluid.molten."..stem]=true} local found={}
@@ -132,8 +134,7 @@ local function plan(remaining,quiet) resolveRawNames(remaining) local stock, sub
 for name, need in pairs(remaining) do local raw = mapping[name] allowed[raw] = true local unit=units[name] or 144
 local required = math.ceil(math.max(0, need - (stock[name] or 0)) / unit) * unit local existing = sub[raw] or 0 assert(existing <= required and existing % unit == 0, "子网原液超额或非整批: " .. raw) local missing = required - existing
 if (main[raw] or 0)<missing then deficits[#deficits+1]={raw=raw,amount=missing-(main[raw] or 0),needed=missing} shortages[#shortages+1]=raw..": 本次需补 "..missing.." mB，主网有 "..(main[raw] or 0) .."，还缺 "..(missing-(main[raw] or 0)).." mB"
-end if required > 0 then expected[raw] = required end local left=missing while left>0 do
-local chunk=math.min(left,math.floor(16000/unit)*unit) moves[#moves+1]={raw=raw,amount=chunk};left=left-chunk end if not quiet then print(raw .. " 本次补入 " .. missing .. " mB") end
+end if required > 0 then expected[raw] = required end if missing>0 then moves[#moves+1]={raw=raw,amount=missing,chunk=math.floor(16000/unit)*unit}end if not quiet then print(raw .. " 本次补入 " .. missing .. " mB") end
 end for raw in pairs(sub) do assert(allowed[raw], "子网有无关原液: " .. raw) end for name, amount in pairs(stock) do assert(amount == 0 or mapping[name], "约束场有未知凝聚物: " .. name)
 end table.sort(moves, function(a,b) return a.raw < b.raw end) if #shortages>0 then table.sort(shortages)
 local message=table.concat(shortages,"；") if not quiet then print("缺料: "..message.."；运行时向主网 AE 申请缺口") end table.sort(deficits,function(a,b) return a.raw<b.raw end) return nil,message,deficits
@@ -161,7 +162,8 @@ local route=ports[raw] local chunk=math.floor((route and 2147483647 or 16000)/ba
 unchanged();emptyConfig();tanks(4,nil) record.configOwned=route==nil;save("stream-configuring") if route then verifyBulk(route,raw)
 print("高速供液: "..raw.."；源 "..route.from.." -> 接收 "..route.to) else assert(call(MAIN,"setFluidInterfaceConfiguration",0, {name=raw,amount=math.min(need-(previous[raw] or 0),chunk),
 size=math.min(need-(previous[raw] or 0),chunk)})==true,"持续供液配置失败") end print(raw.." 整批目标 "..need.." mB；到账即搬入子网。") local job,status,craft,jobDeadline,doneAt
-local attempts=0 local inletOpen=route==nil local deadline=computer.uptime()+1800 while not stopping do
+local requestChunk=math.floor(2147483647/batch)*batch
+local attempts=0 local attemptLimit=math.ceil(need/requestChunk)+2 local inletOpen=route==nil local deadline=computer.uptime()+1800 while not stopping do
 unchanged();assert(same(field(),stock),"备料时约束场库存变化") assert(same(network(SUB),previous),"备料时子网库存变化") local remaining=need-(previous[raw] or 0) local buffered=route and (network(MAIN)[raw] or 0) or bufferedInlet()
 local amount=math.floor(math.min(remaining,buffered,chunk)/batch)*batch if amount>0 then local address,from,to=TRANS,4,5 if route then verifyBulk(route,raw);address,from,to=route.address,route.from,route.to end
 record.pending={raw=raw,amount=amount,address=address,from=from,to=to};save("transfer-pending") local ok,moved=call(address,"transferFluid",from,to,amount) record.transfers[#record.transfers+1]={raw=raw,ok=ok,amount=moved,requested=amount,address=address,from=from,to=to} save("transfer-returned")
@@ -176,7 +178,8 @@ local missing=math.max(0,remaining-bufferedInlet()-(network(MAIN)[raw] or 0)) if
 local available=false for _,cpu in pairs(cpus) do if cpu.busy==false then available=true end end if available then if not craft then
 local rows=call(MAIN,"getCraftables",{name=raw}) assert(type(rows)=="table","原液配方不可读") local count=0;for _,v in pairs(rows) do craft=v;count=count+1 end assert(count==1,"原液配方缺失或不唯一: "..raw)
 local f=craft.getStack() assert(type(f)=="table" and f.name==raw and f.isCraftable==true and type(f.amount)=="number" and f.amount==f.size and f.hasTag==false, "未验证的流体合成对象")
-end attempts=attempts+1;assert(attempts<=3,"原液仍被争抢，暂停保留已收获库存") missing=math.max(0,need-(previous[raw] or 0)-bufferedInlet()-(network(MAIN)[raw] or 0)) if missing>0 then
+end attempts=attempts+1;assert(attempts<=attemptLimit,"原液仍被争抢，暂停保留已收获库存") missing=math.max(0,need-(previous[raw] or 0)-bufferedInlet()-(network(MAIN)[raw] or 0)) if missing>0 then
+missing=math.min(missing,requestChunk)
 job={raw=raw,amount=missing,unit="mB",state="pending",securedBefore=previous[raw] or 0} record.requests[#record.requests+1]=job;save("craft-request-pending") local reason;status,reason=craft.request(missing) assert(status~=nil,"AE 申请未确认: "..tostring(reason))
 job.state="submitted";jobDeadline=computer.uptime()+1800;doneAt=nil save("stream-crafting") print("主网 AE 申请 "..raw.." "..missing.." mB；合成中持续收料。") end
 end end end assert(computer.uptime()<deadline,"持续收料超时，保留子网已搬入原液")

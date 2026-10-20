@@ -1,4 +1,12 @@
-# 2026-10-20 新现场：整批需求过大，待真实数量
+# 2026-10-20 大总量整批并行修复
+
+用户只读现场：节点6/7/8/9/10/11/13/14/16，N6并行182，其余256，共2230；bedrockium5261230080、celestialtungsten657653760、hypogen1284480、neutronium657653760。用户明确要求9节点同时工作，拒绝拆成3+3+3；本地曾探索的bounded-cohort方案已撤销，从未提交或发布，不要恢复。8G是玩家设定的fieldStrength，不是模组固定上限；用户明确自行处理力场强度/供电，程序不读取或调整它们。
+
+对应GT5 5.09.54.133/pin74150cf约束场/凝聚物库存用long，韦门按类型路由；旧controller把本批合计强制int32导致报错。新controller总量接受0..2^53-1精确整数，保留溢出拒绝；仅单次AE request按int32及纠缠单位分块，允许ceil(need/chunk)+2次申请，原transferFluid分块保持。预览以每种一行汇总，避免5G生成几十万表项。engine/bridge及cohort成员不修改，既有中断批次重新核对后整批放行；pending/submitted不重放。
+
+新增build_large_update.py/update_large.lua单控制器事务更新，基线bf1ae6f且核对engine/bridge，512KiB余量、备份/flush/回读/CAS/回滚、无GC支持，所有用户配置/运行记录不动。7大总量模拟+3更新事务用例；完整测试结果见reinstall_v3/README.md及提交记录。下载优先fastly.jsdelivr.net（玩家raw下载失败），OC先Q退出，再update_large.lua到/home/bec_v3_large_update.lua执行，原main.lua web启动。不是重装或清现场；未Minecraft实机验收。
+
+# 2026-10-20 旧诊断阶段（已由上方修复接续）
 
 用户图节点6 controller.lua120整批需求过大，换蜂后保护。已核对V3 batchTarget queuedRecipes=0，检查单种凝聚物本批合计remaining<=2147483647，不是V1的AE队列膨胀，不直接套order_window。新增reinstall_v3/diagnose_batch.lua只读打印savedcohort成员、节点parallel/最大剩余、单机/本组合计超限种类，不修改任何机器/日志，不搬液/申请；3项模拟覆盖合计超限、单机超限及consumed抵扣、异常getter不猜数。已提供下载运行，等待玩家输出再设计分段供液；当前此错误尚未修复，不取消当前批、不删日志、不盲目提高上限。
 
