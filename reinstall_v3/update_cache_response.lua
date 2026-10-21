@@ -1,5 +1,5 @@
 -- BEC_V3_CACHE_RESPONSE_UPDATE_1
-local SELF_SIGNATURE='46297:2646247237'
+local SELF_SIGNATURE='47325:3650750374'
 print('BEC V3 cache response update; Q to exit the old UI first')
 local function sig(s)local a,b=1,0;for i=1,#s do a=(a+s:byte(i))%65521;b=(b+a)%65521 end;return string.format('%d:%.0f',#s,b*65536+a)end
 local rows={{name='lib/cache.lua',source=[=[-- V1 cache worker, scheduled under the same V2 group and shared-fluid leases.
@@ -225,7 +225,7 @@ return function(C,B,cfg,storage)
  function K.close()if active then active.stop=true;stopGenerators(active.group)end end
  return K
 end
-]=],supported={['15289:2748686704']=true}},{name='lib/web_session.lua',source=[=[-- HTML is a data client. Only this Lua allowlist can save bindings or run V2.
+]=],supported={['15289:2748686704']=true,['15885:712537433']=true}},{name='lib/web_session.lua',source=[=[-- HTML is a data client. Only this Lua allowlist can save bindings or run V2.
 local c=require('component');local clock=require('computer');local ser=require('serialization')
 return function(C,B,W,options)
  local c=C.component and C.component(c)or c
@@ -523,7 +523,7 @@ return function(C,B,W,options)
  function H.engine()return E end
  return H
 end
-]=],supported={['18504:2508797642']=true}},{name='lib/web_transport.lua',source=[=[-- Heartbeats while large OC reads run. Receipt is not operation completion.
+]=],supported={['18504:2508797642']=true,['19392:3751895150']=true}},{name='lib/web_transport.lua',source=[=[-- Heartbeats while large OC reads run. Receipt is not operation completion.
 local clock=require('computer')
 return function(panel,event,W,address)
  local T={queue={},next=0,last={mode='binding',values={},group=1,groupCount=1,configured=false,notice='正在读取 OC 配置和设备状态'},stopping=false}
@@ -571,7 +571,7 @@ return function(panel,event,W,address)
  function T.take()if not T.pending then return table.remove(T.queue,1)end end
  return T
 end
-]=],supported={['1959:2130565450']=true}},{name='web.lua',source=[=[local c=require('component');local event=require('event');local clock=require('computer')
+]=],supported={['1959:2130565450']=true,['2480:4007365451']=true}},{name='web.lua',source=[=[local c=require('component');local event=require('event');local clock=require('computer')
 local ROOT='/home/bec_v2'
 local function module(n)return assert(loadfile(ROOT..'/lib/'..n..'.lua'))()end
 local C,B,W=module('config'),module('ochd_bindings'),module('web_json')
@@ -582,7 +582,22 @@ assert(methods.setWebApp~=nil and methods.publish~=nil,'需要支持 HTML 页面
 local f=assert(io.open(C.path('lib/web_page.html'),'r'));local page=f:read('*a');f:close()
 local package={id='bec-v2-studio',title='BEC V2 结构绑定与运行',entry='index.html',files={['index.html']=page},
  events={'save_field','apply_bindings','start','pause','select_group','refresh','scan_components','patterns','cache'}}
-local panel=c.proxy(address);local H=module('web_session')(C,B,W)
+local panel=c.proxy(address)
+-- BEC_V3_WEB_SINGLE_INSTANCE_1: cached component proxies are shared by OpenOS
+-- processes. Acquire before constructing a session or changing the panel.
+local previous=rawget(panel,'_becWebOwner')
+assert(not previous or previous.closed or coroutine.status(previous.root)=='dead',
+ 'BEC 网页程序已经运行，请使用现有页面；先在 OC 按 Q 正常退出后才能重开')
+local owner={root=coroutine.running(),startedAt=clock.uptime(),closed=false}
+rawset(panel,'_becWebOwner',owner)
+local function session()
+local H=module('web_session')(C,B,W)
+local snapshot=H.snapshot
+H.snapshot=function(...)
+ local data=snapshot(...);owner.state=data;owner.updatedAt=clock.uptime()
+ local engine=H.engine();owner.logs=engine and engine.logs
+ return data
+end
 local T=module('web_transport')(panel,event,W,address);C.pulse=T.pulse
 T.snapshot=function()return H.snapshot(true)end
 T.observe=H.observe
@@ -615,11 +630,16 @@ end,debug.traceback)
 local errors=H.close();for _,reason in ipairs(errors)do print('需人工检查：'..reason)end
 pcall(function()panel.release()end)
 assert(ok,err);assert(#errors==0,'暂停存在回读失败，请核对机器')
-]=],supported={['2184:2645903512']=true}},{name='lib/web_page.html',source=(function()local f=assert(io.open('/home/bec_v2/lib/web_page.html','r'));local old=f:read('*a');f:close();old=old:gsub('\r\n','\n');if sig(old)=='233112:3384946455'then return old end;assert(sig(old)=='232745:4075596562','未知本地网页，保留未覆盖');local new=old:sub(1,221487)..[=[&&!Array.isArray(last.cache.catalogue)){cacheReadNext={group:group,page:u.page};cacheReadPage();}}
+end
+local success,reason=xpcall(session,debug.traceback)
+owner.closed=true
+if rawget(panel,'_becWebOwner')==owner then rawset(panel,'_becWebOwner',nil)end
+assert(success,reason)
+]=],supported={['2184:2645903512']=true,['2306:1012168104']=true}},{name='lib/web_page.html',source=(function()local f=assert(io.open('/home/bec_v2/lib/web_page.html','r'));local old=f:read('*a');f:close();old=old:gsub('\r\n','\n');if sig(old)=='233112:3384946455'then return old end;assert(sig(old)=='232745:4075596562','未知本地网页，保留未覆盖');local new=old:sub(1,221487)..[=[&&!Array.isArray(last.cache.catalogue)){cacheReadNext={group:group,page:u.page};cacheReadPage();}}
 function cacheReadPage(){if(cacheRead||!cacheReadNext||!online)return;var q=cacheReadNext;cacheReadNext=null;if(q.group!==group)return;cacheRead=true;send('cache',{mode:'page',page:q.page,group:q.group}).then(function(){cacheRead=false;cachePageMessage='';cacheReadPage();cacheView();}).catch(function(e){cacheRead=false;if(q.group===group)cachePageMessage='翻页未确认：'+e.message;cacheReadPage();cacheView();});}
 function cacheAction(mode,name,value,page){if(cacheWait||!last||!last.cache)return;cacheWait=true;cacheWaiting=last.cache.revision;cacheMessage='正在提交…';cacheView();var args={mode:mode,name:name,value:value,page:page,group:group,revision:last.cache.revision},request=send('cache',args);cacheTok=args._token;request.then(function(r){cacheWait=false;cacheMessage=r.message||'已确认，等待库存更新';cacheView();}).catch(function(e){cacheWait=false;cacheMessage='未执行：'+e.message;cacheView();});}
 function cacheView(){var k=last&&last.cache;if(!k)return;$('cache-status').textContent=(!online?'离线，显示最后状态 · ':last.transportBusy?'OC正在读取，显示上次机器状态 · ':'')+(k.enabled?'自动补库已启用':'自动补库未启用')+' · '+(last.mode==='running'?'自动化运行中':'启动自动化后开始补库')+' · '+(k.busy?'设备组 '+k.group+' 补库中 · ':'')+k.message;var u=cacheState();if(u.total!==k.total){u.pages={};u.total=k.total;u.page=Math.min(u.page,Math.max(0,Math.ceil(k.total/8)-1));}u.pages[k.page]=list(k.rows);var allRows=Array.isArray(k.catalogue)?k.catalogue.map(function(r){return{name:r[0],label:r[1],stock:r[2],override:r[3]===false?null:r[3],target:r[3]===false?k.target:r[3]};}):null;if(allRows){u.pages={};for(var page=0;page<Math.ceil(allRows.length/8);page++)u.pages[page]=allRows.slice(page*8,page*8+8);}
-(allRows||list(k.rows)]=]..old:sub(-9689);assert(sig(new)=='233112:3384946455','网页补丁核对失败，原文件未改');return new end)(),supported={['232745:4075596562']=true}}}
+(allRows||list(k.rows)]=]..old:sub(-9689);assert(sig(new)=='233112:3384946455','网页补丁核对失败，原文件未改');return new end)(),supported={['232745:4075596562']=true,['233112:3384946455']=true}}}
 
 local fs=require('filesystem');local root='/home/bec_v2/'
 local function read(p)local f=io.open(p,'r');if not f then return end;local s=f:read('*a');f:close();return s end

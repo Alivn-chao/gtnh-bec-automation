@@ -1,3 +1,15 @@
+# 2026-10-21 OC MCP 恢复与网页双发布修复
+
+已实际接入游戏 OC。通过 Python 加载 `F:/prism/b3/.minecraft/ochd-mcp/ochd_mcp.py` 的 Bridge，配置路径 `F:/prism/b3/.minecraft/config/ochd-mcp-client.json`（含令牌，不输出、不上传）。目标 computer ID `ebf6f77d-6aa4-425e-8984-3d9533d15c2f:c3c8b166-8dce-4f64-88ea-1e67510967a6`，agentOnline=true。Python 是 bundled runtime dependencies/python/python.exe。oc_run 只返回 job，应查询结果文本里的错误；OpenOS lua 脚本 assert 失败时 shell success 字段仍可能 true。变更结果不确定必须读状态/原 job，不盲重复。
+
+现场恢复：前次关 OC 中断蜂群装入，IO 输入盘不能自动抽出；用户手动归位后核对所有16节点暂停/蜂群0、24个IO槽全空、盘库各蜂群完整，归档中断日志再恢复，T4→金→六相铜→白矮星96实测成功。后续用户又暂停，发现旧 port-complete 日志与已完整归位的六种蜂群不符；同样严格核对后归档为 `.mcp-empty-reconcile-20261021-2` 并保留 proof。严禁把这种一次性人工现场核对当作通用自动删日志方案。现场白矮星后来补到144个。
+
+用户反馈网页旧故障/新运行来回跳。临时只读 publish 观察直接捕获：旧 fault elapsed18.75 与新 supply/nanites/produce 两套快照每约0.5秒交替，旧故障协程仍活着；上次恢复没有彻底隔离旧发布者。进程为 thread 时不能只数 lua 路径判断实例数；原始MCP后台是一个 thread。现场后来两套都正常退出，清掉临时 publish 追踪代理后只启动一套。不要只修改前端隐藏旧故障，也不要直接 kill/断电以免中断搬盘或 AE 请求。
+
+新 `web.lua` 增 BEC_V3_WEB_SINGLE_INSTANCE_1：在 H 构造前占用共用 panel proxy `_becWebOwner`，活动协程存在则拒绝第二次启动；外层 xpcall 清锁，dead owner 可替换。owner.state/logs/updatedAt 只读内存诊断，不额外读机器或周期写盘。已通过 MCP 带版本校验/备份直接替换游戏 web.lua，回读 SHA256 `29662ef7967179502dade5b55d9adffd5457fb6c7a2f548de84a2f55c49a650e`，备份在游戏 `.ochd-mcp/c76788c3-7ca2-464c-8d11-b98ce13d3e99.bak`。游戏使用 /home/bec_mcp_start_singleton_web.lua 启动的 detached runner（panel._becMcpRunner），正常Q仍按原H.close收尾；遇故障镜像 `diagnostics/last-live-fault.dat`。完整 live E 日志可运行小OC Lua读取 component.proxy(panel)._becWebOwner.logs，无须再试 debug.getlocal/getupvalue（OC限制导致取不到）。panel 地址 `26a2e422-5b11-45fd-9b87-d1f6dc0f7f28`。不用再重复启动 main web。
+
+实机采样owner一致、elapsed递增、节点7 crafting，第二次启动确实提示已经运行且原owner不变。146项Python/Lua+20核心场景通过，新测试覆盖重复启动不得构造H/发布/释放/暂停、故障后解锁和死owner。cache响应更新器支持499d433旧响应修复，重建后约47KB。所有私有/现场文件在未跟踪outputs中，不提交outputs。
+
 # 2026-10-18 V3 缓存翻页与保存响应
 
 用户截图运行补库配方36，反馈首次下一页和保存缓存值等待很久。根因：transport心跳仅接收ack，实际H.handle等外层循环；前端只缓存访问过的分页。新增T.canServe/T.serve受限执行队首cache page/save，catalogueReady才允许，无正在处理/待发回执/退出才执行；T.handling与polling防C.write嵌套服务，不绕过FIFO机器动作。cache worker日志处pulse覆盖逐个配方扫描。前端接收全目录紧凑四元组，本地首次分页/离线浏览，单项0与默认false区分，save附group防旧组请求。H.snapshot估算目录额外值数/字节，超470值或14000B丢弃catalogue退快速服务器分页，留面板512/16KiB回执余量。库存仍展示用，不参与控制判断。

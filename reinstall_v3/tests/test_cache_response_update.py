@@ -1,6 +1,7 @@
 """Transactional cache UI update, including exact HTML reconstruction."""
 from pathlib import Path
 import sys
+import subprocess
 import unittest
 
 ROOT=Path(__file__).resolve().parents[2]
@@ -52,5 +53,13 @@ class CacheResponseUpdateTests(unittest.TestCase):
         l.execute("require('filesystem').remove=function()return nil end;collectgarbage=nil")
         l.execute(SCRIPT)
         for name in NAMES:self.assertEqual(l.globals().files['/home/bec_v2/'+name],(ROOT/'reinstall_v2/files'/name).read_text(encoding='utf-8'))
+
+    def test_first_response_patch_can_upgrade_to_single_instance_entry(self):
+        l=self.make()
+        for name in NAMES:
+            l.globals().files['/home/bec_v2/'+name]=subprocess.check_output(['git','show','499d433:reinstall_v2/files/'+name],cwd=ROOT).decode('utf-8')
+        l.execute(SCRIPT)
+        for name in NAMES:self.assertEqual(l.globals().files['/home/bec_v2/'+name],(ROOT/'reinstall_v2/files'/name).read_text(encoding='utf-8'))
+        self.assertIn('BEC_V3_WEB_SINGLE_INSTANCE_1',l.globals().files['/home/bec_v2/web.lua'])
 
 if __name__=='__main__':unittest.main()

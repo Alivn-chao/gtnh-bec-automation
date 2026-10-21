@@ -31,7 +31,11 @@ def build():
             middle=text[len(prefix):len(text)-count if count else len(text)]
             tail="..old:sub(-"+str(len(text[-count:].encode()))+")"if count else ''
             source="(function()local f=assert(io.open('/home/bec_v2/lib/web_page.html','r'));local old=f:read('*a');f:close();old=old:gsub('\\r\\n','\\n');if sig(old)=="+repr(signature(text.encode()))+"then return old end;assert(sig(old)=="+repr(signature(old.encode()))+",'未知本地网页，保留未覆盖');local new=old:sub(1,"+str(len(prefix.encode()))+").."+literal(middle)+tail+";assert(sig(new)=="+repr(signature(text.encode()))+",'网页补丁核对失败，原文件未改');return new end)()"
-        rows.append('{name='+repr(name)+',source='+source+',supported={['+repr(signature(old.encode()))+']=true}}')
+        # The first response patch (499d433) is also a supported upgrade base.
+        previous=subprocess.check_output(['git','show','499d433:reinstall_v2/files/'+name],cwd=ROOT)
+        known={signature(old.encode()),signature(previous)}
+        supported=','.join('['+repr(k)+']=true'for k in sorted(known))
+        rows.append('{name='+repr(name)+',source='+source+',supported={'+supported+'}}')
     tree=ast.parse((V2/'build_cache_update.py').read_text(encoding='utf-8'))
     body=next(ast.literal_eval(n.value)for n in tree.body if isinstance(n,ast.Assign)and any(isinstance(t,ast.Name)and t.id=='body'for t in n.targets))
     body=body.replace('/home/bec_cache_update.lua','/home/bec_v3_cache_update.lua')

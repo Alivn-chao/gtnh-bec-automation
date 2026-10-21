@@ -9,7 +9,22 @@ assert(methods.setWebApp~=nil and methods.publish~=nil,'需要支持 HTML 页面
 local f=assert(io.open(C.path('lib/web_page.html'),'r'));local page=f:read('*a');f:close()
 local package={id='bec-v2-studio',title='BEC V2 结构绑定与运行',entry='index.html',files={['index.html']=page},
  events={'save_field','apply_bindings','start','pause','select_group','refresh','scan_components','patterns','cache'}}
-local panel=c.proxy(address);local H=module('web_session')(C,B,W)
+local panel=c.proxy(address)
+-- BEC_V3_WEB_SINGLE_INSTANCE_1: cached component proxies are shared by OpenOS
+-- processes. Acquire before constructing a session or changing the panel.
+local previous=rawget(panel,'_becWebOwner')
+assert(not previous or previous.closed or coroutine.status(previous.root)=='dead',
+ 'BEC 网页程序已经运行，请使用现有页面；先在 OC 按 Q 正常退出后才能重开')
+local owner={root=coroutine.running(),startedAt=clock.uptime(),closed=false}
+rawset(panel,'_becWebOwner',owner)
+local function session()
+local H=module('web_session')(C,B,W)
+local snapshot=H.snapshot
+H.snapshot=function(...)
+ local data=snapshot(...);owner.state=data;owner.updatedAt=clock.uptime()
+ local engine=H.engine();owner.logs=engine and engine.logs
+ return data
+end
 local T=module('web_transport')(panel,event,W,address);C.pulse=T.pulse
 T.snapshot=function()return H.snapshot(true)end
 T.observe=H.observe
@@ -42,3 +57,8 @@ end,debug.traceback)
 local errors=H.close();for _,reason in ipairs(errors)do print('需人工检查：'..reason)end
 pcall(function()panel.release()end)
 assert(ok,err);assert(#errors==0,'暂停存在回读失败，请核对机器')
+end
+local success,reason=xpcall(session,debug.traceback)
+owner.closed=true
+if rawget(panel,'_becWebOwner')==owner then rawset(panel,'_becWebOwner',nil)end
+assert(success,reason)
