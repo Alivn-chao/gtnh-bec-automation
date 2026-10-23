@@ -1,4 +1,4 @@
--- V2 module: whole-cell transfers through the verified south/north ME IO ports.
+-- BEC_V3_PHYSICAL_HIVE_1: physical type/display; exact totals from whole-cell IO.
 local c=require('component')
 local ser=require('serialization')
 local fs=require('filesystem')
@@ -14,13 +14,14 @@ local function sameBinding(old)
  return #old==#binding
 end
 local CELL='appliedenergistics2:item.ItemExtremeStorageCell.Singularity'
-local DISPLAY_CAP,MIN=30720,64 -- Machine reading limit, not a transfer limit.
+local DISPLAY_CAP,MIN=cfg.hiveSource=='transposer'and 64 or 30720,64 -- Display limit, not a transfer limit.
 -- NaniteTier enum -> material ore name. Labels may be localized.
 local tiers={Carbon={1,'Carbon'},Glowstone={1,'Glowstone'},Silver={2,'Silver'},
  Neutronium={2,'Neutronium'},Gold={3,'Gold'},TranscendentMetal={4,'Transcendent'},
  SixPhasedCopper={5,'SixPhasedCopper'},WhiteDwarfMatter={6,'WhiteDwarf'},
  BlackDwarfMatter={7,'BlackDwarf'},Universium={8,'Universium'},Eternity={9,'Eternity'},MagMatter={10,'MagMatter'}}
 local record,context
+local physicalHatches={}
 local prepStarted,firstMoveStarted
 local function call(a,m,...)
  local args={...}
@@ -66,8 +67,12 @@ local function requiredFamily()
  local v=call(NODE,'getRequiredTier');return type(v)=='table'and v.name or nil
 end
 local function hive()
- local n=call(NODE,'getAvailableNanites');assert(whole(n),'蜂群仓数量无效')
- local p=call(NODE,'getProvidedTier')
+ local n,p
+ if cfg.hiveSource=='transposer'then
+  assert(type(cfg.readPhysicalHive)=='function','缺少实体蜂群读取器，禁止回退观测阵列')
+  n,p=cfg.readPhysicalHive()
+ else n=call(NODE,'getAvailableNanites');p=call(NODE,'getProvidedTier')end
+ assert(whole(n),'蜂群仓数量无效')
  if n==0 then return 0 end
  assert(type(p)=='table' and whole(p.tier) and type(p.name)=='string','蜂群仓类型不可读')
  return n,p
@@ -134,10 +139,43 @@ local function discover()
  end
  local size=call(T,'getInventorySize',0)
  assert(whole(size) and size>=1 and size<=1024,'底面硬盘盒不可读或过大')
+ physicalHatches={}
+ for side=0,cfg.hiveSource=='transposer'and -1 or 5 do
+  if side~=cfg.bankSide and side~=cfg.loadSide and side~=cfg.returnSide then
+   local ok,name=pcall(c.invoke,T,'getInventoryName',side)
+   if ok and name=='gt.blockmachines' then
+    local good,n=pcall(c.invoke,T,'getInventorySize',side)
+    if good and n==3 then physicalHatches[#physicalHatches+1]=side end
+   end
+  end
+ end
  for _,a in ipairs({SOUTH,NORTH}) do for side=0,5 do
   assert(c.invoke(a,'getOutput',side)==0,'蜂群IO已有红石输出，不能叠加操作')
  end end
  return size
+end
+local function checkPhysicalHive(h,p)
+ for _,side in ipairs(physicalHatches)do
+  -- GT non-consumable hatch slot 3 is a display stack capped at 64.
+  -- Its type is evidence; its stack size is NEVER the total inventory.
+  local item=c.invoke(T,'getStackInSlot',side,3)
+  if item and type(item.size)=='number'and item.size>0 then
+   local identified
+   for _,ore in pairs(item.oreNames or {})do
+    if type(ore)=='string'and ore:sub(1,6)=='nanite'then
+     local kind=tiers[ore:sub(7)]
+     if kind then
+      assert(not identified or identified.tier==kind[1]and identified.name==kind[2],'实体蜂群类型不唯一')
+      identified={tier=kind[1],name=kind[2]}
+     end
+    end
+   end
+   if identified then
+    assert(h>0,'实体收容总线展示槽有蜂群，但观测阵列读数为0；请刷新库存读数，未搬盘，保留原日志')
+    assert(p and p.tier==identified.tier and p.name==identified.name,'实体收容总线与观测阵列蜂群类型不符，未搬盘')
+   end
+  end
+ end
 end
 local function emptyPorts()
  for _,side in ipairs({2,3}) do for slot=1,12 do
@@ -222,7 +260,7 @@ local function runPort(side,rs,endDisk,endHive,kind,key)
     save('port-complete');return at,row
    end
   end
-  assert(clock.uptime()<deadline,'IO转移未完成：盘内'..tostring(n)..'，仓内'..h..'；保留现场，不重试')
+  assert(clock.uptime()<deadline,'IO转移未完成：盘内'..tostring(n)..(cfg.hiveSource=='transposer'and '，总线展示' or '，仓内')..h..'；保留现场，不重试')
   tick()
  end
 end
@@ -233,7 +271,7 @@ local function recover(cells)
   if not chosen or record.holding and disk.slot==record.holding.home then chosen=disk end
  end end
  assert(chosen,'缺少可接收新类型的空数字奇点盘，旧蜂群未搬运')
- record.operationTotal=record.holding and record.holding.count or nil
+ record.operationTotal=cfg.hiveSource~='transposer'and record.holding and record.holding.count or nil
  record.beforeReading=h;save('recovering')
  local known=record.holding and record.holding.key
  move(0,2,chosen.slot,1,0)
@@ -261,7 +299,7 @@ local M={}
 function M.preview()
  local size=discover();local h,p=hive();local cells=bank(size)
  print('蜂群IO：装入侧'..cfg.loadSide..'，回收侧'..cfg.returnSide..'，硬盘盒侧'..cfg.bankSide..' / '..size..'槽（仅管理前10格）；IO输入1/输出7，整盘搬运')
- print('仓内：'..h..' 个 / T'..tostring(p and p.tier)..'；需求T'..tostring(needed()))
+ print((cfg.hiveSource=='transposer'and '实体总线展示（非总量）：'or '仓内：')..h..' 个 / T'..tostring(p and p.tier)..'；需求T'..tostring(needed()))
  for _,disk in ipairs(cells) do if disk.item then
   print('盘槽 '..disk.slot..'：T'..disk.item.tier..' / '..disk.count..' 个 / '..disk.item.label)
  end end
@@ -280,7 +318,12 @@ function M.ensure(ctx)
  emptyPorts()
  local family;if initial then family=initial.requiredFamily else family=requiredFamily()end
  local cells=bank(size);local h,p=hive();local best=choose(cells,need,family)
+ checkPhysicalHive(h,p)
  local known=old and sameBinding(old.binding)and old.holding
+ -- A zero runtime cache after reload is not proof that a previously loaded
+ -- physical hatch is empty. Never insert another family on that evidence.
+ assert(not(h==0 and known and whole(known.count)and known.count>0),
+  '蜂群读数为0，但上次已确认仓内有蜂群；请核对收容总线并刷新库存读数，未搬盘，保留原日志')
  -- A saturated node reading cannot prove the current raw quantity. Recover to
  -- read the actual quantity before another operation, even with an old record.
  if not (known and known.count==h and h<DISPLAY_CAP and p and known.family==p.name and known.tier==p.tier) then known=nil end
@@ -312,7 +355,7 @@ function M.ensure(ctx)
   emptyPorts();guard()
   local n,t=hive();assert(n>=MIN and t.tier>=need,'换蜂后数量或等级不足')
   assert(record.holding and math.min(record.holding.count,DISPLAY_CAP)==n and record.holding.family==t.name,'换蜂后身份核对失败')
-  save('done');print('蜂群IO完成：T'..t.tier..' / '..n..' 个；节点仍暂停')
+  save('done');print('蜂群IO完成：T'..t.tier..' / '..(cfg.hiveSource=='transposer'and record.holding.count or n)..' 个；节点仍暂停')
   return true
  end,debug.traceback)
  local cut,cutError=pcall(off)

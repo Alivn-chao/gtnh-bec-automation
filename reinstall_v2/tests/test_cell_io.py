@@ -44,6 +44,59 @@ class ModuleTests(unittest.TestCase):
   self.assertEqual(self.lua.globals().moves,2)
   self.stopped()
 
+ def test_reload_zero_cache_cannot_insert_another_family(self):
+  self.module.ensure()
+  self.lua.execute("inv[0][8]=disk(7562,'SixPhasedCopper',4147);local c=require('component');local invoke=c.invoke;c.invoke=function(a,m,...)if a==NODE and m=='getAvailableNanites'then return 0 end;if a==NODE and m=='getProvidedTier'then return nil end;return invoke(a,m,...)end")
+  before=(self.lua.globals().moves,self.lua.globals().writes,self.lua.eval('files[PATH]'))
+  with self.assertRaisesRegex(Exception,'蜂群读数为0，但上次已确认'):
+   self.module.ensure()
+  self.assertEqual((self.lua.globals().moves,self.lua.globals().writes,self.lua.eval('files[PATH]')),before)
+  self.assertEqual(self.lua.globals().heldCount,19612)
+  self.assertEqual(self.lua.eval('inv[0][8].storedItemCount'),7562)
+
+ def test_reload_zero_cache_recovers_when_runtime_reading_is_refreshed(self):
+  self.module.ensure()
+  self.lua.execute("local c=require('component');local invoke=c.invoke;stale=true;c.invoke=function(a,m,...)if stale and a==NODE and m=='getAvailableNanites'then return 0 end;if stale and a==NODE and m=='getProvidedTier'then return nil end;return invoke(a,m,...)end")
+  with self.assertRaisesRegex(Exception,'蜂群读数为0，但上次已确认'):
+   self.module.ensure()
+  self.lua.execute('stale=false')
+  self.assertFalse(self.module.ensure())
+  self.assertEqual(self.lua.globals().moves,2)
+
+ def physical_hatch(self,stale=False,material='TranscendentMetal',damage=4581):
+  self.lua.execute("""
+seedHive(23737,'TranscendentMetal',4581)
+inv[0][9]=disk(0);inv[0][8]=disk(7562,'SixPhasedCopper',4147)
+local ghost=disk(64,'"""+material+"',"+str(damage)+""").getAvailableItems[1]
+local c=require('component');local invoke=c.invoke
+c.invoke=function(a,m,x,y,...)
+ if a==T and x==4 then
+  if m=='getInventoryName'then return 'gt.blockmachines'end
+  if m=='getInventorySize'then return 3 end
+  if m=='getStackInSlot'then assert(y==3);return ghost end
+ end
+"""+("if a==NODE and m=='getAvailableNanites'then return 0 end;if a==NODE and m=='getProvidedTier'then return nil end;"if stale else '')+"return invoke(a,m,x,y,...)end")
+
+ def test_physical_hatch_detects_false_empty_without_old_journal(self):
+  self.physical_hatch(stale=True)
+  with self.assertRaisesRegex(Exception,'实体收容总线展示槽有蜂群'):
+   self.module.ensure()
+  self.assertEqual(self.lua.globals().moves,0)
+  self.assertEqual(self.lua.globals().writes,0)
+
+ def test_physical_display_64_is_not_used_as_total_23737(self):
+  self.physical_hatch()
+  self.assertFalse(self.module.ensure())
+  self.assertEqual(self.lua.globals().heldCount,23737)
+  self.assertEqual(self.lua.globals().moves,0)
+
+ def test_physical_hatch_type_conflict_blocks_before_moves(self):
+  self.physical_hatch(material='SixPhasedCopper',damage=4147)
+  with self.assertRaisesRegex(Exception,'实体收容总线与观测阵列蜂群类型不符'):
+   self.module.ensure()
+  self.assertEqual(self.lua.globals().moves,0)
+  self.assertEqual(self.lua.globals().writes,0)
+
  def test_same_type_extra_is_loaded_without_recovery(self):
   self.module.ensure()
   self.lua.execute('inv[0][10]=disk(2000)')

@@ -10,6 +10,12 @@ return function(cfg,E,C)
  local buffer
  if gpu.allocateBuffer then local ok,value=pcall(gpu.allocateBuffer,w,h);if ok then buffer=value end end
  local selected=1;local page=1;local cachePage=1
+ local hiveReaders={}
+ for i,g in ipairs(cfg.groups)do
+  if g.nanites and g.nanites.enabled and g.nanites.hiveSource=='transposer'then
+   hiveReaders[i]=assert(loadfile(C.path('lib/hive_transposer.lua')))()(c,g.nanites)
+  end
+ end
  local UI={}
  local bg,panel,white,dim,cyan,green,amber,red=0x080D14,0x111B28,0xDCE7F5,0x73869C,0x35C9EC,0x45D9A1,0xE6B35A,0xF07888
  local function text(x,y,s,color)
@@ -48,13 +54,24 @@ return function(cfg,E,C)
   local rows=math.min(16,h-22);page=math.floor((selected-1)/rows)+1
   gpu.setBackground(panel);gpu.fill(2,6,w-2,rows+2,' ')
   text(3,6,'节点      设备组   当前状态                  并行 / 蜂群等级 / 蜂群数量',dim)
+  local hiveDisplay={}
   for row=1,rows do local i=(page-1)*rows+row;local n=cfg.nodes[i];if n then
    local state=read(n.address,'getState')or '离线'
-   local tier=read(n.address,'getProvidedTier');tier=type(tier)=='table'and tier.tier or '?'
+   local tier,amount
+   if hiveReaders[n.group]then
+    if not hiveDisplay[n.group]then
+     local ok,count,p=pcall(hiveReaders[n.group].read)
+     hiveDisplay[n.group]={tier=ok and p and p.tier or '?',amount=ok and(count==64 and '64+'or tostring(count))or '?'}
+    end
+    tier=hiveDisplay[n.group].tier;amount=hiveDisplay[n.group].amount
+   else
+    tier=read(n.address,'getProvidedTier');tier=type(tier)=='table'and tier.tier or '?'
+    amount=read(n.address,'getAvailableNanites')or '?'
+   end
    text(3,6+row,(i==selected and '> 'or '  ')..string.format('%02d',i)..' '..n.name,i==selected and cyan or white)
    text(20,6+row,'G'..n.group,dim)
    text(27,6+row,state,state=='crafting'and green or state=='idle'and dim or amber)
-   text(54,6+row,tostring(read(n.address,'getParallelRecipesInProgress')or '?')..' / T'..tier..' / '..tostring(read(n.address,'getAvailableNanites')or '?'),white)
+   text(54,6+row,tostring(read(n.address,'getParallelRecipesInProgress')or '?')..' / T'..tier..' / '..tostring(amount),white)
   end end
   local g=cfg.groups[cfg.nodes[selected].group];local y=rows+9
   local generators=0;for _,a in ipairs(g.generators)do if read(a,'isMachineActive')then generators=generators+1 end end

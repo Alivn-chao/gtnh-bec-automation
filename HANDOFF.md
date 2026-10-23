@@ -1,3 +1,15 @@
+# 2026-10-23 用户要求蜂群改由转运器识别
+
+通过现有OCHD MCP（本机配置含令牌，不能上传）读取真实OC：all16getAvailableNanites=0、getProvidedTier=nil，但用户截图收容总线T4=23737。实际盘库T4盘0，六相铜7562卡南3输入1，日志waiting-port requiredTranscendent4 operationTotal7562。不能重用Oct21“空仓”恢复：当时cached0不能证明物理0。源码GT5 5.09.54.133阵列cached字段依赖hatch变化标记；MCP能读蜂群转运器西4邻接gt.blockmachines三槽，第3槽为展示stack，size最多64。用户人工换六相铜后16节点cache恢复7562/T5、T4盘回箱6=23737、IO全空。
+
+用户明确“以后识别蜂群就用转运器，不用观测阵列”。新增lib/hive_transposer.lua独立reader，当前config.groups[1].nanites持久hiveSource=transposer/hatchSide=4。bridge虚拟getAvailableNanites/getProvidedTier和sharedHiveReady转为实体reader，runtime通过readPhysicalHive回调直接读取、不回退数组缓存；displayCap64仅下界，未知完整旧量先全回收，以盘清单真实总量核对，清仓再装；正常无追加/无需换种不搬盘。CLI显示64+不谎报精确数量，IO完成日志用record.holding.count。legacy未启用实体source者保留旧模式；新reader缺失/布局错误拒绝动作。
+
+已用MCP CAS写入实际bridge/nanites_cell、新reader及CLI ui，保留各自.ochd-mcp备份，原cfg和waiting-port原文归档state/group-1/nanites-cell.journal.manual-physical-20261023-1及.config/.proof。证明只含物理展示64/类型与盘库、全部IO空及所有节点暂停、纠缠停机，未把64当7562。人工核对done无holding后正常程序再次回收T5、按配方需求选择箱6的T4，实际总量由IO核对。通过/tmp/bec_mcp_start.lua重启（原web源码内存插入正常H.handle start，原全部守卫保留；临时状态采样/tmp/bec_mcp_live.dat，不碰永久生产代码）。观测状态用/tmp/bec_mcp_watch_physical.lua，不要再执行旧watch/inspect里的数组蜂群getters。
+
+测试故意让所有节点蜂群getter抛错仍能实体装入/沿用/换等级；大小64不冒充19612、部分回执/未知搬运不重放/类型冲突均覆盖。此次实体来源通过MCP部署，不要让玩家再用旧update_large覆盖桥接。源代码与重建首阶段更新器保持，但此功能不是旧update_large独立包。后续实机结果见本次聊天；未复制本机token到任何审计输出。当前本地审计outputs/mcp-20261023和outputs/live_mcp.py（不含token）。
+
+本轮178测试+20核心场景通过。实际实体来源程序已整盘回收T5=7562到箱5、装入T4=23737（箱6空盘），journal done holding.count23737，实体getter展示64/T4，全部操作经过原组暂停/纠缠停机/盘回执/清单核对。此次换盘实机耗时64.70秒，仍有组校验开销，不能把测试当加速测量。长期进程由临时启动wrapper继续，Q退出仍正常。旧数组蜂群getter仅保留未启用hiveSource的兼容模式，当前正式cfg明确transposer，故不会使用。
+
 # 2026-10-20 下载超时运行旧包
 
 用户截图wget fastly c63d7be连接超时，后执行磁盘旧bec_v3_large_update.lua打印通用已安装，随后仍原290错误；不能当新补丁实机失败。更新器仅加明确SURPLUS RECOVERY r2版本提示、下载目标改新名bec_v3_surplus_update.lua避免误跑旧包，事务仍仅替换相同控制器，不改现场。仅wget成功才lua执行；备用CDN入口cdn.jsdelivr.net。更新器4项事务测试通过。

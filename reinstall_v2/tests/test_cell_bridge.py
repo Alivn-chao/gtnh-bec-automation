@@ -49,12 +49,68 @@ class BridgeCellTests(unittest.TestCase):
         # Fixture writes are RAM only, with V2 journal directories accepted.
         ext=EXT.replace("p:match('^/home/bec_nanites_io%.journal')", "p:match('^/home/bec_v2/state/')")
         self.lua.execute(SETUP+ext+BRIDGE_FIXTURE)
-        for path in [V2/'lib/config.lua',V2/'lib/bridge.lua',V2/'lib/engine.lua',V2/'runtime/nanites_cell.lua']:
+        for path in [V2/'lib/config.lua',V2/'lib/bridge.lua',V2/'lib/engine.lua',V2/'lib/hive_transposer.lua',V2/'runtime/nanites_cell.lua']:
             self.lua.globals().files['/home/bec_v2/'+path.relative_to(V2).as_posix()]=path.read_text(encoding='utf-8')
         self.lua.execute("C=loadfile('/home/bec_v2/lib/config.lua')();Bridge=loadfile('/home/bec_v2/lib/bridge.lua')()")
 
     def run_worker(self):
         return self.lua.eval('function()return Bridge.environment(cfg,1,engine)()end')()
+
+    def direct_hive(self):
+        self.lua.execute(r'''
+cfg.groups[1].nanites.hiveSource='transposer';cfg.groups[1].nanites.hatchSide=4
+local c=require('component');local invoke=c.invoke
+c.invoke=function(a,m,x,y,...)
+ if (a==NODE or a:match('^member'))and(m=='getAvailableNanites'or m=='getProvidedTier')then error('array hive data must never be read')end
+ if a==T and x==4 then
+  if m=='getInventoryName'then return 'gt.blockmachines'end
+  if m=='getInventorySize'then return 3 end
+  if m=='getStackInSlot'then assert(y==3);if heldCount==0 then return nil end;local v={};for k,x in pairs(heldItem)do v[k]=x end;v.size=math.min(heldCount,64);return v end
+ end
+ return invoke(a,m,x,y,...)
+end
+''')
+
+    def test_direct_hive_load_and_reuse_without_any_array_hive_getters(self):
+        self.direct_hive()
+        self.assertTrue(self.run_worker())
+        self.assertEqual(self.lua.globals().heldCount,19612)
+        self.assertFalse(self.run_worker())
+        self.assertEqual(self.lua.globals().moves,2)
+
+    def test_direct_hive_whole_recovery_gets_total_from_disk_not_64(self):
+        self.direct_hive()
+        self.assertTrue(self.run_worker())
+        self.lua.execute("need=5;inv[0][8]=disk(7562,'SixPhasedCopper',4147)")
+        self.assertTrue(self.run_worker())
+        self.assertEqual(self.lua.globals().heldCount,7562)
+        self.assertEqual(self.lua.eval('inv[0][9].storedItemCount'),19612)
+        record=self.lua.eval("C.read('/home/bec_v2/state/group-1/nanites-cell.journal')")
+        self.assertEqual(record.holding.count,7562)
+
+    def test_direct_hive_missing_hatch_never_falls_back_to_array(self):
+        self.direct_hive()
+        self.lua.execute("local c=require('component');local invoke=c.invoke;c.invoke=function(a,m,x,...)if a==T and m=='getInventoryName'and x==4 then return nil end;return invoke(a,m,x,...)end")
+        with self.assertRaisesRegex(Exception,'实体蜂群收容总线缺失'):
+            self.run_worker()
+        self.assertEqual(self.lua.globals().moves,0)
+
+    def test_direct_display_64_cannot_hide_partially_unloaded_cell(self):
+        self.direct_hive();self.lua.execute('partial=true')
+        with self.assertRaisesRegex(Exception,'IO转移未完成'):
+            self.lua.execute("local co=coroutine.create(function()return Bridge.environment(cfg,1,engine)()end);for i=1,100 do local ok,err=coroutine.resume(co);if not ok then error(err,0)end;if coroutine.status(co)=='dead'then break end;now=now+1 end")
+        self.assertEqual(self.lua.globals().moves,1)
+        with self.assertRaisesRegex(Exception,'旧蜂群IO未完成'):
+            self.run_worker()
+        self.assertEqual(self.lua.globals().moves,1)
+
+    def test_direct_unknown_move_receipt_is_not_replayed(self):
+        self.direct_hive();self.lua.execute('broken=true')
+        with self.assertRaises(Exception):self.run_worker()
+        self.assertEqual(self.lua.globals().moves,1)
+        with self.assertRaisesRegex(Exception,'旧蜂群IO未完成'):
+            self.run_worker()
+        self.assertEqual(self.lua.globals().moves,1)
 
     def test_two_and_sixteen_nodes_share_one_load(self):
         for count in [2,16]:
