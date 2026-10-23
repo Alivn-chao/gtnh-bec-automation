@@ -350,3 +350,5 @@ getConsumedCondensate 在空闲时仍保留上一单的消耗记录，不能当�
 新增 fixes/crash_recovery/bec_recover.lua，已部署OC /home/bec_recover.lua。preview只读，apply受限核对后备份旧记录和物理证明，解除崩溃前未开始备料/装盘批次的阻塞；不标记旧任务完成，不重放请求，不还原游戏丢失物品。只支持当前已审查的单组、T4Transcendent装入前空总线边界，不能当万能reset。8项Lua5.2模拟保护测试通过。实机preview/apply通过，备份 /home/bec_v2/diagnostics/crash-recovery-259066.*.dat。已正常重新启动唯一web，继续核验生产。
 
 注意实际OC bridge.lua/nanites_cell.lua已有另一轮更新（实体总线读取），与当前仓库不同；本轮没有用仓库旧模块覆盖实际运行模块。实际config蜂群 hiveSource=transposer,hatchSide=4。
+
+恢复后实机确认：T4Trans23737已装入，蜂群IO检查完成52.20秒；新批次3040并行，韦门双流体过滤确认，已有库存满足，无需搬液和纠缠，日志“整批流体齐备，已连续放行；本组同配方节点已同时放行”。随后进入下一蜂群阶段，当前fault=false。此为真实放行验证，不代表整个AE订单已完成。
