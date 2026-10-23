@@ -340,3 +340,13 @@ getConsumedCondensate 在空闲时仍保留上一单的消耗记录，不能当�
 2026-10-17 蜂群检查优化：用户V1换蜂实测平均10秒，V2截图蜂群阶段170.9秒/函数124.35秒。bridge映射getState/getRequiredTier均nodeSnapshot完整N节点读取，cellguard分别3次展开。新cellInspection调用nodeSnapshot(true)完整新鲜快照一次，内含成员RS暂停，另查非cohort组成员与gens全部停机；不跨yield/搬盘缓存。runtimecell guard使用cfg.inspect，fallback原单节点检查；ensure初始等级与family共用一次snapshot；runPort tick后立即guard，删除tick尾重复guard。16节点一轮292→100调用，减少65.8%，非实机时间。新增test_hive_inspection四测试、test_hive_update三测试，现有dynamic/cell安全测试保持。新两文件update_hive.lua约37KB，supports d261/9af/9bd/3a，同样备份回读四点rollback，optional selfremove和GC；保留配置所有日志。用户新安装后旧bec_connection_update.lua可删腾空间，不能清总线删journal。tag计划bec-v2-hive-check-2026-10-17。
 
 2026-10-17 重启idle死等：用户截图读取配方4m34s，日志节点1等待idle，N04nanite-tier-too-low/允许接单，其余idle关闭。模拟从真实跑到watching且物理已完成、尚未E.advance清理的working cohort，shutdown+新E.resume恢复；旧6bb代码持续idle占组，新节点4永不启动。bridge新增BEC_V2_COHORT_IDLE fresh nodeSnapshot全idle+每entry.finished完整消耗证明；controller serve在V2 scoped cohort全idle时核对后break，走原stopped清理，让E释放组再调度。无证明fault、未确认AE请求保留不handoff，V1无限服务fallback不变。测试旧版复现/新版节点4完成/无新任务重新开放idle接单/缺证明/未知申请保留。小2文件update_cohort.lua59KB，支持d261/9af/9bd/3a/6bb，四rename回滚，optional selfremove/GC，不动配置日志，plan tagbec-v2-idle-cohort-2026-10-17。
+
+## 2026-10-24 MCP 崩服恢复（非完成证明）
+
+服务器崩溃后网页 live owner 日志显示 bridge.lua:75“节点空闲但未消耗完需求”。旧 cohort 为节点1..8、15的 T4 双288配方，但实体仅6、7、13仍有此需求，且其 consumed 为空；其他节点 idle/无需求，保留的是其他配方旧消耗。旧 cohort 不可直接 resume。磁盘 last-live-fault.dat 为旧故障，应以 panel._becWebOwner.logs 为当前依据。
+
+本轮已在故障边界正常Q退出网页；真实核对16节点RS15/关闭接单、纠缠器停机、子网原液空、两IO及 transposer side4实体蜂群总线全空。备用箱前9盘：Carbon65812、BlackDwarf101、Silver37604、WhiteDwarf144、SixCu7562、Trans23737、Gold39392、空、空。蜂群journal loading 无pending/holding，operationTotal23737；node2生产journal starting 无请求/搬运，其它生产日志stopped且已确认。
+
+新增 fixes/crash_recovery/bec_recover.lua，已部署OC /home/bec_recover.lua。preview只读，apply受限核对后备份旧记录和物理证明，解除崩溃前未开始备料/装盘批次的阻塞；不标记旧任务完成，不重放请求，不还原游戏丢失物品。只支持当前已审查的单组、T4Transcendent装入前空总线边界，不能当万能reset。8项Lua5.2模拟保护测试通过。实机preview/apply通过，备份 /home/bec_v2/diagnostics/crash-recovery-259066.*.dat。已正常重新启动唯一web，继续核验生产。
+
+注意实际OC bridge.lua/nanites_cell.lua已有另一轮更新（实体总线读取），与当前仓库不同；本轮没有用仓库旧模块覆盖实际运行模块。实际config蜂群 hiveSource=transposer,hatchSide=4。
