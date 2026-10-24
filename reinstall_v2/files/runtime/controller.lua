@@ -228,8 +228,8 @@ if cached then
  emptyConfig();tanks(4,nil);tanks(5,nil);assert(stockedBatch(target),"快速放行前库存或子网变化，保持暂停")
  if BEC_V3_RELEASE_SUPPLY then BEC_V3_RELEASE_SUPPLY()end
 end
-if BEC_V2_PHASE then BEC_V2_PHASE("producing")end pause(0) print("整批流体齐备，已连续放行；本组同配方节点已同时放行。按 Q 停止。") local releasedAt=computer.uptime() local deadline=releasedAt+600
-local lastStock=field() local lastRequired=record.required local nextQueueCheck=0 while not stopping do
+if BEC_V2_PHASE then BEC_V2_PHASE("producing")end pause(0) print("整批流体齐备，已连续放行；本组同配方节点已同时放行。按 Q 停止。") local releasedAt=computer.uptime() -- BEC_V3_NO_RECIPE_TIMEOUT_1: slow recipes wait until completion or explicit stop.
+local lastRequired=record.required local nextQueueCheck=0 while not stopping do
 -- One full group sample per decision, plus a separate fresh sample at the
 -- refill boundary. Never reuse it after a pause, swap, release, or yield.
 local sample=productionSnapshot();local v,req=sample.state,sample.required
@@ -239,7 +239,7 @@ local supplied=call(NODE,"getProvidedTier")
 if type(needed)=="number" and (needed~=lastNaniteTier or family~=lastNaniteFamily or type(supplied)~="table" or supplied.tier<needed) then
 pause(15);local completed=false;waitUntil(10,function() local s=call(NODE,"getState");completed=completedIdle(s);return s=="paused-immediate" or s=="nanite-tier-too-low"or completed,s end,nil,"换蜂前暂停/完成核对")
 if completed then print("换蜂暂停期间本批已完成，消耗核对通过；无需再换蜂。");stopping=true;break end
-switchNanites();if stopping then break end;verifyGate(filters);pause(0);releasedAt=computer.uptime();deadline=releasedAt+600;if BEC_V2_PHASE then BEC_V2_PHASE("producing")end
+switchNanites();if stopping then break end;verifyGate(filters);pause(0);releasedAt=computer.uptime();if BEC_V2_PHASE then BEC_V2_PHASE("producing")end
 sample=productionSnapshot();v,req=sample.state,sample.required;stock=field()
 end
 local parallel if req~=nil then parallel=integer(sample.parallel) local matching=parallel>0
@@ -251,7 +251,9 @@ assert(v=="crafting" or (v=="paused-immediate" and computer.uptime()-releasedAt<
 local freshSample=productionSnapshot();local consumed=freshSample.consumed;assert(type(consumed)=="table","当前消耗记录不可读") local fresh=freshSample.required if type(fresh)~="table" or not same(req,fresh) or parallel~=freshSample.parallel then pause(15);break end
 local count=math.max(1,queuedRecipes()) for name,amount in pairs(req) do local need=perRecipe[name]*math.max(parallel,count)-integer(consumed[name] or 0) if (stock[name] or 0)<need then refill=true end
 end nextQueueCheck=computer.uptime()+1 end if refill then break end
-if not same(stock,lastStock) then deadline=computer.uptime()+600;lastStock=stock end assert(computer.uptime()<deadline,"当前配方运行超时") tick(0.1) end
+-- Recipe duration and condensate consumption can remain unchanged for hours.
+-- State, demand, gate, refill and cancellation guards above remain active.
+tick(0.1) end
 end end end pause(15);generator(false);record.configOwned=false
 for _,job in ipairs(record.requests) do if job.state~="done" then save("craft-paused") print("服务已暂停；主网原液申请仍需核对，保留日志，不重复下单。")
 return end end save("stopped")

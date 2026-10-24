@@ -362,3 +362,11 @@ getConsumedCondensate 在空闲时仍保留上一单的消耗记录，不能当�
 通过MCP版本条件写入并逐字回读两个模块；备份 /home/bec_v2/lib/.ochd-mcp/c886ce2a-8cd5-45c8-9efb-4698acae5b78.bak 和 /home/bec_v2/runtime/.ochd-mcp/23ba0c7c-ee4e-4a36-b484-b5d17760dac7.bak。实体 hive_transposer.lua 未替换。
 
 当次现场：网页已退出、全部节点RS15/关闭接单、纠缠器停机、双IO和实体总线空，白矮星144完整位于盘库8，而done journal.holding仍记白矮星144（home4）。真实核对同族总量守恒后保留 /home/bec_v2/diagnostics/hive-return-reconcile-298991.dat 证明，并仅清除过期holding；未删任何日志或改订单。重启唯一web后实际T6白矮星144装入完成，日志“观测阵列已确认蜂群类型和数量，可以继续备料”，蜂群IO耗时33.90秒，无fault。尚未在实机复现原缓存失效并自动回收重装的分支，不声称已经实测该分支。
+
+## 2026-10-24 慢配方移除生产时限
+
+用户截图 runtime/controller.lua:257“当前配方运行超时”，从换蜂后放行至保护暂停约600秒；实际逻辑以凝聚物库存不变600秒为超时。慢配方中库存不变不代表机器卡死。按用户要求移除正常生产循环的该时限，保留节点状态/需求/消耗/韦门/缺料/用户停止检查及IO、供料超时。变更应用到仓库控制器和实际OC的当前控制器，仅替换4个精确片段；实机其它模块（含刚装的蜂群刷新）未覆盖。
+
+fixes/slow_recipe 内保存受检补丁、实机兼容控制器快照、测试和说明。仓库版与实际版各验证两小时库存不变后正常完成、人工暂停、机器离线仍停机；3个测试、6种组合通过。V3 146回归及20核心场景通过，已重建reinstall_v3/update.lua。
+
+MCP现场确认唯一网页处于超时fault后正常Q退出，16节点RS15且禁止新接单、纠缠器停机。控制器写入带版本条件，备份 /home/bec_v2/runtime/.ochd-mcp/9a93db09-72c3-49ad-b06f-28196bc403e9.bak，逐字回读通过。保留watching生产journal、interrupted cohort和全部请求记录，正常Start继续旧订单，未重下AE订单或清记录。已重启唯一web，等待实机放行确认；尚不能称已实测运行超过10分钟。
