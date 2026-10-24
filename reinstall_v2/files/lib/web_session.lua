@@ -92,9 +92,9 @@ return function(C,B,W,options)
   local formal={};for _,f in ipairs(B.v2Fields(cfg))do formal[f.key]=f.value end
   for _,f in ipairs(fields())do assert(f.value==formal[f.key],'草稿尚未应用，请先应用绑定')end
  end
- -- BEC_V3_CACHE_RESPONSE_1: no hardware controls or binding edits in this lane.
+ -- BEC_V3_PAUSE_RESPONSE_1: cache edits and pause can run between callbacks.
  function H.canServeFast(request)
-  return request.name=='cache'and type(request.args)=='table'and K and K.canServeFast(request.args)
+  return request.name=='pause'or request.name=='cache'and type(request.args)=='table'and K and K.canServeFast(request.args)
  end
  function H.handle(name,args,request)
   assert(type(args)=='table','页面参数必须为对象')
@@ -181,7 +181,7 @@ return function(C,B,W,options)
    local seen={};for i,n in ipairs(cfg.nodes)do if not seen[n.group]then E.resumeNode(i);seen[n.group]=true end end
    H.running=true;H.notice='自动化运行中；节点按批次关闭接单，整组完成后再接下一单。';return H.notice
   elseif name=='pause'then
-   H.running=false;if P and P.co then P.stop=true end;if E then E.pauseAll()end;H.notice='已请求暂停；工作器收尾，未确认记录保留。';return H.notice
+   H.running=false;if P and P.co then P.stop=true end;if K then K.requestStop()end;if E then E.pauseAll()end;H.notice='已请求暂停；工作器收尾，未确认记录保留。';return H.notice
   elseif name=='refresh'then return '页面在线'
   end
   error('不支持的页面事件')

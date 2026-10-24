@@ -12,7 +12,7 @@ V2=ROOT/'reinstall_v2'
 sys.path.insert(0,str(V2))
 from build import literal
 
-NAMES=['lib/cache.lua','lib/web_session.lua','lib/web_transport.lua','web.lua','lib/web_page.html']
+NAMES=['lib/cache.lua','lib/web_session.lua','lib/web_transport.lua','web.lua','lib/web_page.html','runtime/cache.lua']
 BASE='0e3926a'
 def signature(data):return str(len(data))+':'+str(zlib.adler32(data)&0xffffffff)
 def baseline(name):return subprocess.check_output(['git','show',BASE+':reinstall_v2/files/'+name],cwd=ROOT).decode('utf-8')
@@ -34,6 +34,7 @@ def build():
         # The first response patch (499d433) is also a supported upgrade base.
         previous=subprocess.check_output(['git','show','499d433:reinstall_v2/files/'+name],cwd=ROOT)
         known={signature(old.encode()),signature(previous)}
+        known.add(signature(subprocess.check_output(['git','show','2e3dc3c:reinstall_v2/files/'+name],cwd=ROOT)))
         supported=','.join('['+repr(k)+']=true'for k in sorted(known))
         rows.append('{name='+repr(name)+',source='+source+',supported={'+supported+'}}')
     tree=ast.parse((V2/'build_cache_update.py').read_text(encoding='utf-8'))

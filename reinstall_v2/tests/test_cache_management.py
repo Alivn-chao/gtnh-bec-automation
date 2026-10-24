@@ -103,8 +103,12 @@ K.close();K=factoryCache(C,B,cfg,disk)
  def test_arriving_production_waits_for_request_and_confirmed_conversion(self):
   l=setup();l.execute(AE+'''cpuBusy=false
 for i=1,100 do K.step(E,true);world.advance(.05);if requests==1 then break end end
-assert(requests==1 and K.busy and E.fluidOwner=='cache-1'and world.workAllowed==true)
-world.finished=false
+assert(requests==1 and K.busy and E.fluidOwner=='cache-1'and world.workAllowed==false)
+local c=require('component');local invoke=c.invoke
+c.invoke=function(a,m,...)
+ if a=='main'and m=='getCpus'then return {{busy=true,cpu={activeItems=function()return {{name='simulation:product_a',damage=0,size=1}}end,pendingItems=function()return {}end}}}end
+ return invoke(a,m,...)
+end
 steps(200)
 ''')
   self.assertFalse(l.eval('K.busy'))
@@ -112,6 +116,9 @@ steps(200)
   self.assertEqual(l.eval('E.fluidOwner'),None)
   self.assertEqual(l.eval('requests'),1)
   self.assertEqual(l.eval('next(world.sub)'),None)
+
+ def test_order_admitted_before_cache_worker_yields_without_starting(self):
+  l=setup();l.execute("change('enable');K.step(E,true);assert(K.busy);world.finished=false;K.step(E,true);assert(not K.busy and not K.blocked,K.message);assert(not E.groupOwner[1]and not E.fluidOwner);assert((world.calls.transferFluid or 0)==0)")
 
  def test_unfinished_production_journal_blocks_cache_without_writes(self):
   l=setup();l.execute("change('enable');C.write(C.path('state/node-1/production.journal'),{stage='craft-request-pending',pending={},configOwned=false});steps(100)")

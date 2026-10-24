@@ -9,7 +9,10 @@ return function(C,B,cfg,storage)
  local settings=raw and C.read(path)or {version=1,target=fallback,overrides={},enabled=false}
  local K={busy=false,logs={},message='空闲时按目标补库；生产订单优先',page=0}
  local active,nextScan,nextGroup,names=nil,0,1,{}
+ -- BEC_V3_PAUSE_RESPONSE_1: memory-only cancellation, safe between callbacks.
+ function K.requestStop()if active then active.stop=true;active.deadline=0 end end
  local catalogueReady=false;local displayedStock={}
+ local discoveryByGroup,discoveredCatalogue={},nil;local skipSavedDiscovery=false -- BEC_V3_FIXED_DISCOVERY_1
  local function integer(n,min)return type(n)=='number'and n>=min and n<=2147483647 and n%1==0 end
  local function validate(v)
   assert(v.version==1 and integer(v.target,1)and type(v.overrides)=='table'and type(v.enabled)=='boolean','缓存配置无效')
@@ -48,15 +51,28 @@ return function(C,B,cfg,storage)
  end
  local function scan(force)
   if catalogueReady and not force then return end
-  local found={};if fs.exists(cfg.recipeDirectory)then for name in fs.list(cfg.recipeDirectory)do if name:match('%.dat$')then
+  if force then discoveryByGroup={};skipSavedDiscovery=true end
+  local found,totals,outputs={},{},{};local count,valid=0,true
+  if fs.exists(cfg.recipeDirectory)then for name in fs.list(cfg.recipeDirectory)do if name:match('%.dat$')then
    local r=C.read(cfg.recipeDirectory..'/'..name)
-   if r and r.state=='converted'then for _,f in ipairs(r.condensates or {})do
-    assert(type(f.name)=='string'and #f.name<=80,'配方流体名称无效');found[f.name]=true
-   end end
+   if r and r.state=='converted'then
+    count=count+1;local demand={}
+    for _,f in ipairs(r.condensates or {})do
+     assert(type(f.name)=='string'and #f.name<=80,'配方流体名称无效');found[f.name]=true
+     if not integer(f.amount,1)then valid=false else demand[f.name]=(demand[f.name]or 0)+f.amount end
+    end
+    if not next(demand)then valid=false end
+    for k,v in pairs(demand)do if not integer(v,1)then valid=false end;totals[k]=math.max(totals[k]or 0,v)end
+    for _,v in ipairs(r.outputs or {})do outputs[tostring(v.name)..':'..tostring(tonumber(v.damage or 0))]=true end
+   else valid=false end
   end end end
+  discoveredCatalogue=valid and count>0 and {totals=totals,outputs=outputs,count=count}or nil
   names={};for name in pairs(found)do names[#names+1]=name end;table.sort(names);assert(#names<=64,'登记缓存类型超过64种');catalogueReady=true
  end
- function K.invalidateCatalogue()catalogueReady=false end
+ function K.invalidateCatalogue()
+  catalogueReady=false;discoveredCatalogue=nil
+  for _,memo in pairs(discoveryByGroup)do memo.catalogue=nil end
+ end
  -- Only these small settings/page operations may run between worker reads.
  function K.canServeFast(args)return catalogueReady and (args.mode=='page'or args.mode=='save')end
  function K.catalogueStep()scan()end
@@ -93,12 +109,22 @@ return function(C,B,cfg,storage)
   local g=cfg.groups[group];local leader
   for i,n in ipairs(cfg.nodes)do if n.group==group then leader=leader or i end end
   assert(leader,'缓存设备组没有节点');local n=cfg.nodes[leader]
+  -- State reads and workAllowed writes are separate server callbacks. An idle
+  -- node may already have admitted an order before the cache closed admission.
+  -- Yield the leases BEFORE loading the cache runtime or creating its journal.
+  for _,member in ipairs(cfg.nodes)do if member.group==group then
+   if c.invoke(member.address,'getState')~='idle'then
+    log('节点已接单或不再空闲，缓存尚未搬液/下单，交回生产调度。')
+    return true
+   end
+  end end
   local function guard()
    assert(E.fluidOwner==ctx.token and E.groupOwner[group]==ctx.token,'缓存资源锁变化')
    assert(B.read(C.path('config.dat'))==ctx.formal,'缓存期间绑定变化，保留记录')
    local disk=storage.status();assert(disk.known and disk.ok,'缓存期间磁盘不足，保留记录')
    for _,member in ipairs(cfg.nodes)do if member.group==group then
     assert(c.invoke(member.redstone,'getOutput',member.pauseSide)==15,'缓存期间节点暂停信号变化')
+    assert(c.invoke(member.address,'isWorkAllowed')==false,'缓存期间节点接单许可被重新开启')
     local s=c.invoke(member.address,'getState');assert(s=='idle'or s=='paused-immediate'or s=='nanite-tier-too-low','缓存期间节点状态异常：'..tostring(s))
    end end
   end
@@ -132,6 +158,30 @@ return function(C,B,cfg,storage)
    return c.invoke(a,m,table.unpack(args))
   end
   local env=setmetatable({},{__index=_G});env._ENV=env
+  local memo=discoveryByGroup[group]
+  local discoveryPath=C.path('state/group-'..group..'/cache-discovery.dat')
+  local function validSaved(v)
+   if type(v)~='table'or v.version~=1 or v.binding~=ctx.formal or type(v.ports)~='table'or type(v.rawNames)~='table'then return false end
+   local allowed={};for _,a in ipairs(g.bulkTransposers or {})do allowed[a]=true end
+   local count=0
+   for raw,r in pairs(v.ports)do
+    count=count+1;if count>64 or type(raw)~='string'or #raw>80 or type(r)~='table'or not allowed[r.address]
+     or not integer(r.from,0)or r.from>5 or not integer(r.to,0)or r.to>5 or r.from==r.to then return false end
+   end
+   count=0;for kind,raw in pairs(v.rawNames)do count=count+1;if count>64 or type(kind)~='string'or #kind>80 or type(raw)~='string'or #raw>80 then return false end end
+   return true
+  end
+  if not memo then
+   memo={rawNames={}}
+   if not skipSavedDiscovery then local ok,saved=pcall(C.read,discoveryPath);if ok and validSaved(saved)then memo.ports=saved.ports;memo.rawNames=saved.rawNames;memo.persisted=ser.serialize(saved,false)end end
+  end
+  memo.catalogue=discoveredCatalogue;discoveryByGroup[group]=memo
+  env.BEC_V3_CACHE_DISCOVERY=memo
+  env.BEC_V3_CACHE_SAVE_DISCOVERY=function()
+   if not memo.ports then return end
+   local saved={version=1,binding=ctx.formal,ports=memo.ports,rawNames=memo.rawNames};local text=ser.serialize(saved,false)
+   if text~=memo.persisted then C.write(discoveryPath,saved);memo.persisted=text end
+  end
   env.BEC_V2_CACHE_GUARD=guard
   env.BEC_V2_CACHE_PRUNE=function()prune(group)end
   env.BEC_V2_CACHE_YIELD=function()
@@ -163,7 +213,7 @@ return function(C,B,cfg,storage)
  function K.step(E,running)
   if active then
    if not running or not settings.enabled then active.stop=true end
-   if clock.uptime()<(active.deadline or 0)then return end
+   if not active.stop and clock.uptime()<(active.deadline or 0)then return end
    local ok,result,reason=coroutine.resume(active.co)
    if ok and coroutine.status(active.co)~='dead'then active.deadline=result or clock.uptime();return end
    local group=active.group;stopGenerators(group)
@@ -193,9 +243,11 @@ return function(C,B,cfg,storage)
    for _,a in ipairs(g.generators)do if c.invoke(a,'isWorkAllowed')or c.invoke(a,'isMachineActive')then safe=false end end
    if safe and members>0 then
     K.assertReady();prune(group);local disk=storage.status();if not disk.known or not disk.ok then return end
-    -- Keep immediate pause asserted, but allow idle nodes to admit a new order
-    -- so the V1 priority check can see physical inputs as well as AE queues.
-    for i,n in ipairs(cfg.nodes)do if n.group==group then c.invoke(n.redstone,'setOutput',n.pauseSide,15);E.nodeWork(i,true)end end
+    -- Cache owns the same physical supply path as production. Closing work
+    -- permission prevents a new recipe from racing guard() as crafting while
+    -- the immediate-pause signal is still being processed. AE priority checks
+    -- remain active; admission is reopened by E only after clean lease release.
+    for i,n in ipairs(cfg.nodes)do if n.group==group then c.invoke(n.redstone,'setOutput',n.pauseSide,15);E.nodeWork(i,false)end end
     active={group=group,token='cache-'..group,formal=B.read(C.path('config.dat'))}
     E.groupOwner[group]=active.token;E.fluidOwner=active.token
     active.co=coroutine.create(function()return worker(group,E,active)end)

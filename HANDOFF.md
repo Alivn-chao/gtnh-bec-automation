@@ -370,3 +370,17 @@ getConsumedCondensate 在空闲时仍保留上一单的消耗记录，不能当�
 fixes/slow_recipe 内保存受检补丁、实机兼容控制器快照、测试和说明。仓库版与实际版各验证两小时库存不变后正常完成、人工暂停、机器离线仍停机；3个测试、6种组合通过。V3 146回归及20核心场景通过，已重建reinstall_v3/update.lua。
 
 MCP现场确认唯一网页处于超时fault后正常Q退出，16节点RS15且禁止新接单、纠缠器停机。控制器写入带版本条件，备份 /home/bec_v2/runtime/.ochd-mcp/9a93db09-72c3-49ad-b06f-28196bc403e9.bak，逐字回读通过。保留watching生产journal、interrupted cohort和全部请求记录，正常Start继续旧订单，未重下AE订单或清记录。已重启唯一web，等待实机放行确认；尚不能称已实测运行超过10分钟。
+
+## 2026-10-25 暂停、样板入口与固定信息复用
+
+用户反映暂停很慢无法处理样板。MCP现场生产cohort已stopped、16节点idle/关闭接单，后台cache.busy仍true，日志停在配方52；网页仍running。旧transport只接收暂停，需等整段worker返回才执行。新增暂停快通道：沿用现有FIFO、pending回复及防嵌套约束，可在组件回调之间执行；H.pause立即调用K.requestStop，取消ctx休眠截止时间，runtime缓存配方扫描在只读边界响应。未确认请求/搬运仍保留并收尾，未取消安全guard。
+
+用户进一步明确固定信息不应反复扫描。K.scan现在同时生成流体目录、最大单配方需求、生产产物索引，runtime每轮共用它；样板完成/失败或手动刷新会失效，程序重启确认目录一次。已确认bulk端口与raw别名按组记忆并写入state/group-N/cache-discovery.dat，绑定文本一致时重启复用。使用前仅核对所需端口的方向/容量/流体；不符才重新全扫描。已知口暂空允许保留绑定和申请正确原液，实际transfer前仍要求真实流体名称正确和接收口空。错误别名不可把一种凝聚物映射到任意其他流体。库存、设备启停、部分搬运、AE请求确认全保留实时检查。
+
+实际OC已有、但原仓库未同步的缓存关闭接单/工作器启动前再查是否idle保护已保留并同步仓库。生产进入缓存占用期间不能重新开接单，AE队列优先检查仍运行；新入单竞态在搬液/下单前释放缓存资源。相关测试从物理重新开单改为AE排队让位，并新增竞态回归。
+
+部署分两次：先pause响应3模块，再discovery的lib/cache.lua和runtime/cache.lua。均先读实际文件、带MCP版本条件写入、保留备份、逐字回读。两模块最终备份 /home/bec_v2/lib/.ochd-mcp/7f7fb239-da58-4f61-b0f4-bfa922ef3513.bak 和 /home/bec_v2/runtime/.ochd-mcp/b25edac1-b46d-4a38-97bb-1cbbd425b0b8.bak；web_session旧版备份 /home/bec_v2/lib/.ochd-mcp/b8c8f203-e9f6-425a-ab08-cb83d56f4280.bak。
+
+旧管理网页先暂挂，确认所有生产/cohort/cache/cell记录均stopped或done，无pending/不明请求/部分搬运、端口空、纠缠器停，再main.pause确认节点RS15和关闭接单，最后只结束该网页线程并重载。机箱/MCP代理没有关闭，不删journal；任何检查失败都会恢复旧线程并拒绝继续。第二次还要求网页mode=binding且无正在运行样板/缓存。新网页不自动Start；当前mode=binding，16节点idle/workAllowed=false，cache.busy=false/blocked=false。实际独立样板工坊preview读到槽1 Gallifreyan Stabilisation、槽2 Gallifreyan Time Dilation；仅只读，没有替用户转换。
+
+158个回归测试及20个核心场景通过，含3暂停测试、8固定信息复用测试和1新增缓存接单竞态测试。模拟多轮补库不再新增配方文件读取/全扫描，重启复用路线、新样板失效、端口方向变化、空口、错误绑定/地址/别名均验证。实机只验证部署、暂停状态与样板预览，不宣称已实测运行中按钮响应耗时或多轮复用性能。实际基线两阶段补丁重放结果与部署文件一致；原始现场/私有调试文件继续留outputs不提交。

@@ -31,8 +31,8 @@ class CacheResponseUpdateTests(unittest.TestCase):
             self.assertEqual(l.globals().files['/home/bec_v2/'+name],value)
         self.assertLess(len(SCRIPT.encode()),100000)
 
-    def test_all_ten_rename_failures_restore_all_five_files(self):
-        for failure in range(1,11):
+    def test_each_rename_failure_restores_every_file(self):
+        for failure in range(1,2*len(NAMES)+1):
             with self.subTest(failure=failure):
                 l=self.make();l.execute("local fs=require('filesystem');local rename=fs.rename;local n=0;fs.rename=function(a,b)n=n+1;if n=="+str(failure)+"then return false end;return rename(a,b)end")
                 with self.assertRaisesRegex(Exception,'旧程序已恢复'):l.execute(SCRIPT)

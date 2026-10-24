@@ -66,7 +66,31 @@ assert(call(MAIN, "getFluidInterfaceConfiguration", slot) == nil, "供液接口�
 local function waitUntil(seconds, condition, guard) local deadline = computer.uptime() + seconds while true do
 local ready, snapshot = condition() if ready then return end if guard then guard(snapshot) end
 assert(computer.uptime() < deadline, "等待超时，停止") os.sleep(0.25) end
-end local function bulkPorts() local allowed,ports={},{}
+end
+local discovery=BEC_V3_CACHE_DISCOVERY -- Session memo; bindings recreate the host.
+if discovery then for kind,raw in pairs(discovery.rawNames)do
+ local base=mapping[kind]
+ local valid=base and (raw==base or raw=='fluid.'..base or kind=='entangled_space'and(raw=='spatialfluid'or raw=='fluid.spatialfluid')or kind=='entangled_time'and(raw=='temporalfluid'or raw=='fluid.temporalfluid'))
+ if not valid then discovery.rawNames[kind]=nil end
+end end
+local function probeRoute(route,raw)
+ if call(route.address,"getTankCount",route.from)~=1 or call(route.address,"getTankCapacity",route.from,1)~=2147483647
+  or call(route.address,"getTankCount",route.to)~=6 or call(route.address,"getTankCapacity",route.to,1)~=16000 then return false end
+ local f=call(route.address,"getFluidInTank",route.from,1);if type(f)=="table"and type(f[1])=="table"then f=f[1]end
+ return type(f)=="table"and (f.name==raw or not f.name and tonumber(f.amount or 0)==0)
+end
+local function bulkPorts(required)
+ if discovery and discovery.ports then
+  local valid=true
+  for kind in pairs(required or {})do
+   local raw=mapping[kind];local route=discovery.ports[raw]
+   local ok,match=false,false;if route then ok,match=pcall(probeRoute,route,raw)end
+   if not ok or not match then valid=false;break end
+  end
+  if valid then return discovery.ports end
+  discovery.ports=nil;discovery.rawNames={}
+ end
+ local allowed,ports={},{}
 for _,raw in pairs(mapping) do allowed[raw]=true;allowed["fluid."..raw]=true end
 for _,raw in ipairs({"spatialfluid","fluid.spatialfluid","temporalfluid","fluid.temporalfluid"}) do allowed[raw]=true end for address,kind in c.list("transposer") do if kind=="transposer" and address~=TRANS then
 local sources,receivers={},{} for side=0,5 do local ok,count=pcall(call,address,"getTankCount",side)
@@ -77,8 +101,9 @@ if readable and capacity==16000 then receivers[#receivers+1]=side end end end
 if #sources>0 then assert(#receivers==1,"高速供液口接收方向缺失或不唯一: "..address) for _,source in ipairs(sources) do
 assert(not ports[source.raw],"高速供液口重复绑定: "..source.raw) ports[source.raw]={address=address,from=source.from,to=receivers[1]} end
 end end end
-return ports end local function verifyBulk(route,raw)
-local f=call(route.address,"getFluidInTank",route.from,1) if type(f)=="table" and type(f[1])=="table" then f=f[1] end assert(type(f)=="table" and f.name==raw
+if discovery then discovery.ports=ports;if BEC_V3_CACHE_SAVE_DISCOVERY then BEC_V3_CACHE_SAVE_DISCOVERY()end end
+return ports end local function verifyBulk(route,raw,allowEmpty)
+local f=call(route.address,"getFluidInTank",route.from,1) if type(f)=="table" and type(f[1])=="table" then f=f[1] end assert(type(f)=="table" and (f.name==raw or allowEmpty and not f.name and integer(f.amount or 0)==0)
 and call(route.address,"getTankCapacity",route.from,1)==2147483647,"高速缓存口绑定已变化") assert(call(route.address,"getTankCount",route.to)==6,"高速接收接口已变化") for i=1,6 do
 local tank=call(route.address,"getFluidInTank",route.to,i) if type(tank)=="table" and type(tank[1])=="table" then tank=tank[i] or tank[1] end assert(type(tank)=="table" and integer(tank.amount or 0)==0,"高速接收接口有未处理缓存")
 end end local function unchanged()
@@ -117,7 +142,7 @@ local function productionWaiting()
  return priorityQueued
 end
 
-local function prepareStreaming(target) local ports=bulkPorts() local stock,previous=field(),network(SUB)
+local function prepareStreaming(target) local ports=bulkPorts(target) local stock,previous=field(),network(SUB)
 local expected,raws={},{}
 
 local priority=false
@@ -145,7 +170,7 @@ for name,amount in pairs(stock) do assert(amount==0 or mapping[name],"约束场�
 for _,item in ipairs(raws) do if productionWaiting() then return handoff() end local raw,need,batch=item.raw,item.amount,item.batch local route=ports[raw]
 local chunk=math.floor(2147483647/batch)*batch local function bufferedInlet() return 0 end if (previous[raw] or 0)<need then
 unchanged();emptyConfig();tanks(4,nil) record.configOwned=false;save("stream-configuring")
-assert(route,"高速供液口不可用："..raw);verifyBulk(route,raw)
+assert(route,"高速供液口不可用："..raw);verifyBulk(route,raw,true)
 print("高速供液: "..raw.."；源 "..route.from.." -> 接收 "..route.to)
 print(raw.." 整批目标 "..need.." mB；到账即搬入子网。") local job,status,craft,jobDeadline,doneAt
 local attempts=0 local inletOpen=false local deadline=computer.uptime()+1800
@@ -234,13 +259,18 @@ end waitUntil(20,function() return tanks(4,raw)==0 end,unchanged) if stopping th
 end end assert(same(network(SUB),expected),"整批子网原液不符")
 record.plan=nil;save("stream-prepared") return expected end
 local function cacheTarget(copies) assert(type(copies)=="number" and copies>=1 and copies==math.floor(copies),"缓存份数必须为正整数") local totals,count={},0 local selectedBackground
-assert(fs.exists("/home/bec/recipes"),"没有已登记配方") for filename in fs.list("/home/bec/recipes") do if filename:sub(-4)==".dat" then local f=assert(io.open("/home/bec/recipes/"..filename,"r"));local text=f:read("*a");f:close()
+if discovery and discovery.catalogue then
+ for name,n in pairs(discovery.catalogue.totals)do assert(mapping[name],"未登记原液映射: "..name);totals[name]=n*copies;assert(totals[name]<=2147483647,"缓存目标过大")end
+ count=discovery.catalogue.count;productionOutputs=discovery.catalogue.outputs
+else
+assert(fs.exists("/home/bec/recipes"),"没有已登记配方") for filename in fs.list("/home/bec/recipes") do if background and BEC_V2_CACHE_YIELD and BEC_V2_CACHE_YIELD()then return {} end if filename:sub(-4)==".dat" then local f=assert(io.open("/home/bec/recipes/"..filename,"r"));local text=f:read("*a");f:close()
 local recipe=ser.unserialize(text) assert(type(recipe)=="table" and recipe.state=="converted" and type(recipe.condensates)=="table","配方记录未完成: "..filename) local demand={}
 for _,out in ipairs(recipe.outputs or {}) do productionOutputs[tostring(out.name)..":"..tostring(tonumber(out.damage or 0))]=true end
 for _,fluid in ipairs(recipe.condensates) do assert(mapping[fluid.name],"未登记原液映射: "..tostring(fluid.name)) demand[fluid.name]=(demand[fluid.name] or 0)+integer(fluid.amount)
 end assert(next(demand),"配方没有凝聚物需求: "..filename) for name,need in pairs(demand) do
 assert(need*copies<=2147483647,"缓存目标过大") totals[name]=math.max(totals[name] or 0,need*copies) end
 count=count+1 print("配方 "..count.."："..filename) end end
+end
 assert(count>0,"没有可缓存的已登记配方") if fixedStock then
 local input=io.open("/home/bec_cache.config","r")
 if input then local cfg=ser.unserialize(input:read("*a"));input:close()
@@ -254,7 +284,11 @@ assert(old.stage=="stopped" and old.pending==nil and old.configOwned==false,"后
 if productionWaiting() then return {} end local stock=field();local selected,lowest for name,need in pairs(totals) do local available=stock[name] or 0
 if available<need and (not lowest or available<lowest) then selected=name;lowest=available end end if not selected then return {} end
 selectedBackground=selected;totals={[selected]=totals[selected]} end end
-local live,stock=network(MAIN),field();for raw,n in pairs(network(SUB)) do live[raw]=math.max(live[raw] or 0,n) end local visibleRoutes=bulkPorts();local waiting for kind in pairs(totals) do local raw=mapping[kind]
+local live,stock={},field();local visibleRoutes=bulkPorts();local waiting
+local unknown=false;for kind in pairs(totals)do if not(discovery and discovery.rawNames[kind])then unknown=true end end
+if unknown then live=network(MAIN);for raw,n in pairs(network(SUB))do live[raw]=math.max(live[raw]or 0,n)end end
+for kind in pairs(totals) do local raw=mapping[kind]
+if discovery and discovery.rawNames[kind]then mapping[kind]=discovery.rawNames[kind]else
 local candidates={[raw]=true} candidates["fluid."..raw]=true if kind=="entangled_space" or kind=="entangled_time" then
 local stem=kind=="entangled_space" and "spatialfluid" or "temporalfluid" candidates[stem]=true;candidates["fluid."..stem]=true end
 local found={} for name in pairs(candidates) do if (live[name] or 0)>0 or visibleRoutes[name] then found[name]=true end end for name in pairs(candidates) do
@@ -262,8 +296,9 @@ local rows=call(MAIN,"getCraftables",{name=name}) assert(type(rows)=="table","�
 if type(stack)=="table" and stack.name==name and type(stack.amount)=="number" then found[name]=true end end end
 local name,n=nil,0;for candidate in pairs(found) do name=candidate;n=n+1 end assert(n<=1,"原液名称不唯一: "..kind)
 if n==0 and (stock[kind] or 0)<totals[kind] then waiting="等待原液库存/样板可见: "..kind.." / "..raw end
-if n==1 then mapping[kind]=name end end
-if productionWaiting() then return totals end local routes=bulkPorts();local stored=field()
+if n==1 then mapping[kind]=name;if discovery then discovery.rawNames[kind]=name;if BEC_V3_CACHE_SAVE_DISCOVERY then BEC_V3_CACHE_SAVE_DISCOVERY()end end end
+end end
+if productionWaiting() then return totals end local routes=bulkPorts(totals);local stored=field()
 for kind,need in pairs(totals) do
  if (stored[kind] or 0)<need and not routes[mapping[kind]] then waiting="等待高速口流体可见: "..kind.." / "..mapping[kind].."；空口暂不能识别绑定，稍后重扫" end
 end
@@ -271,6 +306,7 @@ if selectedBackground then print("空闲高速补库：直接补本种完整缺�
 print("登记配方 "..count.."；默认目标 "..fixedStock.." mB，单项设置优先，0停补；只补差额。") else print("登记配方 "..count.."；每配方 "..copies.." 份，共用流体按最大用量缓存。") end return totals,waiting
 end local function cacheMain() assert(mode=="preview" or mode=="run","用法: preview / run [每配方份数，默认1]")
 RS=resolve("266f65b5","redstone");GEN=resolve("c1ae3f7c","gt_machine") assert(call(GEN,"getName")=="multi.bec.generator","纠缠装置名称不符") local target,waiting=cacheTarget(cacheCopies)
+if background and BEC_V2_CACHE_YIELD and BEC_V2_CACHE_YIELD()then return end
 while waiting do print(waiting)
 if background or mode=="preview" then return end
 tick(2);if stopping then print("已取消等待；日志和库存未修改。");return end

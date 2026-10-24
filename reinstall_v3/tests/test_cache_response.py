@@ -58,7 +58,7 @@ assert(publications[2].token=='new'and publications[2].at<1)
         l=self.make()
         l.execute("T.handling=true;saveRequest('wait');T.pulse();assert(serviced==nil and #T.queue==1);T.handling=false;T.pulse();assert(serviced==1)")
         l=self.make()
-        l.execute("queued={{'hd_panel_web','panel','pause','player',99,{_token='pause'}}};saveRequest('after');T.pulse();assert(serviced==nil and #T.queue==2);assert(T.take().name=='pause');T.pulse();assert(serviced==1)")
+        l.execute("queued={{'hd_panel_web','panel','start','player',99,{_token='start'}}};saveRequest('after');T.pulse();assert(serviced==nil and #T.queue==2);assert(T.take().name=='start');T.pulse();assert(serviced==1)")
 
     def test_pending_completion_is_not_overwritten_by_another_save(self):
         l=self.make()
@@ -79,17 +79,16 @@ assert(rows.entangled_chromaticglass[4]==false and #rows.entangled_chromaticglas
 assert(rows.entangled_infinity[4]==0 and rows.entangled_transcendentmetal[4]==123)
 ''')
 
-    def test_actual_cache_worker_services_save_at_recipe_log_boundary(self):
+    def test_actual_cache_worker_services_save_at_route_read_boundary(self):
         l=cache_setup();l.execute(SESSION)
         l.execute("H.snapshot();H.handle('cache',{mode='enable',revision=H.snapshot(true).cache.revision},1);H.handle('start',{revision=H.snapshot(true).revision},2)")
         l.execute(TRANSPORT+WIRE+r'''
-local open=io.open;local injected=false
-io.open=function(p,m)
- local f=open(p,m)
- if m=='r'and p==cfg.recipeDirectory..'/b.dat'and not injected then
-  injected=true;saveRequest('during-recipe','123456')
+local c=require('component');local invoke=c.invoke;local injected=false
+c.invoke=function(a,m,...)
+ if m=='getTankCount'and not injected then
+  injected=true;saveRequest('during-read','123456')
  end
- return f
+ return invoke(a,m,...)
 end
 for i=1,50 do H.step();if serviced then break end;world.advance(.05)end
 assert(injected and serviced==1 and T.reply.ok)
