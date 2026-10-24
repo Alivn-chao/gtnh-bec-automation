@@ -57,4 +57,3 @@ c.invoke=function(a,m,...)local side=...;if a=='bulk1'and m=='getFluidInTank'and
  def test_saved_alias_cannot_redirect_recipe_to_unrelated_fluid(self):
   l=self.warm();l.execute("local p=C.path('state/group-1/cache-discovery.dat');local v=C.read(p);v.rawNames.entangled_chromaticglass='molten.infinity';C.write(p,v);K=factoryCache(C,B,cfg,disk);world.stock.entangled_chromaticglass=0;steps(400);local j=C.read(C.path('state/group-1/cache.journal'));assert(j.transfers[1].raw=='molten.chromaticglass');assert(world.stock.entangled_chromaticglass==1008)")
 if __name__=='__main__':unittest.main()
-

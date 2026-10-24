@@ -381,6 +381,6 @@ MCP现场确认唯一网页处于超时fault后正常Q退出，16节点RS15且�
 
 部署分两次：先pause响应3模块，再discovery的lib/cache.lua和runtime/cache.lua。均先读实际文件、带MCP版本条件写入、保留备份、逐字回读。两模块最终备份 /home/bec_v2/lib/.ochd-mcp/7f7fb239-da58-4f61-b0f4-bfa922ef3513.bak 和 /home/bec_v2/runtime/.ochd-mcp/b25edac1-b46d-4a38-97bb-1cbbd425b0b8.bak；web_session旧版备份 /home/bec_v2/lib/.ochd-mcp/b8c8f203-e9f6-425a-ab08-cb83d56f4280.bak。
 
-旧管理网页先暂挂，确认所有生产/cohort/cache/cell记录均stopped或done，无pending/不明请求/部分搬运、端口空、纠缠器停，再main.pause确认节点RS15和关闭接单，最后只结束该网页线程并重载。机箱/MCP代理没有关闭，不删journal；任何检查失败都会恢复旧线程并拒绝继续。第二次还要求网页mode=binding且无正在运行样板/缓存。新网页不自动Start；当前mode=binding，16节点idle/workAllowed=false，cache.busy=false/blocked=false。实际独立样板工坊preview读到槽1 Gallifreyan Stabilisation、槽2 Gallifreyan Time Dilation；仅只读，没有替用户转换。
+旧管理网页先暂挂，确认所有生产/cohort/cache/cell记录均stopped或done，无pending/不明请求/部分搬运、端口空、纠缠器停，再main.pause确认节点RS15和关闭接单，最后只结束该网页线程并重载。机箱/MCP代理没有关闭，不删journal；清理前的现场检查失败会恢复旧线程并拒绝继续。第二次还要求网页mode=binding且无正在运行样板/缓存。新网页不自动Start；当前mode=binding，16节点idle/workAllowed=false，cache.busy=false/blocked=false。实际独立样板工坊preview读到槽1 Gallifreyan Stabilisation、槽2 Gallifreyan Time Dilation；仅只读，没有替用户转换。
 
 158个回归测试及20个核心场景通过，含3暂停测试、8固定信息复用测试和1新增缓存接单竞态测试。模拟多轮补库不再新增配方文件读取/全扫描，重启复用路线、新样板失效、端口方向变化、空口、错误绑定/地址/别名均验证。实机只验证部署、暂停状态与样板预览，不宣称已实测运行中按钮响应耗时或多轮复用性能。实际基线两阶段补丁重放结果与部署文件一致；原始现场/私有调试文件继续留outputs不提交。

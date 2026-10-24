@@ -32,4 +32,3 @@ assert(H.snapshot(true).patterns.status=='running')
   from test_cache_response import CacheResponseTests
   l=CacheResponseTests().make();l.execute("T.handling=true;queued={{'hd_panel_web','panel','pause','player',600,{_token='pause'}}};T.pulse();assert(serviced==nil and #T.queue==1);T.handling=false;T.pending={mode='binding'};T.pulse();assert(serviced==nil);s.now=s.now+.7;T.pulse();T.pulse();assert(serviced==1 and T.reply.name=='pause')")
 if __name__=='__main__':unittest.main()
-
