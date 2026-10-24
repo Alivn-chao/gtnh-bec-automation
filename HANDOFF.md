@@ -352,3 +352,13 @@ getConsumedCondensate 在空闲时仍保留上一单的消耗记录，不能当�
 注意实际OC bridge.lua/nanites_cell.lua已有另一轮更新（实体总线读取），与当前仓库不同；本轮没有用仓库旧模块覆盖实际运行模块。实际config蜂群 hiveSource=transposer,hatchSide=4。
 
 恢复后实机确认：T4Trans23737已装入，蜂群IO检查完成52.20秒；新批次3040并行，韦门双流体过滤确认，已有库存满足，无需搬液和纠缠，日志“整批流体齐备，已连续放行；本组同配方节点已同时放行”。随后进入下一蜂群阶段，当前fault=false。此为真实放行验证，不代表整个AE订单已完成。
+
+## 2026-10-24 观测阵列缓存刷新补丁
+
+用户指出暂停自动化且收容总线留有蜂群后，重启会发生观测阵列无法识别，换种蜂群再换回即可识别。实际实体版本 bridge.sharedHiveReady 只检查 physicalHive.read，而 ensure 无需换盘可直接返回，缺少原生阵列识别确认。
+
+补丁保存在 fixes/hive_refresh/files（实际OC兼容模块快照，包含已有实体总线支持），没有拿旧 reinstall_v2 默认模块覆盖实机。新增 arrayHiveReady 回调，直接读取同组每个原生节点 getAvailableNanites/getProvidedTier，已知总数按30720封顶核对，类型一致；实体有蜂而阵列失配时关闭无需换蜂分支，原日志/组暂停/端口空/空盘/搬运回读条件全部保留，经原有 IO 回收再装入刷新。重新装入后以 verifying-array 阶段最多等待30秒确认，未识别则保留日志停机不重试。模拟测试16项通过（9新增，7既有桥接测试）。
+
+通过MCP版本条件写入并逐字回读两个模块；备份 /home/bec_v2/lib/.ochd-mcp/c886ce2a-8cd5-45c8-9efb-4698acae5b78.bak 和 /home/bec_v2/runtime/.ochd-mcp/23ba0c7c-ee4e-4a36-b484-b5d17760dac7.bak。实体 hive_transposer.lua 未替换。
+
+当次现场：网页已退出、全部节点RS15/关闭接单、纠缠器停机、双IO和实体总线空，白矮星144完整位于盘库8，而done journal.holding仍记白矮星144（home4）。真实核对同族总量守恒后保留 /home/bec_v2/diagnostics/hive-return-reconcile-298991.dat 证明，并仅清除过期holding；未删任何日志或改订单。重启唯一web后实际T6白矮星144装入完成，日志“观测阵列已确认蜂群类型和数量，可以继续备料”，蜂群IO耗时33.90秒，无fault。尚未在实机复现原缓存失效并自动回收重装的分支，不声称已经实测该分支。
