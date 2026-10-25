@@ -11,11 +11,13 @@ NEW=ROOT/'fixes/hive_detection/files/runtime/nanites_cell.lua'
 
 def world(baseline=False):
  f=cell_bridge.BridgeCellTests();f.setUp();l=f.lua
- l.globals().files['/home/bec_v2/runtime/nanites_cell.lua']=(BASE if baseline else NEW).read_text(encoding='utf-8')
+ l.globals().files['/home/bec_v2/runtime/nanites_cell.lua']=(BASE if baseline is True else NEW).read_text(encoding='utf-8')
  l.globals().files['/home/bec_v2/lib/hive_transposer.lua']=(V2/'lib/hive_transposer.lua').read_text(encoding='utf-8')
  l.globals().files['/home/bec_v2/lib/representative.lua']=(V2/'lib/representative.lua').read_text(encoding='utf-8')
  if baseline:
-  l.globals().files['/home/bec_v2/lib/bridge.lua']=subprocess.check_output(['git','show','d4f5bb8:reinstall_v2/files/lib/bridge.lua'],cwd=ROOT).decode('utf-8')
+  revision='3c02005'if baseline=='dedup'else'd4f5bb8'
+  for name in ('bridge','representative'):
+   l.globals().files['/home/bec_v2/lib/'+name+'.lua']=subprocess.check_output(['git','show',revision+':reinstall_v2/files/lib/'+name+'.lua'],cwd=ROOT).decode('utf-8')
  l.execute(r'''
 members(16)
 task.fixedBatch={count=16};cfg.groups[1].cellFeed={enabled=false,representativeChecks=true}
@@ -23,6 +25,7 @@ local c=require('component');local invoke=c.invoke
 calls,bankReads,arrayReads=0,0,0
 c.invoke=function(a,m,...)
  calls=calls+1;local args={...}
+ if a=='pause16'and m=='getOutput'and unpaused then return 0 end
  if a==T and m=='getStackInSlot'and args[1]==0 then bankReads=bankReads+1 end
  if(a==NODE or a:match('^member'))and(m=='getAvailableNanites'or m=='getProvidedTier')then
   arrayReads=arrayReads+1
@@ -49,16 +52,16 @@ def prepare_switch(l):
 class HiveDetectionTests(unittest.TestCase):
  def test_same_switch_keeps_counts_and_reads_less(self):
   rows=[]
-  for baseline in (True,False):
+  for baseline in (True,'dedup',False):
    f,l=world(baseline);self.assertTrue(f.run_worker());prepare_switch(l)
    self.assertTrue(f.run_worker())
    self.assertEqual(l.globals().moves,6);self.assertEqual(l.globals().heldCount,128)
    self.assertEqual(l.eval('inv[0][9].storedItemCount'),19612)
    rows.append({k:int(l.globals()[k])for k in ('calls','bankReads','arrayReads')})
   print('physical-hive 16-node switch callbacks, before/after:',rows)
-  self.assertLess(rows[1]['calls'],rows[0]['calls']*.8)
-  self.assertEqual(rows[0]['bankReads']-rows[1]['bankReads'],10)
-  self.assertEqual(rows[0]['arrayReads'],64);self.assertEqual(rows[1]['arrayReads'],32)
+  self.assertLess(rows[2]['calls'],rows[1]['calls']*.5)
+  self.assertEqual(rows[0]['bankReads']-rows[2]['bankReads'],10)
+  self.assertEqual([r['arrayReads']for r in rows],[64,32,2])
 
  def test_late_pause_generator_or_cancel_change_blocks_transfer(self):
   for mutation in ('unpaused=true','generatorBusy=true','task.cancel=true'):

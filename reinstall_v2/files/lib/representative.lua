@@ -9,6 +9,11 @@ return function(c,cfg,members,entries,task,fallback)
  local function copy(v)local out={};for k,n in pairs(v)do out[k]=n end;return out end
  function M.parallel()return total end
  function M.required()return copy(required)end
+ function M.reference()
+  local ref
+  for _,i in ipairs(members)do if not entries[i].finished and(not ref or entries[i].parallel>=entries[ref].parallel)then ref=i end end
+  return ref
+ end
  local lastReference,phase,pending,steps
  local function id(v)return tostring(v.tier)..':'..tostring(v.name)end
  local function used(i,state)
@@ -67,8 +72,35 @@ return function(c,cfg,members,entries,task,fallback)
   out.state=out.allIdle and 'idle'or out.allPaused and 'paused-immediate'or 'crafting'
   return out
  end
+ -- Hive/gate checks use one physical node. Completion accounting continues
+ -- through snapshot(), never by multiplying this node's consumption.
+ function M.inspection(paused,retry)
+  assert(not task.cancel,'用户暂停生产组')
+  local ref=M.reference()
+  local out={required=copy(required),parallel=total,requiredTier=0,consumed={},allIdle=not ref,allPaused=true,state='idle',reference=ref}
+  if not ref then return out end
+  local n,e=cfg.nodes[ref],entries[ref];local state=c.invoke(n.address,'getState')
+  assert(state=='idle'or state=='crafting'or state=='paused-immediate'or state=='nanite-tier-too-low','代表节点运行异常：'..tostring(state))
+  if paused then assert(c.invoke(n.redstone,'getOutput',n.pauseSide)==15 and state~='crafting','代表节点必须保持暂停')end
+  if state=='idle'then
+   used(ref,state);assert(e.consumedProven and c.invoke(n.address,'isWorkAllowed')==false,'代表节点完成证明或关闭接单未确认')
+   e.finished=true;c.invoke(n.redstone,'setOutput',n.pauseSide,15)
+   return M.inspection(paused,retry)
+  end
+  local p=c.invoke(n.address,'getParallelRecipesInProgress');local req=c.invoke(n.address,'getRequiredCondensate');local demand=c.invoke(n.address,'getRequiredTier')
+  if type(p)~='number'or type(req)~='table'or type(demand)~='table'then
+   if c.invoke(n.address,'getState')=='idle'and(retry or 0)<1 then return M.inspection(paused,1)end
+   error('代表节点需求不可读')
+  end
+  assert(p==e.parallel,'代表节点并行与已确认配额不符')
+  for k,v in pairs(e.required)do assert(req[k]==v,'代表节点配方变化')end
+  for k in pairs(req)do assert(e.required[k],'代表节点出现无关流体需求')end
+  assert(type(demand.tier)=='number'and demand.tier>=1 and demand.tier%1==0,'代表节点蜂群等级无效')
+  out.state=state;out.allIdle=false;out.allPaused=state~='crafting';out.requiredTier=demand.tier;out.requiredFamily=demand.name
+  return out
+ end
  function M.demand()
-  local s=M.snapshot();return s.requiredTier>0 and{tier=s.requiredTier,name=s.requiredFamily}or nil
+  local s=M.inspection(false);return s.requiredTier>0 and{tier=s.requiredTier,name=s.requiredFamily}or nil
  end
  local function hold(i)
   assert(not task.cancel,'用户暂停生产组')

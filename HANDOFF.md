@@ -1,3 +1,30 @@
+# 2026-10-26 用户指定换蜂/韦门仅查代表节点（已部署）
+
+用户明确“改成只检查并行多的那台，韦门也只检测一个节点类型”。此授权优先于
+此前保留整组换蜂巡检的策略。当前固定批次且representativeChecks=true时，新增
+representative.reference()/inspection()只选择最大已确认配额的未完成节点，等额
+选最后放行者。换蜂inspect/IO启用guard/transferChecked/阵列识别、韦门节点状态
+回读、逻辑暂停getOutput和蜂群需求getter均只读这个代表。非参与节点也不扫描。
+普通模式仍走完整检查；写暂停/放行仍控制全部成员。生产轮询snapshot、阶段进度
+同步和最终各台真实凝聚物消耗证明没有改成乘算，不能把一个节点当作整批完成。
+代表完成时仅在本机消耗与关闭接单证明成立后标finished，再选择下一代表。
+
+196项回归+20核心通过。新增两个代表测试，完整断言换蜂检查/阵列/实际搬盘回调/
+IO启用/韦门full与readback/暂停getOutput不访问其他15台node和redstone；检查代表
+暂停或身份变化仍拒绝、代表完成重新选择，普通模式及完整完成证明保持通过。
+同一16台换蜂模拟的三版组件调用为784（旧版）→606（上轮去重）→216（本轮）；
+原生阵列读取64→32→2。没有实际新订单/换蜂测速，不称为实机秒数或时间降幅。
+
+实机已先确认web binding、全部idle/关闭接单、feed/cohort stopped，再清洁退出。
+先写representative模块再写bridge，MCP版本条件、备份、逐字回读；实际runtime
+nanites_cell.lua保持19988字节实体总线兼容版未改，配置也未改。C.validate、Lua
+编译、16台实际idle/RS15/关闭接单与旧批次完成证明核对通过；证明
+diagnostics/single-node-inspection-20261026.dat。初始备份
+lib/.ochd-mcp/8e108a05-e6df-482e-ad38-26c8ccb504ec.bak（representative）和
+lib/.ochd-mcp/91c6b367-b88d-4575-948e-5ebba1d6628d.bak（bridge）。后同步的bridge
+注释也已单独CAS写入回读，与仓库最终源一致；回执保存在私有outputs。
+重开唯一网页保持暂停待启动，无额外AE请求/搬蜂；仍用已有网页“启动自动化”。
+
 # 2026-10-26 换蜂检测去重（已部署，网页待启动）
 
 用户确认配方全部做完，要求继续优化检测。MCP现场最新feed为36次无尽时空能量

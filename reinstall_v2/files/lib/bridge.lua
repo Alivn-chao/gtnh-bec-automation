@@ -96,32 +96,43 @@ function M.environment(cfg,index,engine)
  local native={};for k,v in pairs(c) do native[k]=v end
  local bulk={};for _,a in ipairs(g.bulkTransposers or {}) do bulk[a]=true end
  local function awaitLock() engine.acquire(index) end
+ local function inspectionMembers()
+  if representative then
+   local ref=representative.reference();return ref and{cfg.nodes[ref]}or{}
+  end
+  local out={};for _,member in ipairs(cfg.nodes)do if member.group==n.group then out[#out+1]=member end end;return out
+ end
  local function sharedHiveReady()
   if physicalHive then physicalHive.read();return true end
+  if representative then
+   local member=inspectionMembers()[1];if not member then return true end
+   local count=c.invoke(member.address,'getAvailableNanites');local tier=c.invoke(member.address,'getProvidedTier')
+   return type(count)=='number'and count>=0 and(count==0 or type(tier)=='table'and type(tier.tier)=='number')
+  end
   local h,p=c.invoke(n.address,'getAvailableNanites'),c.invoke(n.address,'getProvidedTier')
-  for _,member in ipairs(cfg.nodes)do if member.group==n.group then
+  for _,member in ipairs(inspectionMembers())do
    local count,tier=c.invoke(member.address,'getAvailableNanites'),c.invoke(member.address,'getProvidedTier')
    if count~=h or h>0 and not(type(p)=='table'and type(tier)=='table'and p.tier==tier.tier and p.name==tier.name)then return false end
-  end end
+  end
   return true
  end
  local function cellGuard(checkHive)
   awaitLock()
-  for _,member in ipairs(cfg.nodes)do if member.group==n.group then
+  for _,member in ipairs(inspectionMembers())do
    local state=c.invoke(member.address,'getState')
    assert(c.invoke(member.redstone,'getOutput',member.pauseSide)==15 and (state=='idle'or state=='paused-immediate'or state=='nanite-tier-too-low'),'换蜂群必须暂停整组节点')
-  end end
+  end
   for _,a in ipairs(g.generators)do assert(c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false,'换蜂群必须等待全部纠缠器停机')end
   assert(not task.cancel,'用户暂停蜂群操作，保留记录')
   if checkHive then assert(sharedHiveReady(),'组内蜂群仓读数不同，核对是否共用同一收容网')end
  end
- -- One fresh, complete recipe snapshot per IO check, without expanding each
- -- logical state/tier/family getter into another full cohort scan.
+ -- Frozen batches inspect only their largest-parallel reference at hive IO
+ -- checkpoints; other modes retain the complete cohort check.
  local function cellInspection()
   awaitLock();assert(not task.cancel,'用户暂停蜂群操作，保留记录')
-  local value=nodeSnapshot(true);local included={}
+  local value=representative and representative.inspection(true)or nodeSnapshot(true);local included={}
   for _,i in ipairs(members)do included[i]=true end
-  for i,member in ipairs(cfg.nodes)do if member.group==n.group and not included[i]then
+  for i,member in ipairs(cfg.nodes)do if not representative and member.group==n.group and not included[i]then
    local state=c.invoke(member.address,'getState')
    assert(c.invoke(member.redstone,'getOutput',member.pauseSide)==15 and (state=='idle'or state=='paused-immediate'or state=='nanite-tier-too-low'),'换蜂必须暂停整组节点')
   end end
@@ -157,6 +168,10 @@ function M.environment(cfg,index,engine)
    if physicalHive and(m=='getAvailableNanites'or m=='getProvidedTier')then
     local count,tier=physicalHive.read();if m=='getAvailableNanites'then return count end;return tier
    end
+   if representative and(m=='getAvailableNanites'or m=='getProvidedTier')then
+    local ref=representative.reference();if not ref then return m=='getAvailableNanites'and 0 or nil end
+    return c.invoke(cfg.nodes[ref].address,m,table.unpack(args))
+   end
    if representative then
     if m=='getRequiredCondensate'then return representative.required()end
     if m=='getParallelRecipesInProgress'or m=='getMinParallel'or m=='getMaxParallel'then return representative.parallel()end
@@ -187,6 +202,7 @@ function M.environment(cfg,index,engine)
     if args[2]==0 then task.released=true end
     return true
    end
+   if representative then local ref=representative.reference();if not ref then return 15 end;local member=cfg.nodes[ref];return c.invoke(member.redstone,m,member.pauseSide)end
    for _,i in ipairs(members)do local member=cfg.nodes[i];if c.invoke(member.redstone,m,member.pauseSide)~=15 then return 0 end end
    return 15
   end
@@ -251,11 +267,12 @@ function M.environment(cfg,index,engine)
   for _,i in ipairs(members)do assert(entries[i].finished,'本批节点已空闲但缺少完整消耗证明，保留日志核对')end
   return true
  end
- -- Gate setup validates the complete recipe once before writing, then checks
- -- every member's actual pause state/output in each of the three readbacks.
+ -- Frozen batches inspect the reference node during gate setup/readback.
+ -- Other modes keep the complete recipe and member pause checks.
  -- The controller performs a fresh full current() check immediately afterward,
  -- before any fluid transfer, generator start, or production release.
  env.BEC_V2_GATE_STATE=function(full)
+  if representative then return representative.inspection(true).state end
   if full then return nodeSnapshot().state end
   assert(not task.cancel,'用户暂停节点，保留进度')
   local allIdle,allPaused=true,true
@@ -297,12 +314,12 @@ function M.environment(cfg,index,engine)
   -- BEC_V3_ARRAY_REFRESH_1: physical inventory alone does not prove that the
   -- assembler has refreshed its cached tier/count after pause or reload.
   if physicalHive then env.BEC_CELL_IO.arrayHiveReady=function(total,tier)
-   for _,member in ipairs(cfg.nodes)do if member.group==n.group then
+   for _,member in ipairs(inspectionMembers())do
     local count=c.invoke(member.address,'getAvailableNanites')
     local provided=c.invoke(member.address,'getProvidedTier')
     if type(count)~='number'or count<64 or total and count~=math.min(total,30720)
       or type(provided)~='table'or provided.tier~=tier.tier or provided.name~=tier.name then return false end
-   end end
+   end
    return true
   end end
   env.BEC_CELL_IO.checkGroup=cellGuard

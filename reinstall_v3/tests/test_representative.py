@@ -82,7 +82,7 @@ nodes.node1.consumed=nodes.node1.required;v=R.snapshot();assert(v.consumed.entan
 local count=reads['node16/getConsumedCondensate'];R.snapshot();assert(reads['node16/getConsumedCondensate']==count)
 ''')
 
- def test_full_bridge_cell_inspection_keeps_all_pause_checks_but_one_demand(self):
+ def test_hive_inspection_checks_only_the_representative(self):
   l=self.world();l.execute(r'''
 cfg.groups[1].cellFeed={enabled=true,representativeChecks=true}
 cfg.groups[1].nanites={enabled=true,mode='cell-io'}
@@ -91,11 +91,12 @@ local old=load
 load=function(source,path,mode,env)if path:find('runtime/controller.lua',1,true)then captured=env;return function()end end;return old(source,path,mode,env)end
 Bridge.environment(cfg,1,e);load=old;reads={}
 local v=captured.BEC_CELL_IO.inspect();assert(v.reference==16 and v.requiredTier==2)
-for i=1,15 do assert(not reads['node'..i..'/getRequiredTier']and not reads['node'..i..'/getRequiredCondensate'])end
+for i=1,15 do assert(not reads['node'..i..'/getState']and not reads['node'..i..'/getRequiredTier']and not reads['node'..i..'/getRequiredCondensate'])end
 assert(reads['node16/getRequiredTier']==1)
 reads={};local c=captured.require('component');assert(c.invoke('node1','getParallelRecipesInProgress')==1000)
 assert(c.invoke('node1','getRequiredCondensate').entangled_chromaticglass==288000);assert(not next(reads))
-outputs['rs3-']=0;assert(not pcall(captured.BEC_CELL_IO.inspect))
+outputs['rs3-']=0;assert(pcall(captured.BEC_CELL_IO.inspect))
+outputs['rs16-']=0;assert(not pcall(captured.BEC_CELL_IO.inspect))
 ''')
 
  def test_full_sixteen_node_controller_finishes_with_representative_sampling(self):
@@ -115,6 +116,44 @@ end
 assert(releaseCount==16 and not E.groupOwner[1],table.concat(E.logs,' / '))
 local cohort=C.read(C.path('state/group-1/cohort.dat'));assert(cohort.stage=='stopped')
 for i=1,16 do assert(cohort.entries[i].finished and not E.tasks[i].fault)end
+''')
+
+ def test_hive_and_gate_callbacks_never_poll_other_nodes(self):
+  l=self.world();l.execute(r'''
+cfg.groups[1].cellFeed={enabled=true,representativeChecks=true}
+cfg.groups[1].nanites={enabled=true,mode='cell-io',hiveSource='transposer',transposer='hive',hatchSide=4,bankSide=0,loadSide=3,returnSide=2,loadRedstone='load-rs',returnRedstone='return-rs'}
+local c=require('component');local invoke=c.invoke;local observed={}
+c.invoke=function(a,m,...)
+ observed[a]=true
+ if m=='getAvailableNanites'then return 30720 end
+ if m=='getProvidedTier'then return{tier=2,name='Silver'}end
+ if a=='hive'and m=='transferItem'then return 1 end
+ if a=='load-rs'and m=='setOutput'then return true end
+ return invoke(a,m,...)
+end
+local e={tasks={[1]=task},acquire=function()end,release=function()end,log=function()end}
+local old=load
+load=function(source,path,mode,env)if path:find('runtime/controller.lua',1,true)then captured=env;return function()end end;return old(source,path,mode,env)end
+Bridge.environment(cfg,1,e);load=old;observed={}
+outputs['rs2-']=0
+local b=captured.BEC_CELL_IO;assert(b.inspect().reference==16)
+assert(b.arrayHiveReady(40000,{tier=2,name='Silver'}))
+assert(b.transferChecked(2,nil,0,3,1,1,1)==1)
+assert(captured.BEC_V2_GATE_STATE(true)=='paused-immediate')
+assert(captured.BEC_V2_GATE_STATE(false)=='paused-immediate')
+local native=captured.require('component')
+assert(native.invoke('rs1-','getOutput',1)==15)
+assert(native.invoke('load-rs','setOutput',0,15))
+for i=1,15 do assert(not observed['node'..i]and not observed['rs'..i..'-'],'unexpected node inspection '..i)end
+assert(observed.node16 and observed['rs16-'])
+''')
+
+ def test_inspection_reselects_completed_reference_with_real_proof(self):
+  l=self.world();l.execute(r'''
+nodes.node16.done=true;nodes.node16.consumed=nodes.node16.required
+local v=R.inspection(true);assert(v.reference==15 and task.entries[16].finished and task.entries[16].consumedProven)
+for i=1,14 do assert(not reads['node'..i..'/getState'])end
+nodes.node15.parallel=1;assert(not pcall(R.inspection,true))
 ''')
 
  def test_real_controller_reduces_component_reads_for_same_completed_batch(self):
