@@ -15,6 +15,8 @@ return function(c,cfg,members,entries,task,fallback)
   return ref
  end
  local lastReference,phase,pending,steps
+ local identities,pausedDemand={},{}
+ function M.invalidateInspection()pausedDemand={}end
  local function id(v)return tostring(v.tier)..':'..tostring(v.name)end
  local function used(i,state)
   local n,e=cfg.nodes[i],entries[i]
@@ -87,15 +89,22 @@ return function(c,cfg,members,entries,task,fallback)
    e.finished=true;c.invoke(n.redstone,'setOutput',n.pauseSide,15)
    return M.inspection(paused,retry)
   end
-  local p=c.invoke(n.address,'getParallelRecipesInProgress');local req=c.invoke(n.address,'getRequiredCondensate');local demand=c.invoke(n.address,'getRequiredTier')
-  if type(p)~='number'or type(req)~='table'or type(demand)~='table'then
+  local p,req
+  if not identities[ref]then p=c.invoke(n.address,'getParallelRecipesInProgress');req=c.invoke(n.address,'getRequiredCondensate')end
+  local demand=paused and pausedDemand[ref]or nil
+  demand=demand or c.invoke(n.address,'getRequiredTier')
+  if type(demand)~='table'or not identities[ref]and(type(p)~='number'or type(req)~='table')then
    if c.invoke(n.address,'getState')=='idle'and(retry or 0)<1 then return M.inspection(paused,1)end
    error('代表节点需求不可读')
   end
-  assert(p==e.parallel,'代表节点并行与已确认配额不符')
-  for k,v in pairs(e.required)do assert(req[k]==v,'代表节点配方变化')end
-  for k in pairs(req)do assert(e.required[k],'代表节点出现无关流体需求')end
+  if not identities[ref]then
+   assert(p==e.parallel,'代表节点并行与已确认配额不符')
+   for k,v in pairs(e.required)do assert(req[k]==v,'代表节点配方变化')end
+   for k in pairs(req)do assert(e.required[k],'代表节点出现无关流体需求')end
+   identities[ref]=true
+  end
   assert(type(demand.tier)=='number'and demand.tier>=1 and demand.tier%1==0,'代表节点蜂群等级无效')
+  if paused then pausedDemand[ref]={tier=demand.tier,name=demand.name}end
   out.state=state;out.allIdle=false;out.allPaused=state~='crafting';out.requiredTier=demand.tier;out.requiredFamily=demand.name
   return out
  end

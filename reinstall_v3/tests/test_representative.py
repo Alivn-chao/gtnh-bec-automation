@@ -153,7 +153,7 @@ assert(observed.node16 and observed['rs16-'])
 nodes.node16.done=true;nodes.node16.consumed=nodes.node16.required
 local v=R.inspection(true);assert(v.reference==15 and task.entries[16].finished and task.entries[16].consumedProven)
 for i=1,14 do assert(not reads['node'..i..'/getState'])end
-nodes.node15.parallel=1;assert(not pcall(R.inspection,true))
+nodes.node15.parallel=1;assert(not pcall(R.snapshot,true))
 ''')
 
  def test_real_controller_reduces_component_reads_for_same_completed_batch(self):

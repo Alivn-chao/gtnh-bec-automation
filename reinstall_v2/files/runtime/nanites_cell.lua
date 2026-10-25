@@ -128,7 +128,12 @@ local function describe(item)
  assert(n==item.storedItemCount,'盘内数量与清单不一致')
  return n,row
 end
+local discoveredSize
 local function discover()
+ if cfg.fixedBatchChecks and discoveredSize then
+  for _,a in ipairs({SOUTH,NORTH})do assert(call(a,'getOutput',0)==0,'蜂群IO已有红石输出，不能叠加操作')end
+  return discoveredSize
+ end
  for a,kind in pairs({[T]='transposer',[SOUTH]='redstone',[NORTH]='redstone',[PAUSE]='redstone',[NODE]='bec_io_node'}) do
   assert(c.type(a)==kind,'组件缺失或类型错误：'..a)
  end
@@ -140,12 +145,16 @@ local function discover()
  for _,a in ipairs({SOUTH,NORTH}) do for side=0,5 do
   assert(c.invoke(a,'getOutput',side)==0,'蜂群IO已有红石输出，不能叠加操作')
  end end
- return size
+ discoveredSize=size;return size
 end
+local portsChecked=false
 local function emptyPorts()
- for _,side in ipairs({2,3}) do for slot=1,12 do
+ local slots={}
+ if cfg.fixedBatchChecks and portsChecked then slots={1,7}else for i=1,12 do slots[#slots+1]=i end end
+ for _,side in ipairs({2,3}) do for _,slot in ipairs(slots)do
   assert(stack(side,slot)==nil,'蜂群IO已有硬盘，保留未完成操作')
  end end
+ portsChecked=true
 end
 -- BEC_V2_STAGE_LATENCY_V2: only the first ten physical bank slots are managed.
 local function bank(size)
@@ -274,7 +283,7 @@ function M.preview()
   print('盘槽 '..disk.slot..'：T'..disk.item.tier..' / '..disk.count..' 个 / '..disk.item.label)
  end end
  local r=oldRecord();print('蜂群IO日志：'..tostring(r and r.stage or '无')..'；旧接口日志不重放')
- emptyPorts()
+ emptyPorts();portsChecked=false
 end
 function M.ensure(ctx)
  M.lastRequirement=nil;context=ctx

@@ -7,7 +7,7 @@ import test_cell_bridge as cell_bridge
 ROOT=Path(__file__).resolve().parents[2]
 V2=ROOT/'reinstall_v2/files'
 BASE=ROOT/'fixes/hive_refresh/files/runtime/nanites_cell.lua'
-NEW=ROOT/'fixes/hive_detection/files/runtime/nanites_cell.lua'
+NEW=ROOT/'fixes/fixed_hive_checks/files/runtime/nanites_cell.lua'
 
 def world(baseline=False):
  f=cell_bridge.BridgeCellTests();f.setUp();l=f.lua

@@ -1,5 +1,5 @@
 -- BEC_V3_PERFORMANCE_UPDATE_1
-local SELF_SIGNATURE='84257:833762774'
+local SELF_SIGNATURE='85011:750668236'
 print('BEC V3 performance preview; Q to exit the old UI first')
 local rows={{name='runtime/controller.lua',source=[=[-- BEC_V3_LARGE_BATCH_1: long-sized totals; bounded per-call fluid requests.
 local c = require("component") local ser = require("serialization") local computer = require("computer") local fs = require("filesystem")
@@ -436,7 +436,12 @@ local function describe(item)
  assert(n==item.storedItemCount,'盘内数量与清单不一致')
  return n,row
 end
+local discoveredSize
 local function discover()
+ if cfg.fixedBatchChecks and discoveredSize then
+  for _,a in ipairs({SOUTH,NORTH})do assert(call(a,'getOutput',0)==0,'蜂群IO已有红石输出，不能叠加操作')end
+  return discoveredSize
+ end
  for a,kind in pairs({[T]='transposer',[SOUTH]='redstone',[NORTH]='redstone',[PAUSE]='redstone',[NODE]='bec_io_node'}) do
   assert(c.type(a)==kind,'组件缺失或类型错误：'..a)
  end
@@ -448,12 +453,16 @@ local function discover()
  for _,a in ipairs({SOUTH,NORTH}) do for side=0,5 do
   assert(c.invoke(a,'getOutput',side)==0,'蜂群IO已有红石输出，不能叠加操作')
  end end
- return size
+ discoveredSize=size;return size
 end
+local portsChecked=false
 local function emptyPorts()
- for _,side in ipairs({2,3}) do for slot=1,12 do
+ local slots={}
+ if cfg.fixedBatchChecks and portsChecked then slots={1,7}else for i=1,12 do slots[#slots+1]=i end end
+ for _,side in ipairs({2,3}) do for _,slot in ipairs(slots)do
   assert(stack(side,slot)==nil,'蜂群IO已有硬盘，保留未完成操作')
  end end
+ portsChecked=true
 end
 -- BEC_V2_STAGE_LATENCY_V2: only the first ten physical bank slots are managed.
 local function bank(size)
@@ -582,7 +591,7 @@ function M.preview()
   print('盘槽 '..disk.slot..'：T'..disk.item.tier..' / '..disk.count..' 个 / '..disk.item.label)
  end end
  local r=oldRecord();print('蜂群IO日志：'..tostring(r and r.stage or '无')..'；旧接口日志不重放')
- emptyPorts()
+ emptyPorts();portsChecked=false
 end
 function M.ensure(ctx)
  M.lastRequirement=nil;context=ctx
@@ -657,7 +666,7 @@ function M.environment(cfg,index,engine)
  local n,g=cfg.nodes[index],cfg.groups[cfg.nodes[index].group]
  local physicalHive
  if g.nanites and g.nanites.enabled and g.nanites.hiveSource=='transposer'then
-  physicalHive=assert(loadfile(C.path('lib/hive_transposer.lua')))()(c,g.nanites)
+  physicalHive=assert(loadfile(C.path('lib/hive_transposer.lua')))()(c,g.nanites,engine.tasks[index].fixedBatch and g.cellFeed and g.cellFeed.representativeChecks)
  end
  local task=engine.tasks[index]
  local members=task.members or {index}
@@ -736,6 +745,12 @@ function M.environment(cfg,index,engine)
  local native={};for k,v in pairs(c) do native[k]=v end
  local bulk={};for _,a in ipairs(g.bulkTransposers or {}) do bulk[a]=true end
  local function awaitLock() engine.acquire(index) end
+ local generatorsChecked=false
+ local function generatorsOff(force)
+  if representative and generatorsChecked and not force then return end
+  for _,a in ipairs(g.generators)do assert(c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false,'换蜂必须等待全部纠缠器停机')end
+  generatorsChecked=true
+ end
  local function inspectionMembers()
   if representative then
    local ref=representative.reference();return ref and{cfg.nodes[ref]}or{}
@@ -762,13 +777,13 @@ function M.environment(cfg,index,engine)
    local state=c.invoke(member.address,'getState')
    assert(c.invoke(member.redstone,'getOutput',member.pauseSide)==15 and (state=='idle'or state=='paused-immediate'or state=='nanite-tier-too-low'),'换蜂群必须暂停整组节点')
   end
-  for _,a in ipairs(g.generators)do assert(c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false,'换蜂群必须等待全部纠缠器停机')end
+  generatorsOff(true)
   assert(not task.cancel,'用户暂停蜂群操作，保留记录')
   if checkHive then assert(sharedHiveReady(),'组内蜂群仓读数不同，核对是否共用同一收容网')end
  end
  -- Frozen batches inspect only their largest-parallel reference at hive IO
  -- checkpoints; other modes retain the complete cohort check.
- local function cellInspection()
+ local function cellInspection(force)
   awaitLock();assert(not task.cancel,'用户暂停蜂群操作，保留记录')
   local value=representative and representative.inspection(true)or nodeSnapshot(true);local included={}
   for _,i in ipairs(members)do included[i]=true end
@@ -776,7 +791,7 @@ function M.environment(cfg,index,engine)
    local state=c.invoke(member.address,'getState')
    assert(c.invoke(member.redstone,'getOutput',member.pauseSide)==15 and (state=='idle'or state=='paused-immediate'or state=='nanite-tier-too-low'),'换蜂必须暂停整组节点')
   end end
-  for _,a in ipairs(g.generators)do assert(c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false,'换蜂必须等待全部纠缠器停机')end
+  generatorsOff(force)
   return value
  end
 
@@ -828,6 +843,7 @@ function M.environment(cfg,index,engine)
   end
   if a==n.redstone and (m=='getOutput' or m=='setOutput') then
    if m=='setOutput' then
+    generatorsChecked=false;if representative then representative.invalidateInspection()end
     if args[2]==0 then
      -- Close every member's next-order admission before releasing ANY member.
      for j,member in ipairs(cfg.nodes)do if member.group==n.group then
@@ -868,6 +884,7 @@ function M.environment(cfg,index,engine)
   end
   if a==g.generators[1] then
    if m=='setWorkAllowed' then
+    generatorsChecked=false
     local intent={version=2,node=index,enabled=args[1],stage='pending'}
     C.write(C.path('state/group-'..n.group..'/generators.dat'),intent)
     for _,address in ipairs(g.generators) do
@@ -948,6 +965,7 @@ function M.environment(cfg,index,engine)
  end
  if g.nanites and g.nanites.enabled and g.nanites.mode=='cell-io'then
   env.BEC_CELL_IO={};for key,value in pairs(g.nanites)do env.BEC_CELL_IO[key]=value end
+  env.BEC_CELL_IO.fixedBatchChecks=representative~=nil
   env.BEC_CELL_IO.node=n.address;env.BEC_CELL_IO.redstone=n.redstone;env.BEC_CELL_IO.pauseSide=n.pauseSide
   env.BEC_CELL_IO.path=C.path('state/group-'..n.group..'/nanites-cell.journal')
   if physicalHive then env.BEC_CELL_IO.readPhysicalHive=physicalHive.read end
@@ -968,7 +986,7 @@ function M.environment(cfg,index,engine)
   -- move() and another in native.invoke(). Slots/journal/readback stay in move().
   env.BEC_CELL_IO.transferChecked=function(tier,family,from,to,count,source,dest)
    assert(count==1 and from~=to,'蜂群搬盘参数无效')
-   local value=cellInspection()
+   local value=cellInspection(true)
    assert(value.requiredTier==tier and(not family or value.requiredFamily==family),'换蜂过程中需求变化，保留现场')
    assert(not task.cancel,'用户暂停蜂群操作，保留记录')
    return c.invoke(g.nanites.transposer,'transferItem',from,to,count,source,dest)
@@ -976,7 +994,7 @@ function M.environment(cfg,index,engine)
   -- BEC_V3_PERFORMANCE_1: initial inspection already proves group pause and
   -- generator shutdown; check hive agreement without repeating that proof.
   env.BEC_CELL_IO.inspectInitial=function()
-   local value=cellInspection()
+   local value=cellInspection(true)
    assert(sharedHiveReady(),'组内蜂群仓读数不同，核对是否共用同一收容网')
    return value
   end

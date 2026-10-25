@@ -1,5 +1,5 @@
 -- Physical GT containment-bus display; size is capped, never a total.
-return function(c,n)
+return function(c,n,cacheLayout)
  local side=n.hatchSide
  assert(type(side)=='number'and side%1==0 and side>=0 and side<=5,'实体蜂群总线方向无效')
  assert(side~=n.bankSide and side~=n.loadSide and side~=n.returnSide,'实体蜂群总线方向与盘库/IO重复')
@@ -7,8 +7,12 @@ return function(c,n)
   Gold={3,'Gold'},TranscendentMetal={4,'Transcendent'},SixPhasedCopper={5,'SixPhasedCopper'},
   WhiteDwarfMatter={6,'WhiteDwarf'},BlackDwarfMatter={7,'BlackDwarf'},Universium={8,'Universium'},
   Eternity={9,'Eternity'},MagMatter={10,'MagMatter'}}
+ local layoutChecked=false
  local function read()
-  assert(c.invoke(n.transposer,'getInventoryName',side)=='gt.blockmachines'and c.invoke(n.transposer,'getInventorySize',side)==3,'实体蜂群收容总线缺失或布局变化')
+  if not cacheLayout or not layoutChecked then
+   assert(c.invoke(n.transposer,'getInventoryName',side)=='gt.blockmachines'and c.invoke(n.transposer,'getInventorySize',side)==3,'实体蜂群收容总线缺失或布局变化')
+   layoutChecked=true
+  end
   local item=c.invoke(n.transposer,'getStackInSlot',side,3)
   if not item then return 0,nil end
   assert(type(item.size)=='number'and item.size%1==0 and item.size>=0 and item.size<=64,'实体蜂群展示数量无效')
