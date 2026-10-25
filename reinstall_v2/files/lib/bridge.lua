@@ -22,7 +22,7 @@ function M.environment(cfg,index,engine)
  local task=engine.tasks[index]
  local members=task.members or {index}
  local entries=task.entries or {}
- local function nodeSnapshot(paused)
+ local function fullNodeSnapshot(paused)
   local snapshot={required={},consumed={},parallel=0,requiredTier=0,allIdle=true,allPaused=true}
   for _,i in ipairs(members) do
    local address=cfg.nodes[i].address
@@ -84,6 +84,14 @@ function M.environment(cfg,index,engine)
   end
   snapshot.state=snapshot.allIdle and 'idle' or snapshot.allPaused and 'paused-immediate' or 'crafting'
   return snapshot
+ end
+ local representative
+ if task.fixedBatch and g.cellFeed and g.cellFeed.representativeChecks then
+  representative=assert(loadfile(C.path('lib/representative.lua')))()(c,cfg,members,entries,task,fullNodeSnapshot)
+ end
+ local function nodeSnapshot(paused)
+  if representative then return representative.snapshot(paused)end
+  return fullNodeSnapshot(paused)
  end
  local native={};for k,v in pairs(c) do native[k]=v end
  local bulk={};for _,a in ipairs(g.bulkTransposers or {}) do bulk[a]=true end
@@ -148,6 +156,11 @@ function M.environment(cfg,index,engine)
   if a==n.address then
    if physicalHive and(m=='getAvailableNanites'or m=='getProvidedTier')then
     local count,tier=physicalHive.read();if m=='getAvailableNanites'then return count end;return tier
+   end
+   if representative then
+    if m=='getRequiredCondensate'then return representative.required()end
+    if m=='getParallelRecipesInProgress'or m=='getMinParallel'or m=='getMaxParallel'then return representative.parallel()end
+    if m=='getRequiredTier'then return representative.demand()end
    end
    if m=='getState' then return nodeSnapshot().state end
    if m=='getRequiredCondensate' then return nodeSnapshot().required end
@@ -224,7 +237,9 @@ function M.environment(cfg,index,engine)
  -- OC reads across a cohort can exceed the original single-node 3-second grace.
  env.BEC_V2_RELEASE_GRACE=30
  env.BEC_V2_NODE_SNAPSHOT=nodeSnapshot
- if task.fixedBatch then
+ if representative then
+  env.BEC_V3_FIXED_BATCH_SNAPSHOT=representative.production
+ elseif task.fixedBatch then
   env.BEC_V3_FIXED_BATCH_SNAPSHOT=assert(loadfile(C.path('lib/fixed_batch.lua')))()(c,cfg,members,entries,task,function()return nodeSnapshot()end)
  end
  -- A stock hit never starts generators (the old supply-lock release point).

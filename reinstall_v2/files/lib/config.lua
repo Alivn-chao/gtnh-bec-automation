@@ -68,6 +68,7 @@ function M.validate(cfg,live)
    assert(integer(f.sourceSlot,1,10)and integer(f.productionSlot,1,10),'原料盘槽位无效')
    assert(integer(f.collectSeconds,1,60),'攒料时间需为1到60秒')
    assert(f.maxParallelPerNode==nil or integer(f.maxParallelPerNode,1,2147483647),'节点自动并行上限无效')
+   assert(f.representativeChecks==nil or type(f.representativeChecks)=='boolean','代表节点检查设置无效')
    if live then
     methods(f.transposer,{'transferItem','getStackInSlot','getInventoryName','getInventorySize'},'原料盘转运器')
     for _,side in ipairs({f.sourceSide,f.productionSide})do assert(c.invoke(f.transposer,'getInventoryName',side)=='tile.appliedenergistics2.BlockDrive'and c.invoke(f.transposer,'getInventorySize',side)==10,'原料两侧必须是ME驱动器')end
@@ -130,6 +131,7 @@ function M.validate(cfg,live)
   if live then
     if cfg.groups[n.group].cellFeed and cfg.groups[n.group].cellFeed.enabled then
      methods(n.address,{'setMinParallel','setMaxParallel','getMinParallel','getMaxParallel','getConsumedCondensate'},'原料批次节点')
+     if cfg.groups[n.group].cellFeed.representativeChecks then methods(n.address,{'getWorkProgress','getRecipeSteps'},'代表节点阶段同步')end
     end
    methods(n.address,{'getState','getRequiredTier','getRequiredCondensate','getParallelRecipesInProgress','setWorkAllowed','isWorkAllowed'},'传送节点（需要可启停的机器组件）')
    if cfg.groups[n.group].nanites and cfg.groups[n.group].nanites.enabled and cfg.groups[n.group].nanites.mode=='cell-io'then methods(n.address,{'getAvailableNanites','getProvidedTier'},'蜂群读数节点')end
