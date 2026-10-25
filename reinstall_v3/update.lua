@@ -1,5 +1,5 @@
 -- BEC_V3_PERFORMANCE_UPDATE_1
-local SELF_SIGNATURE='82087:4286579131'
+local SELF_SIGNATURE='83172:534818745'
 print('BEC V3 performance preview; Q to exit the old UI first')
 local rows={{name='runtime/controller.lua',source=[=[-- BEC_V3_LARGE_BATCH_1: long-sized totals; bounded per-call fluid requests.
 local c = require("component") local ser = require("serialization") local computer = require("computer") local fs = require("filesystem")
@@ -339,6 +339,9 @@ local function call(a,m,...)
  if (a==SOUTH or a==NORTH)and(m=='getOutput'or m=='setOutput')and args[1]==0 then
   args[1]=a==SOUTH and cfg.loadOutputSide or cfg.returnOutputSide
  end
+ if a==T and m=='transferItem'and cfg.transferChecked then
+  return cfg.transferChecked(record.requiredTier,record.requiredFamily,table.unpack(args,1,5))
+ end
  return c.invoke(a,m,table.unpack(args))
 end
 local function whole(n) return type(n)=='number' and n>=0 and n%1==0 end
@@ -490,7 +493,10 @@ local function choose(cells,need,family)
  return best
 end
 local function move(from,to,source,dest,expected,key)
- guard()
+ if cfg.transferChecked then
+  if context and context.check then context.check()end
+  assert(not(context and context.stopping and context.stopping()),'换蜂已暂停，保留现场')
+ else guard()end
  local n,row=describe(stack(from,source))
  assert(n==expected and (not key or row and row.key==key) and stack(to,dest)==nil,'搬盘前槽位/内容变化')
  record.pending={from=from,to=to,source=source,dest=dest,count=expected,key=key}
@@ -549,6 +555,8 @@ local function recover(cells)
  assert(row,'回收盘没有蜂群清单')
  move(2,0,at,chosen.slot,row.count,row.key)
  record.holding=nil;save('recovered')
+ -- Only this bank slot changed; move() read back its complete contents.
+ chosen.item=row;chosen.count=row.count;chosen.empty=false
  print('整盘回收：T'..row.tier..' / '..row.count..' 个，盘槽 '..chosen.slot)
 end
 local function loadCell(disk)
@@ -613,7 +621,7 @@ function M.ensure(ctx)
  record={version=2,kind='cell-io',binding=binding,requiredTier=need,requiredFamily=family,holding=known,stage='prepared'}
  guard();archive();save('prepared')
  local ok,result=xpcall(function()
-  if h>0 and (not keeping or not known) then recover(cells);cells=bank(size);best=choose(cells,need,family);assert(best,'回收后没有可装入蜂群') end
+  if h>0 and (not keeping or not known) then recover(cells);best=choose(cells,need,family);assert(best,'回收后没有可装入蜂群') end
   local picked
   if keeping and known then picked=extra else picked=best.picked end
   for _,disk in ipairs(picked) do loadCell(disk) end
@@ -939,6 +947,15 @@ function M.environment(cfg,index,engine)
   end end
   env.BEC_CELL_IO.checkGroup=cellGuard
   env.BEC_CELL_IO.inspect=cellInspection
+  -- One authoritative check immediately before transfer, instead of one in
+  -- move() and another in native.invoke(). Slots/journal/readback stay in move().
+  env.BEC_CELL_IO.transferChecked=function(tier,family,from,to,count,source,dest)
+   assert(count==1 and from~=to,'蜂群搬盘参数无效')
+   local value=cellInspection()
+   assert(value.requiredTier==tier and(not family or value.requiredFamily==family),'换蜂过程中需求变化，保留现场')
+   assert(not task.cancel,'用户暂停蜂群操作，保留记录')
+   return c.invoke(g.nanites.transposer,'transferItem',from,to,count,source,dest)
+  end
   -- BEC_V3_PERFORMANCE_1: initial inspection already proves group pause and
   -- generator shutdown; check hive agreement without repeating that proof.
   env.BEC_CELL_IO.inspectInitial=function()

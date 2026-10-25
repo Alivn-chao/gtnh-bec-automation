@@ -307,6 +307,15 @@ function M.environment(cfg,index,engine)
   end end
   env.BEC_CELL_IO.checkGroup=cellGuard
   env.BEC_CELL_IO.inspect=cellInspection
+  -- One authoritative check immediately before transfer, instead of one in
+  -- move() and another in native.invoke(). Slots/journal/readback stay in move().
+  env.BEC_CELL_IO.transferChecked=function(tier,family,from,to,count,source,dest)
+   assert(count==1 and from~=to,'蜂群搬盘参数无效')
+   local value=cellInspection()
+   assert(value.requiredTier==tier and(not family or value.requiredFamily==family),'换蜂过程中需求变化，保留现场')
+   assert(not task.cancel,'用户暂停蜂群操作，保留记录')
+   return c.invoke(g.nanites.transposer,'transferItem',from,to,count,source,dest)
+  end
   -- BEC_V3_PERFORMANCE_1: initial inspection already proves group pause and
   -- generator shutdown; check hive agreement without repeating that proof.
   env.BEC_CELL_IO.inspectInitial=function()
