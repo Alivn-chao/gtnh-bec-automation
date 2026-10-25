@@ -99,11 +99,18 @@ function M.new(cfg,group,C,E,resumeAdmission)
   assert(not stack(from,sourceSlot)and after and after.name==record.cell and after.size==1,'搬盘后槽位不符，不重复搬运')
   record.pending=nil;save(stage..'-confirmed');return after
  end
+ local function parallel(i,from,wanted)
+  local n=cfg.nodes[i];local lo,hi=from.min,from.max
+  if lo>wanted.max then c.invoke(n.address,'setMinParallel',wanted.min);lo=wanted.min end
+  if hi<wanted.min then c.invoke(n.address,'setMaxParallel',wanted.max);hi=wanted.max end
+  if lo~=wanted.min then c.invoke(n.address,'setMinParallel',wanted.min)end
+  if hi~=wanted.max then c.invoke(n.address,'setMaxParallel',wanted.max)end
+  assert(c.invoke(n.address,'getMinParallel')==wanted.min and c.invoke(n.address,'getMaxParallel')==wanted.max,'并行参数回读失败')
+ end
  local function restore()
-  for _,i in ipairs(ids)do local v=record.limits[i];local n=cfg.nodes[i]
+  for _,i in ipairs(record.members)do local v=record.limits[i];local q=record.quota[i]
    record.pending={kind='restore-parallel',node=i};save('restoring')
-   c.invoke(n.address,'setMinParallel',1);c.invoke(n.address,'setMaxParallel',v.max);c.invoke(n.address,'setMinParallel',v.min)
-   assert(c.invoke(n.address,'getMinParallel')==v.min and c.invoke(n.address,'getMaxParallel')==v.max,'还原并行参数失败')
+   parallel(i,{min=q,max=q},v)
    record.pending=nil;save('restored')
   end
  end
@@ -181,8 +188,7 @@ function M.new(cfg,group,C,E,resumeAdmission)
    record.quota=M.allocate(count,limits);save('planned')
    for _,i in ipairs(ids)do local q=record.quota[i];if q>0 then
     local n=cfg.nodes[i];record.pending={kind='set-parallel',node=i,quota=q};save('configuring')
-    enabled();c.invoke(n.address,'setMinParallel',1);c.invoke(n.address,'setMaxParallel',q);c.invoke(n.address,'setMinParallel',q)
-    assert(c.invoke(n.address,'getMinParallel')==q and c.invoke(n.address,'getMaxParallel')==q,'并行配额回读失败')
+    enabled();parallel(i,record.limits[i],{min=q,max=q})
     record.pending=nil;record.members[#record.members+1]=i;save('configured')
    end end
    record.cursor=1;save('admitting')

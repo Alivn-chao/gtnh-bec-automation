@@ -21,7 +21,7 @@ return function(cfg,C,Bridge,monitor)
   reports=ok and result or {status="报告初始化失败，生产日志保留",step=function()end,close=function()end,capture=function()end}
  end
  E.reports=reports
- local storage,nextDiskCheck
+ local storage,nextDiskCheck;local pruneWanted,nextEmergencyPrune=true,0
  if not monitor and require('filesystem').get then storage=assert(loadfile(C.path('lib/storage.lua')))()(C);nextDiskCheck=0 end
  function E.reportFault(i,reason)
   if reports then local ok=pcall(reports.capture,i,E,reason);if not ok then reports.status="故障报告保存失败，现场日志保留" end end
@@ -131,6 +131,7 @@ return function(cfg,C,Bridge,monitor)
   end
   C.write(cohortPath(group),{version=2,stage=(t.fault or t.cancel)and 'interrupted'or 'stopped',
    leader=i,members=t.members,entries=t.entries,normalized=t.normalized})
+  if not t.fault and not t.cancel then pruneWanted=true end
   if reports then
    reports.historyWanted=true
    if t.fault and not t.cancel then E.reportFault(i,E.logs[#E.logs]or "worker failure")end
@@ -153,20 +154,32 @@ return function(cfg,C,Bridge,monitor)
   for key,value in pairs(a)do if b[key]~=value then return false end end
   for key,value in pairs(b)do if a[key]~=value then return false end end;return true
  end
+ local function diskStatus(value)
+  E.disk=value or storage.status()
+  if not E.disk.known or not E.disk.ok then
+   E.diskLow=true;E.pauseAll();E.log(1,'磁盘空间不足或不可读：停止接单，保留当前日志，需腾出至少512KiB')
+  else E.diskLow=false end
+ end
  function E.step()
   if monitor then return end
   for _,feed in pairs(E.cellFeeds)do feed.observe()end
   if storage and clock.uptime()>=(nextDiskCheck or 0)then
-   storage.prune(cfg);E.disk=storage.status();nextDiskCheck=clock.uptime()+10
-   if not E.disk.known or not E.disk.ok then
-    E.diskLow=true;E.pauseAll();E.log(1,'磁盘空间不足或不可读：停止接单，保留当前日志，需腾出至少512KiB')
-   else E.diskLow=false end
+   local status=storage.status()
+   if status.known and not status.ok and clock.uptime()>=nextEmergencyPrune then
+    storage.prune(cfg);pruneWanted=false;nextEmergencyPrune=clock.uptime()+60
+    status=storage.status()
+   end
+   diskStatus(status);nextDiskCheck=clock.uptime()+10
   end
   if reports then
    reports.step()
    if E.reportStatus~=reports.status then E.reportStatus=reports.status;E.log(1,reports.status)end
   end
   for i,t in ipairs(E.tasks)do if t.co and (t.cancel or t.waitKind=='lock'and(not E.fluidOwner or E.fluidOwner==i)or t.waitKind~='lock'and clock.uptime()>=(t.deadline or 0))then advance(i)end end
+  if storage and pruneWanted and E.disk and E.disk.known and not E.fluidOwner and not next(E.groupOwner)then
+   local busy=false;for _,feed in pairs(E.cellFeeds)do if feed.plan()then busy=true;break end end
+   if not busy then storage.prune(cfg);pruneWanted=false;diskStatus()end
+  end
   for group in ipairs(cfg.groups)do if not E.groupOwner[group]then
    local feed=E.cellFeeds[group]
    local feedReady=true

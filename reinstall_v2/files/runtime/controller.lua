@@ -121,12 +121,29 @@ local parallel=checkRecipe(required) local count=math.max(parallel,queuedRecipes
 assert(count-parallel<=math.floor((9007199254740991-integer(remaining[name]))/perRecipe[name]),"整批需求超出Lua精确整数范围")
 target[name]=integer(remaining[name]+perRecipe[name]*(count-parallel)) end return target,count
 end local function unchanged() local req, remaining = current() assert(same(req, record.required) and same(remaining, record.remaining), "暂停订单发生变化，停止")
-end local function resolveRawNames(target) local main,sub,stock=network(MAIN),network(SUB),field() for kind,need in pairs(target) do
-if kind=="entangled_space" or kind=="entangled_time" then local stem=kind=="entangled_space" and "spatialfluid" or "temporalfluid" local candidates={[stem]=true,["molten."..stem]=true,["fluid."..stem]=true,["fluid.molten."..stem]=true} local found={}
+end
+local discovery,saveDiscovery,discoveryLoaded
+local baseMapping={};for k,v in pairs(mapping)do baseMapping[k]=v end
+local function rawAlias(kind,raw)
+ local base=baseMapping[kind]
+ return base and(raw==base or raw=='fluid.'..base or kind=='entangled_space'and(raw=='spatialfluid'or raw=='fluid.spatialfluid')or kind=='entangled_time'and(raw=='temporalfluid'or raw=='fluid.temporalfluid'))
+end
+local function loadDiscovery()
+ if discoveryLoaded then return end;discoveryLoaded=true
+ if type(BEC_V3_PRODUCTION_DISCOVERY)=='function'then discovery,saveDiscovery=BEC_V3_PRODUCTION_DISCOVERY()end
+ if discovery then for kind,raw in pairs(discovery.rawNames)do if rawAlias(kind,raw)then mapping[kind]=raw else discovery.rawNames[kind]=nil end end end
+end
+local function resolveRawNames(target)
+ loadDiscovery()
+ local unknown=false;for kind in pairs(target)do if(kind=='entangled_space'or kind=='entangled_time')and not(discovery and discovery.rawNames[kind])then unknown=true end end
+ if not unknown then return end
+ local main,sub,stock=network(MAIN),network(SUB),field()
+ for kind,need in pairs(target)do
+ if(kind=='entangled_space'or kind=='entangled_time')and not(discovery and discovery.rawNames[kind])then local stem=kind=="entangled_space" and "spatialfluid" or "temporalfluid" local candidates={[stem]=true,["molten."..stem]=true,["fluid."..stem]=true,["fluid.molten."..stem]=true} local found={}
 for name in pairs(candidates) do if (main[name] or 0)>0 or (sub[name] or 0)>0 then found[name]=true end local rows=call(MAIN,"getCraftables",{name=name}) assert(type(rows)=="table","原液配方读取失败")
 for _,craft in pairs(rows) do local f=craft.getStack() if type(f)=="table" and f.name==name then found[name]=true end end
 end local name,n=nil,0;for candidate in pairs(found) do name=candidate;n=n+1 end assert(n<=1,"空间/时间原液名称不唯一: "..kind) assert(n==1 or (stock[kind] or 0)>=need,"主网缺少空间/时间原液库存或样板: "..kind)
-if n==1 then mapping[kind]=name end end end end
+if n==1 then mapping[kind]=name;if discovery then discovery.rawNames[kind]=name;if saveDiscovery then saveDiscovery()end end end end end end
 local function plan(remaining,quiet) resolveRawNames(remaining) local stock, sub, main = field(), network(SUB), network(MAIN) local moves, expected, allowed, shortages, deficits = {}, {}, {}, {}, {}
 for name, need in pairs(remaining) do local raw = mapping[name] allowed[raw] = true local unit=units[name] or 144
 local required = math.ceil(math.max(0, need - (stock[name] or 0)) / unit) * unit local existing = sub[raw] or 0 assert(existing <= required and existing % unit == 0, "子网原液超额或非整批: " .. raw) local missing = required - existing
@@ -138,25 +155,66 @@ local message=table.concat(shortages,"；") if not quiet then print("缺料: "..
 end return moves, sub, expected end local function waitUntil(seconds, condition, guard,label)
 local deadline = computer.uptime() + seconds while true do local ready, snapshot = condition() if ready then return end
 if guard then guard(snapshot) end assert(computer.uptime() < deadline, "等待超时，停止"..(label and "："..label.." / 实际状态 "..tostring(snapshot)or "")) os.sleep(0.25) end
-end local function bulkPorts() local allowed,ports={},{} for _,raw in pairs(mapping) do allowed[raw]=true end
-for address,kind in c.list("transposer") do if kind=="transposer" and address~=TRANS then local sources,receivers={},{} for side=0,5 do
-local ok,count=pcall(call,address,"getTankCount",side) if ok and count==1 then local readable,capacity=pcall(call,address,"getTankCapacity",side,1) if readable and capacity==2147483647 then
-local f=call(address,"getFluidInTank",side,1) if type(f)=="table" and type(f[1])=="table" then f=f[1] end if type(f)=="table" and allowed[f.name] then sources[#sources+1]={from=side,raw=f.name} end end
-elseif ok and count==6 then local readable,capacity=pcall(call,address,"getTankCapacity",side,1) if readable and capacity==16000 then receivers[#receivers+1]=side end end
-end if #sources>0 then assert(#receivers==1,"高速供液口接收方向缺失或不唯一: "..address) for _,source in ipairs(sources) do
-assert(not ports[source.raw],"高速供液口重复绑定: "..source.raw) ports[source.raw]={address=address,from=source.from,to=receivers[1]} end end
-end end return ports end
-local function verifyBulk(route,raw) local f=call(route.address,"getFluidInTank",route.from,1) if type(f)=="table" and type(f[1])=="table" then f=f[1] end assert(type(f)=="table" and f.name==raw
+end
+local function probeRoute(route,raw)
+ if call(route.address,'getTankCount',route.from)~=1 or call(route.address,'getTankCapacity',route.from,1)~=2147483647
+  or call(route.address,'getTankCount',route.to)~=6 or call(route.address,'getTankCapacity',route.to,1)~=16000 then return false end
+ local f=call(route.address,'getFluidInTank',route.from,1);if type(f)=='table'and type(f[1])=='table'then f=f[1]end
+ return type(f)=='table'and(f.name==raw or not f.name and tonumber(f.amount or 0)==0)
+end
+local function bulkPorts(required)
+ loadDiscovery();if not next(required)then return{}end
+ if discovery and discovery.ports then
+  local valid=true
+  for kind in pairs(required)do local route=discovery.ports[mapping[kind]];local ok,match=false,false
+   if route then ok,match=pcall(probeRoute,route,mapping[kind])end
+   if not ok or not match then valid=false;break end
+  end
+  if valid then return discovery.ports end
+  discovery.ports=nil
+ end
+ local allowed,ports={},{}
+ for _,raw in pairs(baseMapping)do allowed[raw]=true;allowed['fluid.'..raw]=true end
+ for _,raw in ipairs({'spatialfluid','fluid.spatialfluid','temporalfluid','fluid.temporalfluid'})do allowed[raw]=true end
+ for address,kind in c.list('transposer')do if kind=='transposer'and address~=TRANS then
+  local sources,receivers={},{}
+  for side=0,5 do
+   local ok,count=pcall(call,address,'getTankCount',side)
+   if ok and count==1 then
+    local readable,capacity=pcall(call,address,'getTankCapacity',side,1)
+    if readable and capacity==2147483647 then local f=call(address,'getFluidInTank',side,1);if type(f)=='table'and type(f[1])=='table'then f=f[1]end
+     if type(f)=='table'and allowed[f.name]then sources[#sources+1]={from=side,raw=f.name}end
+    end
+   elseif ok and count==6 then local readable,capacity=pcall(call,address,'getTankCapacity',side,1);if readable and capacity==16000 then receivers[#receivers+1]=side end end
+  end
+  if #sources>0 then assert(#receivers==1,'高速供液口接收方向缺失或不唯一: '..address)
+   for _,source in ipairs(sources)do assert(not ports[source.raw],'高速供液口重复绑定: '..source.raw);ports[source.raw]={address=address,from=source.from,to=receivers[1]}end
+  end
+ end end
+ for kind in pairs(required)do
+  local raw=mapping[kind]
+  if not ports[raw]then local found,n=nil,0;for name in pairs(ports)do if rawAlias(kind,name)then found=name;n=n+1 end end
+   assert(n<=1,'高速供液原液名称不唯一: '..kind);if n==1 then mapping[kind]=found end
+  end
+  if discovery and ports[mapping[kind]]then discovery.rawNames[kind]=mapping[kind]end
+ end
+ if discovery then discovery.ports=ports;if saveDiscovery then saveDiscovery()end end
+ return ports
+end
+local function verifyBulk(route,raw,allowEmpty) local f=call(route.address,"getFluidInTank",route.from,1) if type(f)=="table" and type(f[1])=="table" then f=f[1] end assert(type(f)=="table" and(f.name==raw or allowEmpty and not f.name and integer(f.amount or 0)==0)
 and call(route.address,"getTankCapacity",route.from,1)==2147483647,"高速缓存口绑定已变化") assert(call(route.address,"getTankCount",route.to)==6,"高速接收接口已变化") for i=1,6 do local tank=call(route.address,"getFluidInTank",route.to,i)
 if type(tank)=="table" and type(tank[1])=="table" then tank=tank[i] or tank[1] end assert(type(tank)=="table" and integer(tank.amount or 0)==0,"高速接收接口有未处理缓存") end end
-local function prepareStreaming(target) resolveRawNames(target) local ports=bulkPorts() local stock,previous=field(),network(SUB)
+local function prepareStreaming(target) resolveRawNames(target) local stock,previous=field(),network(SUB)
+local wanted={};for name,need in pairs(target)do local batch=units[name]or 144;local amount=math.ceil(math.max(0,need-(stock[name]or 0))/batch)*batch
+ if amount>(previous[mapping[name]]or 0)then wanted[name]=true end end
+local ports=bulkPorts(wanted)
 local expected,raws={},{} for name,need in pairs(target) do local raw=mapping[name] local batch=units[name] or 144
 local amount=math.ceil(math.max(0,need-(stock[name] or 0))/batch)*batch local existing=previous[raw] or 0 assert(existing<=amount and existing%batch==0,"子网原液超额或非整批: "..raw) if amount>0 then expected[raw]=amount end
 raws[#raws+1]={raw=raw,amount=amount,batch=batch} end for raw in pairs(previous) do local allowed=false
 for _,item in ipairs(raws) do if item.raw==raw then allowed=true end end assert(allowed,"子网有无关原液: "..raw) end for name,amount in pairs(stock) do assert(amount==0 or mapping[name],"约束场有未知凝聚物") end
 table.sort(raws,function(a,b) return a.raw<b.raw end) record.plan=raws;record.expected=expected;record.secured=previous;save("stream-planned") for _,item in ipairs(raws) do local raw,need,batch=item.raw,item.amount,item.batch
 local route=ports[raw] local chunk=math.floor((route and 2147483647 or 16000)/batch)*batch local function bufferedInlet() return route and 0 or tanks(4,raw) end if (previous[raw] or 0)<need then
-unchanged();emptyConfig();tanks(4,nil) record.configOwned=route==nil;save("stream-configuring") if route then verifyBulk(route,raw)
+unchanged();emptyConfig();tanks(4,nil) record.configOwned=route==nil;save("stream-configuring") if route then verifyBulk(route,raw,true)
 print("高速供液: "..raw.."；源 "..route.from.." -> 接收 "..route.to) else assert(call(MAIN,"setFluidInterfaceConfiguration",0, {name=raw,amount=math.min(need-(previous[raw] or 0),chunk),
 size=math.min(need-(previous[raw] or 0),chunk)})==true,"持续供液配置失败") end print(raw.." 整批目标 "..need.." mB；到账即搬入子网。") local job,status,craft,jobDeadline,doneAt
 local requestChunk=math.floor(2147483647/batch)*batch

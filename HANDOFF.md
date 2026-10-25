@@ -1,3 +1,32 @@
+# 2026-10-26 接单参数/归档/生产路线三项优化（已部署待用户测试）
+
+用户要求先改推荐的1/3/4，改完自行测试。本轮不改接单顺序、10秒收集或韦门策略。
+cell_feed差量设置并行，合法范围排序，保留写前意图/回读，仅恢复record.members；
+模拟3/16/1000份批次setter由57/96/96降为6/32/64，读操作保留，不明响应不重放。
+engine每10秒仅查容量；常规归档在启动空闲/批次完成且无资源占用时清理，低空间
+立即尝试原有已确认归档清理，重复紧急清理最多每60秒；仍不足/不可读保持暂停。
+
+新增lib/fluid_discovery.lua，生产读取并保存与后台缓存兼容的cache-discovery.dat，
+正式配置全文绑定+地址/方向/数量验证；运行时别名限制在同种流体，探测仅需补入
+的口，变更才重新全扫，真实transfer前仍检查原液名称、空接收口、回执和增量。
+controller允许已知空源先等待/申请正确原液，不能拿空源直接搬运。模块缺失时
+bridge回退内存发现，兼容历史3文件更新；旧更新器仍不是本轮完整安装。
+
+220项回归+20核心通过，新增18项并纳入2项既有存储保留测试。真实控制器模拟
+两种配方跨工作器仅扫描一次；已知空源场景只请求一次并精确搬液；位置变化、
+错绑定/未绑定地址/错误原液/别名跳转、参数中断、归档时机和低空间均覆盖。
+10路发现模拟90读→已知且只需1路的5次探测；不是实际生产总调用数/耗时。
+
+实机初始web binding、16台idle且关闭接单、feed/cohort stopped。正常清洁退出，
+更新前剩余1127844B。MCP CAS写入新fluid_discovery及cell_feed/engine/bridge/
+controller，逐字回读，config.dat原字节未改；既有nanites_cell/representative/
+hive_transposer未覆盖。证明 diagnostics/batch-overhead-update-20261026.dat；
+安装备份cell_feed:f234aa74-5101-43d6-a012-3f3236d6cda5，engine:6d1e8436-1db7-421a-afad-d0581fb8aa7d，
+bridge:a68cd7f0-ce43-4a72-b1fd-50284c4bdc68（均lib/.ochd-mcp/*.bak）；
+controller:runtime/.ochd-mcp/e974fa2e-2b4e-4253-804f-a7d0aa0b665f.bak。
+本次没有发AE订单或搬蜂，用户将自行测试；网页重开后保持暂停，已有页面点启动。
+私有现场/脚本/回执在outputs/batch-overhead-20261026，不提交。
+
 # 2026-10-26 固定批次继续压缩检查（已部署）
 
 用户认为固定流程错误概率低，要求继续压缩216次调用。仅在fixedBatch且

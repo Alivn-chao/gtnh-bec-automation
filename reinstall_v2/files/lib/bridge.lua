@@ -254,6 +254,11 @@ function M.environment(cfg,index,engine)
   return c.invoke(a,m,table.unpack(args))
  end
  local env=setmetatable({}, {__index=_G});env._ENV=env
+ env.BEC_V3_PRODUCTION_DISCOVERY=function()
+  local ok,loader=pcall(loadfile,C.path('lib/fluid_discovery.lua'))
+  if not ok or not loader then return{rawNames={}}end
+  return loader()(C,cfg,n.group)
+ end
  -- Every invocation scans all members anew. The controller may use the fields
  -- together within one decision, but resamples after yielding or changing
  -- hardware. These separate OC reads are not an atomic server-side snapshot.
