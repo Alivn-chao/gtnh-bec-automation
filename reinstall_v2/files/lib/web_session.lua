@@ -179,7 +179,9 @@ return function(C,B,W,options)
     H.started=true
    end
    local seen={};for i,n in ipairs(cfg.nodes)do if not seen[n.group]then E.resumeNode(i);seen[n.group]=true end end
-   H.running=true;H.notice='自动化运行中；节点按批次关闭接单，整组完成后再接下一单。';return H.notice
+   H.running=true;H.notice='自动化运行中；节点按批次关闭接单，整组完成后再接下一单。'
+   for _,g in ipairs(cfg.groups)do if g.cellFeed and g.cellFeed.enabled then H.notice='原料盘批次模式运行中：攒料10秒，搬盘后计数，自动分配最多16台节点。'end end
+   return H.notice
   elseif name=='pause'then
    H.running=false;if P and P.co then P.stop=true end;if K then K.requestStop()end;if E then E.pauseAll()end;H.notice='已请求暂停；工作器收尾，未确认记录保留。';return H.notice
   elseif name=='refresh'then return '页面在线'

@@ -1,3 +1,15 @@
+# 2026-10-25 原料盘批次模式（实机16台各1份完成）
+
+用户要求同配方攒料10秒、先搬盘再计数、最多16台均分、快节点等慢节点，继续当前分支，不另开分支。新原料转运器 `f587ab61-c626-47e2-b0f5-0fdeefc36fec`，西4缓存ME驱动器、东5生产ME驱动器，均槽1；空盘为16384k ME元件（不是蜂群数字奇点）。两侧真实空盘往返、盘内清单读取已通过。适配器 ac436344 / fc757c8f 是物理适配器地址，不是可直接调用的驱动器组件。右侧AE线最初漏接，用户随后补接。
+
+新增 canonical lib/cell_feed.lua、lib/fixed_batch.lua；engine opt-in groups[N].cellFeed；config验证；cache优先让位原料盘并完成已提交操作；bridge/controller固定批次生产快照及软件阶段等待。配方身份/配额接单时校验，实时状态与tier保留，完整消耗证明后不重复扫描已确认消耗。先行节点需求变化后用现有立即暂停等待仍在原需求的节点；非常短配方跨多步则回退原实时策略，不宣称精确tick阶段暂停。不同配额仅模拟验证。同步游戏已有大批量流体/实体蜂群桥接到canonical时保留原行为；实际runtime/nanites_cell未替换（仍已有实体蜂群与刷新修复）。旧三文件更新器不是新模式完整安装器，见 fixes/cell_feed/README.md。
+
+实际已配置 collectSeconds=10、sourceSide=4、productionSide=5、slot1、自动并行上限2147483647（实际接单仍受硬件约束）。正常原料盘未完成记录不自动重放。新检查曾把onRecipeStart的短暂crafting判异常；已改成关闭后续接单后等待暂停态。首次节点1已接1份、盘余15份时，正常Q退出；用显式 new(...,true) 核对同接线、16台关闭/暂停、已接份数/需求、零凝聚物消耗、精确余料后继续，未重搬盘/重复接第一份。正常引擎不使用此修复入口。
+
+用户16个原始屏蔽层真实完成：5类368件→16份，16台各1；cohort/cell-feed均stopped、每台finished和全消耗证明、空盘回缓存端、生产端空、min/max恢复1/256。游戏证明 `/home/bec_v2/diagnostics/cell-feed-completed-20261025.dat`。初次旧空间补库converting实际上原液已空/库存达标/零AE请求/纠缠器inactive但allowedtrue，核对后归档证明并收尾为stopped，未重复搬液。用户截图旧 production.journal.before-resume-7 报Windows保存失败；实查该旧归档不存在，当前新批次日志/证明正常写入回读。不要凭此恢复或伪造缺失旧归档。
+
+MCP曾临时agent offline，机箱仍running、lastError=null；用户重连后恢复，没有执行power stop/start。现场私有快照/安装备份/脚本在 outputs/cell-batch-20261025，绝不整目录git add。178项回归+20原核心场景通过。验收后正常请求pause让缓存已提交部分收尾，清洁边界回到标准web runner，避免继续使用一次性接单恢复的engine注入。日志/盘/配置均保留。
+
 # 2026-10-21 OC MCP 恢复与网页双发布修复
 
 已实际接入游戏 OC。通过 Python 加载 `F:/prism/b3/.minecraft/ochd-mcp/ochd_mcp.py` 的 Bridge，配置路径 `F:/prism/b3/.minecraft/config/ochd-mcp-client.json`（含令牌，不输出、不上传）。目标 computer ID `ebf6f77d-6aa4-425e-8984-3d9533d15c2f:c3c8b166-8dce-4f64-88ea-1e67510967a6`，agentOnline=true。Python 是 bundled runtime dependencies/python/python.exe。oc_run 只返回 job，应查询结果文本里的错误；OpenOS lua 脚本 assert 失败时 shell success 字段仍可能 true。变更结果不确定必须读状态/原 job，不盲重复。

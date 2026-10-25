@@ -15,6 +15,10 @@ end
 function M.environment(cfg,index,engine)
  C.pulse=engine.pulse;local c=C.component and C.component(c)or c
  local n,g=cfg.nodes[index],cfg.groups[cfg.nodes[index].group]
+ local physicalHive
+ if g.nanites and g.nanites.enabled and g.nanites.hiveSource=='transposer'then
+  physicalHive=assert(loadfile(C.path('lib/hive_transposer.lua')))()(c,g.nanites)
+ end
  local task=engine.tasks[index]
  local members=task.members or {index}
  local entries=task.entries or {}
@@ -85,6 +89,7 @@ function M.environment(cfg,index,engine)
  local bulk={};for _,a in ipairs(g.bulkTransposers or {}) do bulk[a]=true end
  local function awaitLock() engine.acquire(index) end
  local function sharedHiveReady()
+  if physicalHive then physicalHive.read();return true end
   local h,p=c.invoke(n.address,'getAvailableNanites'),c.invoke(n.address,'getProvidedTier')
   for _,member in ipairs(cfg.nodes)do if member.group==n.group then
    local count,tier=c.invoke(member.address,'getAvailableNanites'),c.invoke(member.address,'getProvidedTier')
@@ -141,6 +146,9 @@ function M.environment(cfg,index,engine)
   end
   if (a==cfg.mainInterface and (m=='getFluidInterfaceConfiguration' or m=='setFluidInterfaceConfiguration')) or a==g.transposer or (bulk[a] and m=='transferFluid') then awaitLock() end
   if a==n.address then
+   if physicalHive and(m=='getAvailableNanites'or m=='getProvidedTier')then
+    local count,tier=physicalHive.read();if m=='getAvailableNanites'then return count end;return tier
+   end
    if m=='getState' then return nodeSnapshot().state end
    if m=='getRequiredCondensate' then return nodeSnapshot().required end
    if m=='getConsumedCondensate' then return nodeSnapshot().consumed end
@@ -216,6 +224,9 @@ function M.environment(cfg,index,engine)
  -- OC reads across a cohort can exceed the original single-node 3-second grace.
  env.BEC_V2_RELEASE_GRACE=30
  env.BEC_V2_NODE_SNAPSHOT=nodeSnapshot
+ if task.fixedBatch then
+  env.BEC_V3_FIXED_BATCH_SNAPSHOT=assert(loadfile(C.path('lib/fixed_batch.lua')))()(c,cfg,members,entries,task,function()return nodeSnapshot()end)
+ end
  -- A stock hit never starts generators (the old supply-lock release point).
  -- Called only after empty-inlet/subnet and live stock checks, before release.
  env.BEC_V3_RELEASE_SUPPLY=function()engine.release(index)end
@@ -267,6 +278,18 @@ function M.environment(cfg,index,engine)
   env.BEC_CELL_IO={};for key,value in pairs(g.nanites)do env.BEC_CELL_IO[key]=value end
   env.BEC_CELL_IO.node=n.address;env.BEC_CELL_IO.redstone=n.redstone;env.BEC_CELL_IO.pauseSide=n.pauseSide
   env.BEC_CELL_IO.path=C.path('state/group-'..n.group..'/nanites-cell.journal')
+  if physicalHive then env.BEC_CELL_IO.readPhysicalHive=physicalHive.read end
+  -- BEC_V3_ARRAY_REFRESH_1: physical inventory alone does not prove that the
+  -- assembler has refreshed its cached tier/count after pause or reload.
+  if physicalHive then env.BEC_CELL_IO.arrayHiveReady=function(total,tier)
+   for _,member in ipairs(cfg.nodes)do if member.group==n.group then
+    local count=c.invoke(member.address,'getAvailableNanites')
+    local provided=c.invoke(member.address,'getProvidedTier')
+    if type(count)~='number'or count<64 or total and count~=math.min(total,30720)
+      or type(provided)~='table'or provided.tier~=tier.tier or provided.name~=tier.name then return false end
+   end end
+   return true
+  end end
   env.BEC_CELL_IO.checkGroup=cellGuard
   env.BEC_CELL_IO.inspect=cellInspection
   -- BEC_V3_PERFORMANCE_1: initial inspection already proves group pause and

@@ -13,6 +13,9 @@ class UpdateTests(unittest.TestCase):
     def make(self):
         l=fixture()
         for name in FILES:l.globals().files['/home/bec_v2/'+name]=old(name)
+        # This historic updater requires the original companion modules, even
+        # when the current source tree has a newer opt-in batch scheduler.
+        for name in ['lib/engine.lua','lib/config.lua']:l.globals().files['/home/bec_v2/'+name]=old(name)
         l.globals().files['/home/bec_v2/state/group-1/nanites-cell.journal']='pending-cell-keep'
         l.globals().files['/home/bec_v2/cache.config']='cache-keep'
         return l

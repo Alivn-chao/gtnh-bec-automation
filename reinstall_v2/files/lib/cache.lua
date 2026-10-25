@@ -109,6 +109,7 @@ return function(C,B,cfg,storage)
   local g=cfg.groups[group];local leader
   for i,n in ipairs(cfg.nodes)do if n.group==group then leader=leader or i end end
   assert(leader,'缓存设备组没有节点');local n=cfg.nodes[leader]
+  if E.hasPendingFeed and E.hasPendingFeed(group)then log('原料缓存盘已到料，交回生产调度。');return true end
   -- State reads and workAllowed writes are separate server callbacks. An idle
   -- node may already have admitted an order before the cache closed admission.
   -- Yield the leases BEFORE loading the cache runtime or creating its journal.
@@ -135,6 +136,7 @@ return function(C,B,cfg,storage)
   end
   native.invoke=function(a,m,...)
    local args={...}
+   if E.hasPendingFeed and E.hasPendingFeed(group)then ctx.stop=true end
    if m=='transferFluid'or m=='setFluidInterfaceConfiguration'or m=='setWorkAllowed'or m=='setOutput'then guard()end
    if a==n.address and (m=='getState'or m=='getRequiredCondensate')then
     local state='idle';local req={}
@@ -230,7 +232,7 @@ return function(C,B,cfg,storage)
   nextScan=clock.uptime()+5
   scan();if #names==0 then K.message='尚无已登记配方，等待样板处理登记需求';return end
   for offset=0,#cfg.groups-1 do
-   local group=(nextGroup+offset-1)%#cfg.groups+1;local g=cfg.groups[group];local safe=not E.groupOwner[group];local members=0
+   local group=(nextGroup+offset-1)%#cfg.groups+1;local g=cfg.groups[group];local safe=not E.groupOwner[group]and not(E.hasPendingFeed and E.hasPendingFeed(group));local members=0
    local saved=C.read(C.path('state/group-'..group..'/cohort.dat'));if saved and saved.stage~='stopped'then safe=false end
    for i,n in ipairs(cfg.nodes)do if n.group==group then members=members+1
     local t=E.tasks[i];if t.disabled or t.fault or c.invoke(n.address,'getState')~='idle'then safe=false end

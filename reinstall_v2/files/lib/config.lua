@@ -61,6 +61,18 @@ function M.validate(cfg,live)
   assert(integer(g.mainSide,0,5) and integer(g.subSide,0,5) and g.mainSide~=g.subSide,'供液方向无效')
   for _,a in ipairs(g.generators) do address(a,'纠缠器');assert(not resources[a],'纠缠器重复绑定');resources[a]=true end
   for _,a in ipairs(g.bulkTransposers or {}) do address(a,'高速供液转运器');assert(not resources[a],'高速供液转运器重复绑定');resources[a]=true end
+  if g.cellFeed and g.cellFeed.enabled then
+   local f=g.cellFeed;address(f.transposer,'原料盘转运器')
+   assert(not resources[f.transposer],'原料盘转运器不能与供液/蜂群共用');resources[f.transposer]=true
+   assert(integer(f.sourceSide,0,5)and integer(f.productionSide,0,5)and f.sourceSide~=f.productionSide,'原料驱动器方向无效')
+   assert(integer(f.sourceSlot,1,10)and integer(f.productionSlot,1,10),'原料盘槽位无效')
+   assert(integer(f.collectSeconds,1,60),'攒料时间需为1到60秒')
+   assert(f.maxParallelPerNode==nil or integer(f.maxParallelPerNode,1,2147483647),'节点自动并行上限无效')
+   if live then
+    methods(f.transposer,{'transferItem','getStackInSlot','getInventoryName','getInventorySize'},'原料盘转运器')
+    for _,side in ipairs({f.sourceSide,f.productionSide})do assert(c.invoke(f.transposer,'getInventoryName',side)=='tile.appliedenergistics2.BlockDrive'and c.invoke(f.transposer,'getInventorySize',side)==10,'原料两侧必须是ME驱动器')end
+   end
+  end
   if g.nanites and g.nanites.enabled then
    local n=g.nanites
    local mode=n.mode or 'me-interface'
@@ -116,6 +128,9 @@ function M.validate(cfg,live)
   local key=n.redstone..':'..n.pauseSide;assert(not redstones[key],'红石输出线路重复');redstones[key]=true
   assert(not gates[n.gate] or gates[n.gate]==n.group,'不同生产组不能共享韦门');gates[n.gate]=n.group
   if live then
+    if cfg.groups[n.group].cellFeed and cfg.groups[n.group].cellFeed.enabled then
+     methods(n.address,{'setMinParallel','setMaxParallel','getMinParallel','getMaxParallel','getConsumedCondensate'},'原料批次节点')
+    end
    methods(n.address,{'getState','getRequiredTier','getRequiredCondensate','getParallelRecipesInProgress','setWorkAllowed','isWorkAllowed'},'传送节点（需要可启停的机器组件）')
    if cfg.groups[n.group].nanites and cfg.groups[n.group].nanites.enabled and cfg.groups[n.group].nanites.mode=='cell-io'then methods(n.address,{'getAvailableNanites','getProvidedTier'},'蜂群读数节点')end
    methods(n.redstone,{'setOutput','getOutput'},'暂停红石')

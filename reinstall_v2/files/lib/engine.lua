@@ -27,6 +27,15 @@ return function(cfg,C,Bridge,monitor)
   if reports then local ok=pcall(reports.capture,i,E,reason);if not ok then reports.status="故障报告保存失败，现场日志保留" end end
  end
  for i in ipairs(cfg.nodes)do E.tasks[i]={status='等待订单',disabled=false}end
+ E.cellFeeds={}
+ if not monitor then
+  for group,g in ipairs(cfg.groups)do if g.cellFeed and g.cellFeed.enabled then
+   E.cellFeeds[group]=assert(loadfile(C.path('lib/cell_feed.lua')))().new(cfg,group,C,E)
+  end end
+ end
+ function E.hasPendingFeed(group)
+  local feed=E.cellFeeds[group];return feed and feed.pending()or false
+ end
  function E.log(i,message)
   E.logs[#E.logs+1]='['..cfg.nodes[i].name..'] '..message
   if #E.logs>40 then table.remove(E.logs,1)end
@@ -116,7 +125,10 @@ return function(cfg,C,Bridge,monitor)
    for j,n in ipairs(cfg.nodes)do if n.group==group then
     E.tasks[j].disabled=true;E.tasks[j].status=t.fault and '同组故障，需核对' or '整组暂停';pcall(pause,j);pcall(E.nodeWork,j,false)
    end end
-  else for _,j in ipairs(t.members)do E.tasks[j].status='等待订单'end end
+  else
+   if E.cellFeeds[group]then E.cellFeeds[group].finish()end
+   for _,j in ipairs(t.members)do E.tasks[j].status='等待订单'end
+  end
   C.write(cohortPath(group),{version=2,stage=(t.fault or t.cancel)and 'interrupted'or 'stopped',
    leader=i,members=t.members,entries=t.entries,normalized=t.normalized})
   if reports then
@@ -143,6 +155,7 @@ return function(cfg,C,Bridge,monitor)
  end
  function E.step()
   if monitor then return end
+  for _,feed in pairs(E.cellFeeds)do feed.observe()end
   if storage and clock.uptime()>=(nextDiskCheck or 0)then
    storage.prune(cfg);E.disk=storage.status();nextDiskCheck=clock.uptime()+10
    if not E.disk.known or not E.disk.ok then
@@ -155,10 +168,27 @@ return function(cfg,C,Bridge,monitor)
   end
   for i,t in ipairs(E.tasks)do if t.co and (t.cancel or t.waitKind=='lock'and(not E.fluidOwner or E.fluidOwner==i)or t.waitKind~='lock'and clock.uptime()>=(t.deadline or 0))then advance(i)end end
   for group in ipairs(cfg.groups)do if not E.groupOwner[group]then
+   local feed=E.cellFeeds[group]
+   local feedReady=true
+   if feed then
+    local disabled,leader=false,nil
+    for i,n in ipairs(cfg.nodes)do if n.group==group then leader=leader or i;if E.tasks[i].disabled or E.tasks[i].fault then disabled=true end end end
+    feedReady=false
+    if not disabled then
+     local ok,result=pcall(feed.step)
+     if ok then
+      feedReady=result
+      if not result then for i,n in ipairs(cfg.nodes)do if n.group==group then E.tasks[i].status=feed.message end end end
+     else
+      E.log(leader,'原料盘保护暂停：'..tostring(result));local t=E.tasks[leader];t.fault=true;t.startedAt=t.startedAt or clock.uptime();t.endedAt=clock.uptime();E.phase(leader,'fault');E.pauseNode(leader)
+     end
+    end
+   end
+   if feedReady then
    local saved=C.read(cohortPath(group));local unfinished=saved and saved.stage~='stopped'
    -- Reopen only after the previous cohort has finished its cleanup. Never
    -- reopen on restart with an interrupted cohort awaiting manual review.
-   if not unfinished then
+   if not unfinished and not feed then
     for j,n in ipairs(cfg.nodes)do if n.group==group and not E.tasks[j].disabled and not E.tasks[j].fault then
      pause(j)
      local journal=C.read(C.path('state/node-'..j..'/production.journal'))
@@ -177,6 +207,7 @@ return function(cfg,C,Bridge,monitor)
        E.log(i,'保留旧进度；核对后按R恢复');E.pauseNode(i);t.status='旧进度待核对';break
       end
       t.members={};t.entries={};t.normalized=normalized;t.released=false
+      t.fixedBatch=feed and feed.plan()or nil
       if unfinished then
        assert(i==saved.leader and type(saved.members)=='table'and type(saved.entries)=='table','旧生产组记录不可恢复')
        t.members=saved.members;t.entries=saved.entries;t.normalized=saved.normalized
@@ -201,6 +232,7 @@ return function(cfg,C,Bridge,monitor)
      end
     end
     if unfinished then break end
+   end
    end
   end end
  end

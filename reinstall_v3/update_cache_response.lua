@@ -1,5 +1,5 @@
 -- BEC_V3_CACHE_RESPONSE_UPDATE_1
-local SELF_SIGNATURE='82077:4063839258'
+local SELF_SIGNATURE='82525:1368395846'
 print('BEC V3 cache response update; Q to exit the old UI first')
 local function sig(s)local a,b=1,0;for i=1,#s do a=(a+s:byte(i))%65521;b=(b+a)%65521 end;return string.format('%d:%.0f',#s,b*65536+a)end
 local rows={{name='lib/cache.lua',source=[=[-- V1 cache worker, scheduled under the same V2 group and shared-fluid leases.
@@ -113,6 +113,7 @@ return function(C,B,cfg,storage)
   local g=cfg.groups[group];local leader
   for i,n in ipairs(cfg.nodes)do if n.group==group then leader=leader or i end end
   assert(leader,'缓存设备组没有节点');local n=cfg.nodes[leader]
+  if E.hasPendingFeed and E.hasPendingFeed(group)then log('原料缓存盘已到料，交回生产调度。');return true end
   -- State reads and workAllowed writes are separate server callbacks. An idle
   -- node may already have admitted an order before the cache closed admission.
   -- Yield the leases BEFORE loading the cache runtime or creating its journal.
@@ -139,6 +140,7 @@ return function(C,B,cfg,storage)
   end
   native.invoke=function(a,m,...)
    local args={...}
+   if E.hasPendingFeed and E.hasPendingFeed(group)then ctx.stop=true end
    if m=='transferFluid'or m=='setFluidInterfaceConfiguration'or m=='setWorkAllowed'or m=='setOutput'then guard()end
    if a==n.address and (m=='getState'or m=='getRequiredCondensate')then
     local state='idle';local req={}
@@ -234,7 +236,7 @@ return function(C,B,cfg,storage)
   nextScan=clock.uptime()+5
   scan();if #names==0 then K.message='尚无已登记配方，等待样板处理登记需求';return end
   for offset=0,#cfg.groups-1 do
-   local group=(nextGroup+offset-1)%#cfg.groups+1;local g=cfg.groups[group];local safe=not E.groupOwner[group];local members=0
+   local group=(nextGroup+offset-1)%#cfg.groups+1;local g=cfg.groups[group];local safe=not E.groupOwner[group]and not(E.hasPendingFeed and E.hasPendingFeed(group));local members=0
    local saved=C.read(C.path('state/group-'..group..'/cohort.dat'));if saved and saved.stage~='stopped'then safe=false end
    for i,n in ipairs(cfg.nodes)do if n.group==group then members=members+1
     local t=E.tasks[i];if t.disabled or t.fault or c.invoke(n.address,'getState')~='idle'then safe=false end
@@ -458,7 +460,9 @@ return function(C,B,W,options)
     H.started=true
    end
    local seen={};for i,n in ipairs(cfg.nodes)do if not seen[n.group]then E.resumeNode(i);seen[n.group]=true end end
-   H.running=true;H.notice='自动化运行中；节点按批次关闭接单，整组完成后再接下一单。';return H.notice
+   H.running=true;H.notice='自动化运行中；节点按批次关闭接单，整组完成后再接下一单。'
+   for _,g in ipairs(cfg.groups)do if g.cellFeed and g.cellFeed.enabled then H.notice='原料盘批次模式运行中：攒料10秒，搬盘后计数，自动分配最多16台节点。'end end
+   return H.notice
   elseif name=='pause'then
    H.running=false;if P and P.co then P.stop=true end;if K then K.requestStop()end;if E then E.pauseAll()end;H.notice='已请求暂停；工作器收尾，未确认记录保留。';return H.notice
   elseif name=='refresh'then return '页面在线'
