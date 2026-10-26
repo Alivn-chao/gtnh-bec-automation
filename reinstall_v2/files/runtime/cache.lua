@@ -43,6 +43,7 @@ if fs.exists(JOURNAL) then local f = assert(io.open(JOURNAL, "r")) local old = f
 writeVerified(JOURNAL .. ".previous", old) end writeVerified(JOURNAL, ser.serialize(record, false))
 end local function pause(value) call(RS, "setOutput", sides.top, value)
 assert(call(RS, "getOutput", sides.top) == value, "红石输出回读不符") end local function generator(enabled)
+if not enabled and call(GEN,"isWorkAllowed")==false then return end -- no-op stop needs no write/group guard
 call(GEN, "setWorkAllowed", enabled) assert(call(GEN, "isWorkAllowed") == enabled, "纠缠装置启停回读不符") end
 local function gateFilters(required) assert(type(required)=="table","门过滤需求不可读") local result={}
 for name,n in pairs(required) do assert(mapping[name] and integer(n)>0,"门过滤需求无效: "..tostring(name)) result[#result+1]=name

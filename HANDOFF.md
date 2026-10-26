@@ -1,3 +1,43 @@
+# 2026-10-26 缓存让位与配方识别前检查优化
+
+用户要求缩短缓存/进料检测，在选项中明确保留10秒攒料，只优化检测。MCP开始时
+原程序running/idle，源盘为空。原lib/cell_feed、engine、cache及runtime/cache逐字
+核对20eb39a。实机只读确认转运器getAllStacks存在（methods值false仍表示存在），
+Inventory.count/getAll是可调用表，getAll含0..9全部十槽空表，每侧约0.15秒。
+
+cell_feed合并逐台许可关闭后idle/RS检查，省掉两轮重复状态读取，暂停15已存在时
+免写；完整批量库存不可用/不完整则回退逐槽。盘移动前后读回及不明回执保护保留。
+接单期间不再读已移走的来源盘；确认过的配额/需求在engine新批次组建时复用，仅
+重读一个参考节点身份，运行状态/消耗证明仍继续。常规归档让位待进料，低空间清理
+不变。cache主动唤醒休眠工作器以收尾让位；已关纠缠器免重复写关闭/全组guard。
+新日志记录准备检查与搬盘匹配耗时，不新增周期落盘。
+
+9项新增测试覆盖十槽/回退、关闭接单竞态、失败回读、停止无效来源轮询、配额复用、
+唤醒cache和捕获检查点取消。250回归+20核心通过。模拟16台首次M.match前
+c.invoke调用125→59，暂停写16→0；不含固定10秒，也不是整体实机耗时。
+
+暂停更新恰逢旧版在C.write('capturing')心跳收到了pause：移盘前enabled拒绝，
+因此只留下无pending/openNode/recipe且members/limits/quota均空的capturing记录。
+核实全部16台idle/关闭接单/RS15、gens停、cohort/cache stopped、缓存源盘仍288件，
+生产侧和其他槽全空、接线一致后，保存原记录与证明至
+/home/bec_v2/diagnostics/feed-before-move-review-20261026.dat；原记录改stopped，
+.previous保留原capturing。没有移动/重喂/接单。canonical enabled在这个尚无硬件
+意图的已知检查点正常取消并保存stopped；其他pending/未知回执仍禁止自动重放。
+随后正常Q退出。不是通过删日志绕过未确认动作。
+
+MCP版本条件/备份更新四模块，逐字回读SHA256：
+- lib/cell_feed.lua a047566bd2a471b6a0b3cd4fdb53277a02bb92daebfd1687dcac14954f2327ee
+- lib/engine.lua 6a28fd9e10985b019c294e934c7d5373e46b06c9db5448b0aa21aac99b7c7332
+- lib/cache.lua d00ff7309b1f9073cee8d164dfe4068bb1bdb48c2286f2dda60653a42f136414
+- runtime/cache.lua a347d44c1d2ee5e8f8e45e28c46997888f217af9caa52c94d4bb2c0d1b11becb
+保持config、生产controller、实体nanites_cell不变；安装前根盘余816686字节。
+用原单实例/home/bec_mcp_start_singleton_web.lua恢复原running状态。真实288件
+成功匹配tectech_gt_godforgecasing_3_12.dat的3份，每份输出12个Transcendentally
+Amplified Magnetic Confinement Casing；节点1..3各接1份。真实日志准备检查3.00秒，
+搬盘与匹配0.65秒，collectSeconds仍10；cohort已交给标准controller，非模拟。
+此时完整新配方产出尚未作为本轮验收结论。原现场/回读/证明在任务
+outputs/mcp-20261026-feed，不能整目录上传。详见fixes/feed_detection/README.md。
+
 # 2026-10-26 缓存需求索引与空转优化
 
 用户要求检测过的样板缓存需求保存在库、不要反复检查耗时。MCP先只读测量：

@@ -74,13 +74,49 @@ function M.new(cfg,group,C,E,resumeAdmission)
  end
  local ids=members()
  local function enabled()
-  for _,i in ipairs(ids)do assert(not E.tasks[i].disabled and not E.tasks[i].fault,'原料批次已暂停，保留记录')end
+  for _,i in ipairs(ids)do if E.tasks[i].disabled or E.tasks[i].fault then
+   -- No hardware intent exists yet at this checkpoint. A pause received by
+   -- C.write's heartbeat must not leave a phantom unfinished batch.
+   if record and record.stage=='capturing'and not record.pending then save('stopped');record=nil;F.since=nil end
+   error('原料批次已暂停，保留记录')
+  end end
  end
- local function closeAll()
-  for _,i in ipairs(ids)do
-   local n=cfg.nodes[i];c.invoke(n.redstone,'setOutput',n.pauseSide,15)
-   assert(c.invoke(n.redstone,'getOutput',n.pauseSide)==15,'暂停输出回读失败');E.nodeWork(i,false)
+ local function pause(n)
+  if c.invoke(n.redstone,'getOutput',n.pauseSide)==15 then return end
+  c.invoke(n.redstone,'setOutput',n.pauseSide,15)
+  assert(c.invoke(n.redstone,'getOutput',n.pauseSide)==15,'暂停输出回读失败')
+ end
+ local function closeAll()for _,i in ipairs(ids)do pause(cfg.nodes[i]);E.nodeWork(i,false)end end
+ local function captureReady()
+  for _,i in ipairs(ids)do local n=cfg.nodes[i]
+   local allowed=c.invoke(n.address,'isWorkAllowed');assert(type(allowed)=='boolean','接单许可不可读')
+   if allowed then
+    if c.invoke(n.address,'getState')~='idle'then return false end
+    E.nodeWork(i,false)
+   end
+   -- Read state AFTER closing admission. Idle cannot admit another recipe
+   -- until this controller explicitly reopens it later in the transaction.
+   if c.invoke(n.address,'getState')~='idle'then return false end
+   pause(n)
   end
+  return true
+ end
+ local bulkSupported
+ local function inventory(side)
+  if bulkSupported==nil then local ok,methods=pcall(c.methods,settings.transposer);bulkSupported=ok and type(methods)=='table'and methods.getAllStacks~=nil end
+  if bulkSupported then
+   local ok,rows=pcall(function()
+    local view=call('getAllStacks',side);assert(view.count()==10)
+    local all=view.getAll();assert(type(all)=='table');local out={}
+    -- OC Inventory.getAll() is zero-indexed, including empty slot tables.
+    for slot=1,10 do local v=all[slot-1];assert(type(v)=='table')
+     if v.name~=nil then assert(type(v.name)=='string'and type(v.size)=='number'and v.size>0);out[slot]=v end
+    end
+    return out
+   end)
+   if ok then return rows end;bulkSupported=false
+  end
+  local rows={};for slot=1,10 do rows[slot]=stack(side,slot)end;return rows
  end
  local function idleClosed()
   for _,i in ipairs(ids)do local n=cfg.nodes[i]
@@ -204,11 +240,12 @@ function M.new(cfg,group,C,E,resumeAdmission)
   record=old
  end
  function F.observe()
+  if record and not F.ready then return end -- the source disk is absent during admission
   if clock.uptime()<F.nextPoll then return end;F.nextPoll=clock.uptime()+1
   local v=stack(settings.sourceSide,settings.sourceSlot)
   if v and whole(v.storedItemCount)and v.storedItemCount>0 then F.since=F.since or clock.uptime()else F.since=nil end
  end
- function F.pending()F.observe();return record~=nil or F.since~=nil end
+ function F.pending()if record then return true end;F.observe();return F.since~=nil end
  function F.step()
   enabled();if F.ready then return true end
   assert(not record or not record.pending,'原料盘有未确认操作，禁止自动重放')
@@ -217,16 +254,20 @@ function M.new(cfg,group,C,E,resumeAdmission)
    if not F.since or clock.uptime()-F.since<(settings.collectSeconds or 10)then
     F.message=F.since and '同配方攒料10秒' or '等待缓存盘进料';return false
    end
-   for _,i in ipairs(ids)do if c.invoke(cfg.nodes[i].address,'getState')~='idle'then F.message='等待全部节点空闲';return false end end
-   drives();closeAll();idleClosed()
-   for _,side in ipairs({settings.sourceSide,settings.productionSide})do for slot=1,10 do
-    if side==settings.productionSide or slot~=settings.sourceSlot then assert(not stack(side,slot),'原料驱动器存在其他盘，禁止混批')end
-   end end
-   local v=assert(stack(settings.sourceSide,settings.sourceSlot),'原料盘不见了')
+   local checkedAt=clock.uptime()
+   if not captureReady()then F.message='等待全部节点空闲';return false end
+   drives();local capturedSlots={}
+   for _,side in ipairs({settings.sourceSide,settings.productionSide})do
+    local rows=inventory(side);capturedSlots[side]=rows
+    for slot=1,10 do if side==settings.productionSide or slot~=settings.sourceSlot then assert(not rows[slot],'原料驱动器存在其他盘，禁止混批')end end
+   end
+   local v=assert(capturedSlots[settings.sourceSide][settings.sourceSlot],'原料盘不见了')
+   local checkedSeconds=clock.uptime()-checkedAt;local captureAt=clock.uptime()
    record={version=1,kind='cell-feed',binding={settings.transposer,settings.sourceSide,settings.productionSide,settings.sourceSlot,settings.productionSlot},cell=v.name,limits={},quota={},members={}}
    save('capturing')
    local captured=move(settings.sourceSide,settings.productionSide,settings.sourceSlot,settings.productionSlot,'moving-to-production')
    local items=M.describe(captured);local recipe,count=M.match(items,recipes)
+   E.log(ids[1],string.format('进料识别：准备检查 %.2f秒 / 搬盘与匹配 %.2f秒；攒料时间保持%d秒',checkedSeconds,clock.uptime()-captureAt,settings.collectSeconds or 10))
    record.items=items;record.recipe=recipe.file;record.count=count;record.condensates=recipe.condensates;record.outputs=recipe.outputs
    local limits={}
    for _,i in ipairs(ids)do local n=cfg.nodes[i];local lo=c.invoke(n.address,'getMinParallel');local hi=c.invoke(n.address,'getMaxParallel')

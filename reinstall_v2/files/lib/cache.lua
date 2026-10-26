@@ -216,10 +216,11 @@ return function(C,B,cfg,storage)
   replace('"/home/bec_cache.journal"',string.format('%q',journal(group)));replace('"/home/bec_cache.config"',string.format('%q',path))
   guard();return assert(load(text,C.path('runtime/cache.lua'),'t',env))('background-stock',settings.target)
  end
- local function stopGenerators(group)for _,a in ipairs(cfg.groups[group].generators)do pcall(c.invoke,a,'setWorkAllowed',false)end end
+ local function stopGenerators(group)for _,a in ipairs(cfg.groups[group].generators)do pcall(function()if c.invoke(a,'isWorkAllowed')~=false then c.invoke(a,'setWorkAllowed',false)end end)end end
  function K.step(E,running)
   if active then
    if not running or not settings.enabled then active.stop=true end
+   if E.hasPendingFeed and E.hasPendingFeed(active.group)then active.stop=true;active.deadline=0 end
    if not active.stop and clock.uptime()<(active.deadline or 0)then return end
    local ok,result,reason=coroutine.resume(active.co)
    if ok and coroutine.status(active.co)~='dead'then active.deadline=result or clock.uptime();return end
@@ -264,7 +265,7 @@ return function(C,B,cfg,storage)
     -- permission prevents a new recipe from racing guard() as crafting while
     -- the immediate-pause signal is still being processed. AE priority checks
     -- remain active; admission is reopened by E only after clean lease release.
-    for i,n in ipairs(cfg.nodes)do if n.group==group then c.invoke(n.redstone,'setOutput',n.pauseSide,15);E.nodeWork(i,false)end end
+    for i,n in ipairs(cfg.nodes)do if n.group==group then if c.invoke(n.redstone,'getOutput',n.pauseSide)~=15 then c.invoke(n.redstone,'setOutput',n.pauseSide,15);assert(c.invoke(n.redstone,'getOutput',n.pauseSide)==15,'缓存暂停回读失败')end;E.nodeWork(i,false)end end
     active={group=group,token='cache-'..group,formal=B.read(C.path('config.dat')),pruned=true}
     E.groupOwner[group]=active.token;E.fluidOwner=active.token
     active.co=coroutine.create(function()return worker(group,E,active)end)

@@ -177,7 +177,7 @@ return function(cfg,C,Bridge,monitor,resumeCellFeed)
   end
   for i,t in ipairs(E.tasks)do if t.co and (t.cancel or t.waitKind=='lock'and(not E.fluidOwner or E.fluidOwner==i)or t.waitKind~='lock'and clock.uptime()>=(t.deadline or 0))then advance(i)end end
   if storage and pruneWanted and E.disk and E.disk.known and not E.fluidOwner and not next(E.groupOwner)then
-   local busy=false;for _,feed in pairs(E.cellFeeds)do if feed.plan()then busy=true;break end end
+   local busy=false;for _,feed in pairs(E.cellFeeds)do if feed.pending()then busy=true;break end end
    if not busy then storage.prune(cfg);pruneWanted=false;diskStatus()end
   end
   for group in ipairs(cfg.groups)do if not E.groupOwner[group]then
@@ -225,6 +225,17 @@ return function(cfg,C,Bridge,monitor,resumeCellFeed)
        assert(i==saved.leader and type(saved.members)=='table'and type(saved.entries)=='table','旧生产组记录不可恢复')
        t.members=saved.members;t.entries=saved.entries;t.normalized=saved.normalized
        for _,j in ipairs(t.members)do assert(cfg.nodes[j]and cfg.nodes[j].group==group,'配置改变了旧生产组，禁止恢复')end
+      elseif feed then
+       -- cell_feed has just checked every accepted quota/recipe and closed
+       -- admission. Reuse that frozen identity, rather than scanning it twice.
+       local plan=assert(feed.plan());local per={}
+       for _,fluid in ipairs(plan.condensates)do per[fluid.name]=(per[fluid.name]or 0)+fluid.amount end
+       assert(same(normalized,per),'代表节点与已确认原料批次不符')
+       for _,j in ipairs(plan.members)do
+        assert(cfg.nodes[j].group==group and not E.tasks[j].disabled and not E.tasks[j].fault,'原料批次节点已暂停')
+        local q=assert(plan.quota[j]);local required={};for name,amount in pairs(per)do required[name]=amount*q end
+        t.members[#t.members+1]=j;t.entries[j]={parallel=q,tier=entry.tier,required=required,consumed={}}
+       end
       else
        for j,v in ipairs(cfg.nodes)do if v.group==group and not E.tasks[j].disabled then
         local row,norm=pending(j)
