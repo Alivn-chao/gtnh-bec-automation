@@ -1,5 +1,5 @@
 -- BEC_V3_CACHE_RESPONSE_UPDATE_1
-local SELF_SIGNATURE='83984:4196608892'
+local SELF_SIGNATURE='85561:3119219193'
 print('BEC V3 cache response update; Q to exit the old UI first')
 local function sig(s)local a,b=1,0;for i=1,#s do a=(a+s:byte(i))%65521;b=(b+a)%65521 end;return string.format('%d:%.0f',#s,b*65536+a)end
 local rows={{name='lib/cache.lua',source=[=[-- V1 cache worker, scheduled under the same V2 group and shared-fluid leases.
@@ -194,6 +194,15 @@ return function(C,B,cfg,storage)
    if text~=memo.persisted then C.write(discoveryPath,saved);memo.persisted=text end
   end
   env.BEC_V2_CACHE_GUARD=guard
+  -- Waiting polls share the group/binding/disk read for at most one second.
+  -- Every physical write still runs native.invoke's fresh guard above.
+  local nextPollGuard=0
+  env.BEC_V3_CACHE_POLL=function()
+   assert(E.fluidOwner==ctx.token and E.groupOwner[group]==ctx.token,'缓存资源锁变化')
+   if clock.uptime()>=nextPollGuard then guard();nextPollGuard=clock.uptime()+1 end
+  end
+  env.BEC_V3_CACHE_REQUEST_GUARD=guard
+  if fs.exists(C.path('lib/cache_pipeline.lua'))then env.BEC_V3_CACHE_PIPELINE=assert(loadfile(C.path('lib/cache_pipeline.lua')))()end
   env.BEC_V2_CACHE_PRUNE=function()if not ctx.pruned then prune(group);ctx.pruned=true end end
   env.BEC_V2_CACHE_YIELD=function()
    if ctx.stop then return true end
@@ -822,8 +831,9 @@ local f=call(route.address,"getFluidInTank",route.from,1) if type(f)=="table" an
 and call(route.address,"getTankCapacity",route.from,1)==2147483647,"高速缓存口绑定已变化") assert(call(route.address,"getTankCount",route.to)==6,"高速接收接口已变化") for i=1,6 do
 local tank=call(route.address,"getFluidInTank",route.to,i) if type(tank)=="table" and type(tank[1])=="table" then tank=tank[i] or tank[1] end assert(type(tank)=="table" and integer(tank.amount or 0)==0,"高速接收接口有未处理缓存")
 end end local function unchanged()
+if BEC_V3_CACHE_POLL then BEC_V3_CACHE_POLL();return field()end
 local state=call(NODE,"getState") local blocked={idle=true,["paused-immediate"]=true,["assembler-offline"]=true,unpowered=true,["nanite-tier-too-low"]=true} assert(state=="idle" or (background and blocked[state]),"节点状态变化，停止预缓存并保留已有库存")
-assert(call(RS,"getOutput",sides.top)==15,"暂停信号变化") field() end
+assert(call(RS,"getOutput",sides.top)==15,"暂停信号变化") return field() end
 -- BEC_V1_CACHE_FAST_V2
 local productionOutputs,priorityAt,priorityQueued={},-math.huge,false
 local unknownReported=false
@@ -882,6 +892,14 @@ assert(existing<=amount and existing%batch==0,"子网原液超额或非整批: "
 end for raw in pairs(previous) do local allowed=false
 for _,item in ipairs(raws) do if item.raw==raw then allowed=true end end assert(allowed,"子网有无关原液: "..raw) end
 for name,amount in pairs(stock) do assert(amount==0 or mapping[name],"约束场有未知凝聚物") end table.sort(raws,function(a,b) return a.raw<b.raw end) record.plan=raws;record.expected=expected;record.secured=previous;save("stream-planned")
+if BEC_V3_CACHE_PIPELINE then
+ return BEC_V3_CACHE_PIPELINE({items=raws,record=record,previous=previous,expected=expected,ports=ports,
+  main=MAIN,sub=SUB,call=call,network=network,same=same,save=save,log=print,now=computer.uptime,
+  emptyConfig=emptyConfig,tanks=tanks,verifyBulk=verifyBulk,waitUntil=waitUntil,unchanged=unchanged,tick=tick,
+  stopping=function()return stopping end,productionWaiting=productionWaiting,handoff=handoff,
+  requestGuard=BEC_V3_CACHE_REQUEST_GUARD,
+  poll=function()assert(same(unchanged(),stock),"备料时约束场库存变化");assert(same(network(SUB),previous),"备料时子网库存变化")end})
+end
 for _,item in ipairs(raws) do if productionWaiting() then return handoff() end local raw,need,batch=item.raw,item.amount,item.batch local route=ports[raw]
 local chunk=math.floor(2147483647/batch)*batch local function bufferedInlet() return 0 end if (previous[raw] or 0)<need then
 unchanged();emptyConfig();tanks(4,nil) record.configOwned=false;save("stream-configuring")
@@ -998,7 +1016,10 @@ local old if previous then old=ser.unserialize(previous:read("*a"));previous:clo
 assert(old.stage=="stopped" and old.pending==nil and old.configOwned==false,"后台缓存有未确认操作，保留日志核对") totals=old.target else
 if productionWaiting() then return {} end local stock=field();local selected,lowest for name,need in pairs(totals) do local available=stock[name] or 0
 if available<need and (not lowest or available<lowest) then selected=name;lowest=available end end if not selected then return {} end
-selectedBackground=selected;totals={[selected]=totals[selected]} end end
+selectedBackground=selected
+if BEC_V3_CACHE_PIPELINE then
+ for name,need in pairs(totals)do if(stock[name]or 0)>=need then totals[name]=nil end end
+else totals={[selected]=totals[selected]}end end end
 local live,stock={},field();local visibleRoutes=bulkPorts();local waiting
 local unknown=false;for kind in pairs(totals)do if not(discovery and discovery.rawNames[kind])then unknown=true end end
 if unknown then live=network(MAIN);for raw,n in pairs(network(SUB))do live[raw]=math.max(live[raw]or 0,n)end end
@@ -1017,7 +1038,10 @@ if productionWaiting() then return totals end local routes=bulkPorts(totals);loc
 for kind,need in pairs(totals) do
  if (stored[kind] or 0)<need and not routes[mapping[kind]] then waiting="等待高速口流体可见: "..kind.." / "..mapping[kind].."；空口暂不能识别绑定，稍后重扫" end
 end
-if selectedBackground then print("空闲高速补库：直接补本种完整缺口到 "..totals[selectedBackground].." mB；有配方优先让位。") end if fixedStock then
+if selectedBackground then
+ if BEC_V3_CACHE_PIPELINE then local n=0;for _ in pairs(totals)do n=n+1 end;print("空闲并行补库："..n.." 种原液同时补缺口；有配方优先让位。")
+ else print("空闲高速补库：直接补本种完整缺口到 "..totals[selectedBackground].." mB；有配方优先让位。")end
+end if fixedStock then
 print("登记配方 "..count.."；默认目标 "..fixedStock.." mB，单项设置优先，0停补；只补差额。") else print("登记配方 "..count.."；每配方 "..copies.." 份，共用流体按最大用量缓存。") end return totals,waiting
 end local function cacheMain() assert(mode=="preview" or mode=="run","用法: preview / run [每配方份数，默认1]")
 RS=resolve("266f65b5","redstone");GEN=resolve("c1ae3f7c","gt_machine") assert(call(GEN,"getName")=="multi.bec.generator","纠缠装置名称不符") local target,waiting=cacheTarget(cacheCopies)

@@ -1,3 +1,38 @@
+# 2026-10-27 缓存并行下单与等待检查合并
+
+用户要求缓存尝试同时下单、提速并精简重复检查。先同步GitHub772bb0f，实机
+runtime/cache.lua与lib/cache.lua分别匹配a347d44c/d00ff730，原程序running、16台
+idle/关闭接单，旧缓存正在逐种补库，没有用旧副本覆盖后续进料/阶段/蜂群更新。
+
+新增lib/cache_pipeline.lua，runtime后台不再只挑一种最低库存，而选择所有登记
+未达标类型。按空闲AE CPU发独立申请，计算计划中的任务预留CPU名额；一次读取
+CPU容量供整波使用，其他类型到货可独立搬入。纯等待整组/配置/磁盘检查最多每秒
+一次，网络库存和各请求共享轮询；每次真实转运仍新guard、意图、回执、子网增量。
+新一波请求有guard；AE活句柄只在内存，不写record.plan。单笔请求/转运受int32
+限制，未知回复/取消不重放；明确未提交失败允许人工供料，其余类型继续。生产
+原料到达后不提交完整的新任务，等待已申请确认、补齐零散转换单位后交回锁。
+
+260回归+20核心通过，新增10项：三种同时提交/异步收料，1/2 CPU规划预留，
+拒绝互不阻塞，未知/取消保留，进料优先，申请前暂停变化、缺模块回退及16台对照。
+相同3/5/8秒AE模型，旧后台跨度约32秒→8秒；节点/红石读取约1万→1616。仅模拟。
+旧六文件响应更新器没有新增pipeline模块，不是完整并行功能安装器；缺模块走串行。
+
+MCP正常pause并等旧hypogen缓存确认收尾，全部生产/feed/cohort/cache停止后仅
+结束网页线程，机箱保持运行。安装前根盘655865B；CAS/备份写入三模块并逐字回读：
+cache_pipeline 8f49788785dfe447d9abfd6504e24828ba8c55c944cc9b32a678df6565d5e54c；
+runtime/cache 31f6f21bff23941cb472603e132f46098a3b0cfb6856886176edb16399534b9f；
+lib/cache a3c7a4fead5b001ff4f3887dfab164097e6d4ec158293e4b280bb741744e0f8e。
+两份旧程序分别备份runtime/.ochd-mcp/e152159c-d115-49ee-9b7c-400cc2193f62.bak、
+lib/.ochd-mcp/7c097979-8802-4d1e-baf3-1d4023cdbd56.bak。config原字节不改，缓存
+目标/接线/生产模块/实体蜂群模块保持。原Lua编译、16台idle/RS15/关闭接单和旧
+缓存完整确认通过；证明diagnostics/cache-parallel-installed-20261027.dat，余589893B。
+用唯一标准web源码临时wrapper重开，按原running恢复，owner补engine供只读诊断。
+实机running/无故障、cache busy且未blocked；同一轮目标为彩色玻璃1G/无尽100M，
+分别从两口完整搬入30067200/4022784mB，两个回执确认后一起转换。主网这两种
+有现货，所以真实requests为空；未人为耗掉库存制造测试单，AE并发本次只有模拟
+验证，不宣称已实机多笔申请。其余生产/feed/cohort保持stopped，22个CPU空闲。
+原始文件/脚本/测试/回执在outputs/cache-parallel-20261027，不整目录上传。
+
 # 2026-10-26 服务器重启后原批次恢复
 
 用户说明自动化已有后续更新，先从GitHub同步b88c59f；现场representative、cell_feed、

@@ -190,6 +190,15 @@ return function(C,B,cfg,storage)
    if text~=memo.persisted then C.write(discoveryPath,saved);memo.persisted=text end
   end
   env.BEC_V2_CACHE_GUARD=guard
+  -- Waiting polls share the group/binding/disk read for at most one second.
+  -- Every physical write still runs native.invoke's fresh guard above.
+  local nextPollGuard=0
+  env.BEC_V3_CACHE_POLL=function()
+   assert(E.fluidOwner==ctx.token and E.groupOwner[group]==ctx.token,'缓存资源锁变化')
+   if clock.uptime()>=nextPollGuard then guard();nextPollGuard=clock.uptime()+1 end
+  end
+  env.BEC_V3_CACHE_REQUEST_GUARD=guard
+  if fs.exists(C.path('lib/cache_pipeline.lua'))then env.BEC_V3_CACHE_PIPELINE=assert(loadfile(C.path('lib/cache_pipeline.lua')))()end
   env.BEC_V2_CACHE_PRUNE=function()if not ctx.pruned then prune(group);ctx.pruned=true end end
   env.BEC_V2_CACHE_YIELD=function()
    if ctx.stop then return true end
