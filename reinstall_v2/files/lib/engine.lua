@@ -1,6 +1,6 @@
 local c=require('component')
 local clock=require('computer')
-return function(cfg,C,Bridge,monitor)
+return function(cfg,C,Bridge,monitor,resumeCellFeed)
  local c=C.component and C.component(c)or c
  local E={tasks={},groupOwner={},fluidOwner=nil,logs={},monitor=monitor,roundRobin={},pulse=C.pulse}
  local phases={starting='detect',waiting='detect',nanites='nanites',gate='gate',converting='convert',watching='produce',producing='produce',stopped='finish',fault='fault'}
@@ -30,7 +30,7 @@ return function(cfg,C,Bridge,monitor)
  E.cellFeeds={}
  if not monitor then
   for group,g in ipairs(cfg.groups)do if g.cellFeed and g.cellFeed.enabled then
-   E.cellFeeds[group]=assert(loadfile(C.path('lib/cell_feed.lua')))().new(cfg,group,C,E)
+   E.cellFeeds[group]=assert(loadfile(C.path('lib/cell_feed.lua')))().new(cfg,group,C,E,resumeCellFeed)
   end end
  end
  function E.hasPendingFeed(group)

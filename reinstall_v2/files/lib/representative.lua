@@ -14,9 +14,14 @@ return function(c,cfg,members,entries,task,fallback)
   for _,i in ipairs(members)do if not entries[i].finished and(not ref or entries[i].parallel>=entries[ref].parallel)then ref=i end end
   return ref
  end
- local lastReference,phase,pending,steps
+ local lastReference,phase,pending,steps,catchup,releasePending
  local identities,pausedDemand={},{}
- function M.invalidateInspection()pausedDemand={}end
+ function M.invalidateInspection()
+  pausedDemand={};releasePending=nil
+  -- A controller-wide pause/release overwrites per-node barrier outputs.
+  -- Their memoized intent must not hide a now-released leading node.
+  for _,i in ipairs(members)do entries[i].phaseHeld=nil end
+ end
  local function id(v)return tostring(v.tier)..':'..tostring(v.name)end
  local function used(i,state)
   local n,e=cfg.nodes[i],entries[i]
@@ -106,6 +111,7 @@ return function(c,cfg,members,entries,task,fallback)
   assert(type(demand.tier)=='number'and demand.tier>=1 and demand.tier%1==0,'代表节点蜂群等级无效')
   if paused then pausedDemand[ref]={tier=demand.tier,name=demand.name}end
   out.state=state;out.allIdle=false;out.allPaused=state~='crafting';out.requiredTier=demand.tier;out.requiredFamily=demand.name
+  if catchup then out.requiredTier=catchup.tier;out.requiredFamily=catchup.name end
   return out
  end
  function M.demand()
@@ -129,6 +135,14 @@ return function(c,cfg,members,entries,task,fallback)
    if progress>=step.start and progress<step['end']then return step.start end
   end
  end
+ local function trailingDemand(progress)
+  for _,step in ipairs(steps)do if progress>=step.start and progress<step['end']then
+   local v=step.nanite
+   assert(type(v)=='table'and type(v.tier)=='number'and v.tier>=1 and v.tier%1==0 and type(v.name)=='string','追赶阶段蜂群需求不可读，保持暂停')
+   return{tier=v.tier,name=v.name}
+  end end
+  error('追赶节点进度不在配方阶段内，保持暂停')
+ end
  function M.production()
   local out=M.snapshot()
   if not task.released or out.allIdle then return out end
@@ -141,12 +155,14 @@ return function(c,cfg,members,entries,task,fallback)
    pending={tier=demand.tier,name=demand.name,start=start}
   end
   if pending then
-   local ready=true
+   local ready=true;local required
    for _,i in ipairs(members)do if out.states[i]~='idle'then
     local progress=c.invoke(cfg.nodes[i].address,'getWorkProgress')
     assert(type(progress)=='number'and progress>=0,'阶段同步进度不可读')
     if progress>=pending.start then hold(i)else
      ready=false
+     local demand=trailingDemand(progress)
+     if not required or demand.tier>required.tier then required=demand end
      if entries[i].phaseHeld then
       assert(c.invoke(cfg.nodes[i].address,'isWorkAllowed')==false,'阶段追赶前接单必须关闭')
       c.invoke(cfg.nodes[i].redstone,'setOutput',cfg.nodes[i].pauseSide,0);entries[i].phaseHeld=nil
@@ -154,14 +170,19 @@ return function(c,cfg,members,entries,task,fallback)
     end
    end end
    if ready then
-    phase={tier=pending.tier,name=pending.name};pending=nil
+    phase={tier=pending.tier,name=pending.name};pending=nil;catchup=nil
     out.requiredTier=phase.tier;out.requiredFamily=phase.name
     for _,i in ipairs(members)do entries[i].phaseHeld=nil end
-    out.allPaused=true;out.state='paused-immediate'
+    out.allPaused=true;out.state='paused-immediate';releasePending=true
    else
-    out.requiredTier=phase.tier;out.requiredFamily=phase.name;out.allPaused=false;out.state='crafting'
+    -- A slow node may be several stages behind the representative. Reusing
+    -- the representative's previous tier can strand it at an earlier T4 step
+    -- while T1 is loaded. Derive its real demand from the frozen stage table.
+    catchup=assert(required)
+    out.requiredTier=catchup.tier;out.requiredFamily=catchup.name;out.allPaused=false;out.state='crafting'
    end
   end
+  out.phaseReleaseRequired=releasePending
   return out
  end
  return M

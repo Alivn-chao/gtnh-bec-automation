@@ -47,12 +47,14 @@ function M.new(cfg,group,C,E,resumeAdmission)
  local F={ready=false,message='等待缓存盘进料',nextPoll=0}
  local path=C.path('state/group-'..group..'/cell-feed.journal')
  local old=C.read(path)
- assert(not old or old.stage=='stopped'or resumeAdmission==true and old.stage=='waiting-node'and not old.pending,'原料盘有未完成批次，请保留记录核对，禁止自动重放')
+ local resumeReady=resumeAdmission=='ready'and old and old.stage=='ready'
+ assert(not old or old.stage=='stopped'or resumeReady and not old.pending or resumeAdmission==true and old.stage=='waiting-node'and not old.pending,'原料盘有未完成批次，请保留记录核对，禁止自动重放')
  local cohort=C.read(C.path('state/group-'..group..'/cohort.dat'))
- assert(not cohort or cohort.stage=='stopped','整组有旧生产记录，禁止搬入新原料盘')
+ assert(not cohort or cohort.stage=='stopped'or resumeReady and(cohort.stage=='working'or cohort.stage=='interrupted'),'整组有旧生产记录，禁止搬入新原料盘')
  for i,n in ipairs(cfg.nodes)do if n.group==group then
   local j=C.read(C.path('state/node-'..i..'/production.journal'))
-  assert(not j or j.stage=='stopped'and not j.pending and j.configOwned==false,'节点存在未完成生产记录，禁止新批次')
+  assert(not j or (j.stage=='stopped'or resumeReady and cohort and i==cohort.leader and j.stage=='watching'and not j.plan)and not j.pending and j.configOwned==false,'节点存在未完成生产记录，禁止新批次')
+  if resumeReady then for _,v in ipairs(j and j.transfers or{})do assert(v.ok==true,'旧生产搬运未确认')end end
   for _,job in ipairs(j and j.requests or {})do assert(job.state=='done','节点旧AE请求未确认')end
  end end
  local recipes={}
@@ -114,7 +116,53 @@ function M.new(cfg,group,C,E,resumeAdmission)
    record.pending=nil;save('restored')
   end
  end
- if resumeAdmission then
+ if resumeReady then
+  -- Explicit ready-checkpoint recovery only: no admission, move or recipe replay.
+  assert(cohort and cohort.version==2 and type(cohort.members)=='table'and type(cohort.entries)=='table'and type(cohort.normalized)=='table','生产组记录不可核对')
+  assert(not old.openNode and not old.pending and type(old.members)=='table'and #old.members>0 and old.cursor==#old.members+1 and type(old.quota)=='table'and type(old.limits)=='table','原料盘就绪检查点无效')
+  assert(#cohort.members==#old.members,'生产组成员数量变化')
+  local binding={settings.transposer,settings.sourceSide,settings.productionSide,settings.sourceSlot,settings.productionSlot}
+  assert(type(old.binding)=='table'and #old.binding==#binding,'原料盘接线记录无效')
+  for i,v in ipairs(binding)do assert(old.binding[i]==v,'原料盘接线已变化')end
+  local recipe;for _,r in ipairs(recipes)do if r.file==old.recipe then recipe=r end end;assert(recipe,'恢复时配方登记缺失')
+  local per={};for _,v in ipairs(recipe.condensates)do per[v.name]=(per[v.name]or 0)+v.amount end
+  local function same(a,b)assert(type(a)=='table'and type(b)=='table');for k,v in pairs(a)do assert(b[k]==v,'恢复配方或原料身份变化')end;for k in pairs(b)do assert(a[k]~=nil,'恢复配方含未知条目')end end
+  same(per,cohort.normalized)
+  for k,v in pairs(recipe.items)do assert(old.items[k]==v*old.count,'冻结原料身份变化')end
+  for k in pairs(old.items)do assert(recipe.items[k],'冻结原料含未知物品')end
+  local seen={};for pos,i in ipairs(old.members)do
+   assert(cfg.nodes[i]and cfg.nodes[i].group==group and not seen[i]and cohort.members[pos]==i,'生产组成员变化');seen[i]=true
+  end
+  assert(seen[cohort.leader],'生产组主节点不在批次内')
+  local total=0
+  for _,i in ipairs(ids)do local n=cfg.nodes[i];local q=old.quota[i];local limits=old.limits[i]
+   assert(whole(q)and limits and whole(limits.min)and limits.min>=1 and whole(limits.max)and limits.max>=limits.min,'原始配额/并行还原记录无效');total=total+q
+   assert(c.invoke(n.redstone,'getOutput',n.pauseSide)==15 and c.invoke(n.address,'isWorkAllowed')==false,'恢复前整组必须暂停并关闭接单')
+   local state=c.invoke(n.address,'getState');local p=c.invoke(n.address,'getParallelRecipesInProgress')
+   if q>0 then
+    local e=assert(cohort.entries[i]);assert(seen[i]and e.parallel==q,'生产组配额变化')
+    assert(c.invoke(n.address,'getMinParallel')==q and c.invoke(n.address,'getMaxParallel')==q,'节点配额设置变化')
+    local expected={};for k,v in pairs(per)do expected[k]=v*q end;same(expected,e.required)
+    local used=c.invoke(n.address,'getConsumedCondensate');assert(type(used)=='table','消耗记录不可读')
+    for k,v in pairs(expected)do local u=used[k]or 0;assert(whole(u)and u<=(v)and u>=(e.consumed and e.consumed[k]or 0),'节点消耗记录不符')
+     if state=='idle'then assert(u==v,'空闲节点缺少完整消耗证明')end
+    end
+    for k,v in pairs(used)do assert(v==0 or expected[k],'消耗含无关凝聚物')end
+    if state=='idle'then assert(p==0,'空闲节点并行异常')else
+     assert(not e.finished and(state=='paused-immediate'or state=='nanite-tier-too-low')and p==q,'恢复时节点状态/并行异常');same(expected,c.invoke(n.address,'getRequiredCondensate'))
+    end
+   else assert(not seen[i]and state=='idle'and p==0,'未参与节点提前接单')end
+  end
+  assert(total==old.count,'批次总份数变化')
+  drives()
+  for _,side in ipairs({settings.sourceSide,settings.productionSide})do for slot=1,10 do
+   local v=stack(side,slot)
+   if side==settings.sourceSide and slot==settings.sourceSlot then assert(v and v.name==old.cell,'返回缓存侧的原料盘变化');M.describe(v)
+   else assert(not v,'生产侧或其他槽位存在盘，拒绝恢复')end
+  end end
+  record=old;F.ready=true;F.message='已核对原就绪批次；继续已接单生产'
+ end
+ if resumeAdmission==true then
   -- Explicit repair entry, never selected by the normal engine constructor.
   -- Only confirmed pre-production admission can resume; no move is replayed.
   assert(old and old.stage=='waiting-node'and not old.pending and type(old.members)=='table'and type(old.quota)=='table'and type(old.limits)=='table','不支持恢复此原料批次')

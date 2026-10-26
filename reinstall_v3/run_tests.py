@@ -16,7 +16,7 @@ modules=['test_read_optimization','test_hive_inspection','test_stage_latency',
  'test_idle_cohort','test_two_recipe_pipeline','test_batch_stop','test_cache_management',
  'test_cache_partial','test_cache_recover','test_web_session','test_web_latency',
  'test_web_transport','test_performance','test_update','test_cache_response','test_cache_response_update','test_web_single_instance',
- 'test_pause_response','test_cache_discovery','test_cell_feed','test_fixed_batch','test_representative','test_hive_detection','test_fixed_hive_checks','test_batch_overhead','test_production_routes','test_storage']
+ 'test_pause_response','test_cache_discovery','test_cell_feed','test_fixed_batch','test_representative','test_phase_catchup','test_ready_resume','test_hive_detection','test_fixed_hive_checks','test_batch_overhead','test_production_routes','test_storage']
 result=unittest.TextTestRunner(verbosity=1).run(unittest.defaultTestLoader.loadTestsFromNames(modules))
 if not result.wasSuccessful():sys.exit(1)
 runpy.run_path(str(ROOT/'reinstall_v2/tests/test_v2.py'),run_name='__main__')

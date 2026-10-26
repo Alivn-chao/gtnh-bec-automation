@@ -1,3 +1,42 @@
+# 2026-10-26 阶段追赶死锁修复与原批次恢复
+
+现场基线 codex/bec-v3-performance 的31f1dc4，实际模块逐字核对一致。原8单
+强化时间结构方块每台并行1，节点1/2停在400001/464656，节点3..8停在733334，
+最大800000。实体转运器读到T1碳；前两台需要T4，先行者需要T2且保持RS15。
+旧representative阶段等待沿用上一需求T1，落后节点跨多个阶段而不能追上。
+
+representative从已缓存getRecipeSteps和原有各节点进度读取推导追赶需求，取落后
+节点最大等级；inspection/demand与生产判断共用该需求。整组输出改变时清除
+phaseHeld缓存，恢复先行节点暂停；阶段汇合产生持续的phaseReleaseRequired，
+controller经原暂停/蜂群/门检查再放行，即使汇合时蜂群种类未变化也不会留下全停。
+没有新增逐轮逐台需求/配方扫描。用户要求检查不要太严影响耗时，恢复核对只做一次。
+
+正常重启被cell-feed ready保护拒绝，并未搬盘/接单。追加显式恢复入口：engine
+第五参数'ready'传给cell_feed.new；仅核对原ready记录、对应cohort、已确认配额、
+实际消耗/暂停/关闭接单、原配方/接线及缓存侧已归还盘/生产侧空盘位置。构造只读，
+原finish仍恢复当初并行参数。普通构造不自动恢复，不明IO/AE回执仍拒绝重放。
+4个恢复测试含10种拒绝情况、原构造只读、保留下一批材料和同一cohort收尾；
+8个阶段测试含真实8台旧死锁复现、跨多步T4追赶、整组放行后的先行暂停、同蜂群
+汇合释放信号及控制器实际响应。232项回归+20核心模拟通过。
+
+MCP先发网页pause并等工作器收尾，再Q正常退出，16台RS15/关闭接单、纠缠器停。
+带版本条件和备份更新四个文件，逐字回读SHA256：
+- lib/representative.lua 982eef8423d8e5237f9cca5be9ff1fcd8c830c1e24c29cfbda7f9ab296bd484c
+- runtime/controller.lua 61f662f5f671f0d8cc5493f3888a01ec2ed5982f1dbe4a647251a02caa0b6c2d
+- lib/cell_feed.lua acdf045ef7ff46607fd0460d5d9d5426a36518643ecc2d6ea5a2ff9fe1b3a9bc
+- lib/engine.lua 2ced4515e5947d39e4877164d4e7fb67c3a083d0ad95b0e7197bff5bf048185e
+原实体兼容runtime/nanites_cell.lua保持1e616a7d:20425，不用仓库默认版本覆盖。
+配置、原料、消耗和IO日志未重置。备份在各文件目录.ochd-mcp中，私有证据仍在
+任务outputs/mcp-20261026-diagnosis，不能整目录git add。
+
+用/tmp/bec_resume_ready_web_20261026.lua启动唯一网页；它仅给正式web_session
+注入带'ready'参数的engine工厂，其余沿用原单实例runner/Start。实际T1→T2→T4
+→T1→T2后，原8台全部finished/consumedProven、cohort为stopped，恢复生产用时
+约95.9游戏秒。转运器仍只负责蜂群识别，原生阵列读取仅用于既有装盘后识别确认。
+自动化已自行接下一批518份Resplendent Wave Focus原料，不需要再手动重启网页。
+安装后根盘剩余约891KiB，512KiB保留线不变；最终下一批状态见后续实机采样。
+旧三文件update.lua不是原料盘模式的完整安装器。
+
 # 2026-10-26 接单参数/归档/生产路线三项优化（已部署待用户测试）
 
 用户要求先改推荐的1/3/4，改完自行测试。本轮不改接单顺序、10秒收集或韦门策略。

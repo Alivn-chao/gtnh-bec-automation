@@ -1,5 +1,5 @@
 -- BEC_V3_PERFORMANCE_UPDATE_1
-local SELF_SIGNATURE='88192:2774843245'
+local SELF_SIGNATURE='88223:1139723089'
 print('BEC V3 performance preview; Q to exit the old UI first')
 local rows={{name='runtime/controller.lua',source=[=[-- BEC_V3_LARGE_BATCH_1: long-sized totals; bounded per-call fluid requests.
 local c = require("component") local ser = require("serialization") local computer = require("computer") local fs = require("filesystem")
@@ -301,7 +301,7 @@ local sample=productionSnapshot();local v,req=sample.state,sample.required
 local stock=field();verifyGate(filters)
 local needed,family=sample.requiredTier,sample.requiredFamily
 local supplied=call(NODE,"getProvidedTier")
-if type(needed)=="number" and (needed~=lastNaniteTier or family~=lastNaniteFamily or type(supplied)~="table" or supplied.tier<needed) then
+if type(needed)=="number" and (sample.phaseReleaseRequired or needed~=lastNaniteTier or family~=lastNaniteFamily or type(supplied)~="table" or supplied.tier<needed) then
 pause(15);local completed=false;waitUntil(10,function() local s=call(NODE,"getState");completed=completedIdle(s);return s=="paused-immediate" or s=="nanite-tier-too-low"or completed,s end,nil,"换蜂前暂停/完成核对")
 if completed then print("换蜂暂停期间本批已完成，消耗核对通过；无需再换蜂。");stopping=true;break end
 switchNanites();if stopping then break end;verifyGate(filters);pause(0);releasedAt=computer.uptime();if BEC_V2_PHASE then BEC_V2_PHASE("producing")end

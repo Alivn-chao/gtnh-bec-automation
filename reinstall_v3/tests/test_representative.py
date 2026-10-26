@@ -6,7 +6,7 @@ SETUP=r'''
 configure(16)
 local c=require('component');local original=c.invoke
 task={released=false,fixedBatch={count=1000},members={},entries={},normalized={entangled_chromaticglass=288,entangled_transcendentmetal=288}}
-reads={};progress={};local steps={{start=0,['end']=100},{start=100,['end']=200}}
+reads={};progress={};local steps={{start=0,['end']=100,nanite={tier=2,name='Silver'}},{start=100,['end']=200,nanite={tier=3,name='Gold'}}}
 for i=1,16 do
  local n=nodes['node'..i];local q=i<=8 and 62 or 63
  n.parallel=q;n.required={entangled_chromaticglass=288*q,entangled_transcendentmetal=288*q};n.workAllowed=false;n.tier=2
