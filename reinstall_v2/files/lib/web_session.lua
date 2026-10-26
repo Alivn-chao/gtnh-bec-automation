@@ -84,8 +84,8 @@ return function(C,B,W,options)
  local function patternStep()
   if not(P and P.co)then return end
   local ok,err=coroutine.resume(P.co)
-  if not ok then P.co=nil;P.status='failed';P.message=tostring(err):sub(1,400);patternLog('处理失败：',P.message);H.notice=P.message;if K then K.invalidateCatalogue()end
-  elseif coroutine.status(P.co)=='dead'then P.co=nil;P.status=P.stop and 'stopped'or 'done';P.message=P.stop and '已停止；已完成槽位和需求记录保留'or '本次样板检查/处理完成';H.notice=P.message;if K then K.invalidateCatalogue()end end
+  if not ok then P.co=nil;P.status='failed';P.message=tostring(err):sub(1,400);patternLog('处理失败：',P.message);H.notice=P.message;if K and P.mode~='preview'then K.invalidateCatalogue()end
+  elseif coroutine.status(P.co)=='dead'then P.co=nil;P.status=P.stop and 'stopped'or 'done';P.message=P.stop and '已停止；已完成槽位和需求记录保留'or '本次样板检查/处理完成';H.notice=P.message;if K and P.mode~='preview'then K.invalidateCatalogue()end end
  end
  local function cleanDraft()
   assert(expected and B.read(path)==expected,'请先应用绑定；正式配置若被外部修改，请重新打开网页')

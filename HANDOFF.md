@@ -1,3 +1,33 @@
+# 2026-10-26 缓存需求索引与空转优化
+
+用户要求检测过的样板缓存需求保存在库、不要反复检查耗时。MCP先只读测量：
+55份登记配方全部converted/14种流体，全文读取1.65游戏秒；16节点状态/RS/许可
+48调用0.90秒；场库存0.05秒。实机lib/cache.lua、runtime/cache.lua、web_session
+逐字匹配b9cb993；当时用户已暂停且完成样板处理，不能擅自Start。
+
+新lib/cache_catalogue.lua保存每文件的大小/mtime、凝聚物需求、产物键；启动时
+比较版本复用已解析记录，只有新增/变化文件重读，删除项移除，手动刷新强制重建。
+索引限64KiB、仅当前+.previous；保存需额外空间并留512KiB，不够则只用内存。
+cache.lua在组已占用/有原料盘时跳过，缺料前仅读实时场库存；满库不再建worker、
+全组扫描或重复写开关。同worker仅一次归档清理。web_session只读preview不再
+invalidate，run结束仍刷新。搬运/AE/真实库存/转换协议未改，不缓存动态库存作控制。
+模拟16节点20秒满库存：组件552→4、节点384→0、开关72→0，非实机耗时。
+新增9项测试，241回归+20核心通过。
+
+确认16节点idle/关闭接单/RS15、纠缠器停、cohort/cache/feed均stopped后正常Q。
+MCP写入并回读3模块（备份在lib/.ochd-mcp），SHA256：
+- cache_catalogue.lua 9a1d0626c7c757fd3ef1ab65f975d21c2797f8d278661ed469739841b4b10e3d
+- cache.lua 7eeb5f94bda5574bd60d2235151f7499d3e381517963ea85876c07c08a912aac
+- web_session.lua e4d63836a8d245bee8f89be074f9c19d7f44a55d9a1260af419231c7a0c126b0
+实际runtime/cache.lua和实体nanites_cell.lua保持原样。
+
+实机分别创建两个独立索引读取器：首轮55份/14种、正文55读、18,512字节索引落盘、
+1.70秒；第二轮55复用/0正文读/不重复写索引、0.15秒。根盘余810,698字节（约792KiB）。
+没有为测速申请或搬液，真实补库循环提速尚待用户试。通过/tmp/bec_cache_reopen_web_20261026.lua
+重开原标准唯一网页，保持binding/暂停（没有Start）。私有MCP原文件/部署/测量在任务
+outputs/mcp-20261026-cache，不整目录上传。旧6文件响应更新器仍缺新增索引模块，
+只可作为旧响应补丁，不能宣称为本轮完整安装器。
+
 # 2026-10-26 阶段追赶死锁修复与原批次恢复
 
 现场基线 codex/bec-v3-performance 的31f1dc4，实际模块逐字核对一致。原8单

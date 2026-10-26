@@ -12,6 +12,8 @@ return function(C,B,cfg,storage)
  -- BEC_V3_PAUSE_RESPONSE_1: memory-only cancellation, safe between callbacks.
  function K.requestStop()if active then active.stop=true;active.deadline=0 end end
  local catalogueReady=false;local displayedStock={}
+ local catalogueIndex
+ if fs.exists(C.path('lib/cache_catalogue.lua'))then catalogueIndex=assert(loadfile(C.path('lib/cache_catalogue.lua')))()(C,cfg.recipeDirectory,storage)end
  local discoveryByGroup,discoveredCatalogue={},nil;local skipSavedDiscovery=false -- BEC_V3_FIXED_DISCOVERY_1
  local function integer(n,min)return type(n)=='number'and n>=min and n<=2147483647 and n%1==0 end
  local function validate(v)
@@ -52,7 +54,9 @@ return function(C,B,cfg,storage)
  local function scan(force)
   if catalogueReady and not force then return end
   if force then discoveryByGroup={};skipSavedDiscovery=true end
-  local found,totals,outputs={},{},{};local count,valid=0,true
+  local found
+  if catalogueIndex then found,discoveredCatalogue,K.catalogueStats=catalogueIndex.scan(force)else
+  local totals,outputs={},{},{};found={};local count,valid=0,true
   if fs.exists(cfg.recipeDirectory)then for name in fs.list(cfg.recipeDirectory)do if name:match('%.dat$')then
    local r=C.read(cfg.recipeDirectory..'/'..name)
    if r and r.state=='converted'then
@@ -67,6 +71,7 @@ return function(C,B,cfg,storage)
    else valid=false end
   end end end
   discoveredCatalogue=valid and count>0 and {totals=totals,outputs=outputs,count=count}or nil
+  end
   names={};for name in pairs(found)do names[#names+1]=name end;table.sort(names);assert(#names<=64,'登记缓存类型超过64种');catalogueReady=true
  end
  function K.invalidateCatalogue()
@@ -185,7 +190,7 @@ return function(C,B,cfg,storage)
    if text~=memo.persisted then C.write(discoveryPath,saved);memo.persisted=text end
   end
   env.BEC_V2_CACHE_GUARD=guard
-  env.BEC_V2_CACHE_PRUNE=function()prune(group)end
+  env.BEC_V2_CACHE_PRUNE=function()if not ctx.pruned then prune(group);ctx.pruned=true end end
   env.BEC_V2_CACHE_YIELD=function()
    if ctx.stop then return true end
    for _,t in ipairs(E.tasks)do if t.co and t.waitKind=='lock'then return true end end
@@ -232,7 +237,17 @@ return function(C,B,cfg,storage)
   nextScan=clock.uptime()+5
   scan();if #names==0 then K.message='尚无已登记配方，等待样板处理登记需求';return end
   for offset=0,#cfg.groups-1 do
-   local group=(nextGroup+offset-1)%#cfg.groups+1;local g=cfg.groups[group];local safe=not E.groupOwner[group]and not(E.hasPendingFeed and E.hasPendingFeed(group));local members=0
+   local group=(nextGroup+offset-1)%#cfg.groups+1;local g=cfg.groups[group]
+   if not E.groupOwner[group]and not(E.hasPendingFeed and E.hasPendingFeed(group))then
+   local ok,stock=pcall(c.invoke,g.storage,'getStoredCondensate');local needs=false
+   if ok and type(stock)=='table'then for _,name in ipairs(names)do
+    local amount=stock[name]or 0;local target=settings.overrides[name];if target==nil then target=settings.target end
+    if type(amount)~='number'or amount<0 or amount%1~=0 then ok=false;break end
+    if amount<target then needs=true end
+   end else ok=false end
+   if ok then displayedStock[group]=stock else K.message='缓存库存暂不可读，等待下次检查'end
+   if ok and needs then
+   local safe=true;local members=0
    local saved=C.read(C.path('state/group-'..group..'/cohort.dat'));if saved and saved.stage~='stopped'then safe=false end
    for i,n in ipairs(cfg.nodes)do if n.group==group then members=members+1
     local t=E.tasks[i];if t.disabled or t.fault or c.invoke(n.address,'getState')~='idle'then safe=false end
@@ -250,11 +265,12 @@ return function(C,B,cfg,storage)
     -- the immediate-pause signal is still being processed. AE priority checks
     -- remain active; admission is reopened by E only after clean lease release.
     for i,n in ipairs(cfg.nodes)do if n.group==group then c.invoke(n.redstone,'setOutput',n.pauseSide,15);E.nodeWork(i,false)end end
-    active={group=group,token='cache-'..group,formal=B.read(C.path('config.dat'))}
+    active={group=group,token='cache-'..group,formal=B.read(C.path('config.dat')),pruned=true}
     E.groupOwner[group]=active.token;E.fluidOwner=active.token
     active.co=coroutine.create(function()return worker(group,E,active)end)
     K.busy=true;K.group=group;nextGroup=group%#cfg.groups+1;return
    end
+   end end -- a busy group or a full stock needs no cache worker/admission scan
   end
  end
  function K.snapshot(group,fast)
