@@ -1,3 +1,28 @@
+# 2026-10-26 服务器重启后原批次恢复
+
+用户说明自动化已有后续更新，先从GitHub同步b88c59f；现场representative、cell_feed、
+engine、bridge、web_session、controller在统一换行后逐字匹配对应版本，实体蜂群模块
+保留20425字节原版本。本次不降级/覆盖源码，不关闭机箱，不重投原料。
+
+旧186份Gallifreyan Spacetime Compression Field Generator批次feed ready、cohort
+interrupted/leader11，所有条目finished/consumedProven且完整消耗。但现场6/7号仍
+各12并行、进度24250/24275、需求SixPhasedCopper T5，实际消耗已等于原需求。
+其余14台idle/关闭接单，部分已还原并行且原生consumed属于其他已结束配方，不能
+把这些当前值宣称为旧186份的新鲜消耗证明；本次沿用保存的历史完成证明。现场与
+磁盘检查点错位，具体服务器存档先后原因没有进一步证实，不自动重放任何旧动作。
+
+正常网页pause后暂停唯一runner，一次核对原配方/份数/配额、16台RS15/关闭接单、
+6/7实际身份和足量消耗、其余idle、原料盘位置、已确认IO/AE/搬液、纠缠器停和子网空。
+完整原记录和实际读数保存diagnostics/server-restart-reconcile-20261026.dat，保留
+cohort.previous；仅把6/7的finished清除，保留各自完整consumedProven，未改feed。
+随后恢复runner，通过已有网页start（原engine仍存在）重新建立原工作器，不另开网页。
+
+实机fault=false，6/7在T5→T7正常换蜂后已crafting/RS0，进度推进到45037/44995；
+其余14条历史完成证明保留，没有重投整批。日志确认子网空/需求已抵扣，不搬液或纠缠。
+左侧81648件下一批原料保留；截至该采样只证明两台恢复运行，尚未宣称186份全部收尾。
+这是一次针对已核对现场的修复，不是普通启动自动接受完成标记冲突。不要重跑脚本。
+私有原程序/记录/脚本/回执在outputs/restart-20261026，不整目录上传。
+
 # 2026-10-26 缓存让位与配方识别前检查优化
 
 用户要求缩短缓存/进料检测，在选项中明确保留10秒攒料，只优化检测。MCP开始时
