@@ -5,6 +5,9 @@ local MAIN = "3afdc4cf-04e3-4ae9-8be6-e753c23a249d" local SUB = "86311657-33d1-4
 local NODE = "b04787f9-5423-4b03-8549-c786d4ef38d0" local GATE_ADDRESS = "cf2a0c4a-ab8d-4958-b1df-253094d6690c" local RS, GEN, GATE, armed, record local stopping=false
 local NANITES=assert(loadfile("/home/bec_nanites.lua","t",_ENV),"缺少蜂群模块")()
 local lastNaniteTier,lastNaniteFamily
+local Prep=BEC_V3_PREPARATION;local preparing=false;local prepGateReady=false;local prepConverting=false
+local balanceInventory,maybeConvert
+local function preparationPaused(s)return s=='paused-immediate'or preparing and s=='nanite-tier-too-low'end
 local mapping = { entangled_infinity = "molten.infinity", entangled_chromaticglass = "molten.chromaticglass", entangled_transcendentmetal = "molten.transcendentmetal",
 entangled_dimshiftedsuperfluid = "dimensionallyshiftedsuperfluid", entangled_neutronium="molten.neutronium",entangled_cosmicneutronium="molten.cosmicneutronium", entangled_bedrockium="molten.bedrockium",entangled_celestialtungsten="molten.celestialtungsten", entangled_hypogen="molten.hypogen",entangled_phononmedium="phononmedium",
 entangled_quarkgluonplasma="quarkgluonplasma",entangled_spacetime="molten.spacetime", entangled_time="molten.temporalfluid",entangled_space="molten.spatialfluid", entangled_cosmicsolder="boundlesscosmicsolder", entangled_mhdcsm="molten.magnetohydrodynamicallyconstrainedstarmatter",
@@ -96,10 +99,10 @@ assert(call(GATE,"isMachineActive")==true,"麦克斯韦门未运行；检查结�
 if type(BEC_V2_GATE_STATE)=="function" then return BEC_V2_GATE_STATE(full) end
 return call(NODE,"getState") end
 local function configureGate(required) if BEC_V2_PHASE then BEC_V2_PHASE("gate")end local started=computer.uptime();print("配置韦门 / 三轮回读")
-assert(call(RS,"getOutput",sides.top)==15 and gateNodeState(true)=="paused-immediate",
+assert(call(RS,"getOutput",sides.top)==15 and preparationPaused(gateNodeState(true)),
 "切换门过滤前节点必须立即暂停") local expected=gateFilters(required) assert(integer(call(GATE,"getCondensateFilterCount"))>=#expected,"麦克斯韦门过滤槽不足") local actual=call(GATE,"getCondensateFilters")
 assert(type(actual)=="table","麦克斯韦门过滤不可读") record.gateIntent={address=GATE,filters=expected};save(record.stage) if not same(actual,expected) then call(GATE,"setCondensateFilters",expected) end for i=1,3 do
-verifyGate(expected) assert(gateNodeState(false)=="paused-immediate","设置过滤时订单状态变化") if i<3 then tick(0.1) end end
+verifyGate(expected) assert(preparationPaused(gateNodeState(false)),"设置过滤时订单状态变化") if i<3 then tick(0.1) end end
 print("麦克斯韦门过滤: "..table.concat(expected,", ")..string.format(" / 确认 %.2f 秒",computer.uptime()-started)) return expected end local function tanks(side, name)
 local count, amount = integer(call(TRANS, "getTankCount", side)), 0 assert(count > 0, "接口没有流体槽") for i = 1, count do local f = call(TRANS, "getFluidInTank", side, i)
 assert(type(f) == "table", "接口缓存不可读") if type(f[1]) == "table" then f = f[i] or f[1] end local n = integer(f.amount or 0) if n > 0 then
@@ -109,7 +112,7 @@ assert(call(MAIN, "getFluidInterfaceConfiguration", slot) == nil, "供液接口�
 -- V2 bridge can read all four adjacent fields in one fresh group scan.
 -- Outside that bridge, retain the original component getter path.
 local snapshot=type(BEC_V2_NODE_SNAPSHOT)=="function" and BEC_V2_NODE_SNAPSHOT() or nil
-local state=snapshot and snapshot.state or call(NODE,"getState") local unavailable=state=="assembler-offline" or state=="unpowered" or state=="nanite-tier-too-low" assert(state=="paused-immediate" or (recovering and unavailable and call(RS,"getOutput",sides.top)==15),"订单未处于立即暂停状态")
+local state=snapshot and snapshot.state or call(NODE,"getState") local unavailable=state=="assembler-offline" or state=="unpowered" or state=="nanite-tier-too-low" assert(preparationPaused(state) or (recovering and unavailable and call(RS,"getOutput",sides.top)==15),"订单未处于立即暂停状态")
 local parallel=integer(snapshot and snapshot.parallel or call(NODE, "getParallelRecipesInProgress")) assert(parallel>=1,"暂停节点没有正在处理的配方") local required, consumed
 if snapshot then required,consumed=snapshot.required,snapshot.consumed else required,consumed=call(NODE,"getRequiredCondensate"),call(NODE,"getConsumedCondensate")end
 assert(type(required) == "table" and type(consumed) == "table", "订单需求不可读")
@@ -208,6 +211,22 @@ local function prepareStreaming(target) resolveRawNames(target) local stock,prev
 local wanted={};for name,need in pairs(target)do local batch=units[name]or 144;local amount=math.ceil(math.max(0,need-(stock[name]or 0))/batch)*batch
  if amount>(previous[mapping[name]]or 0)then wanted[name]=true end end
 local ports=bulkPorts(wanted)
+if preparing then
+ local highSpeed=true;for name in pairs(wanted)do if not ports[mapping[name]]then highSpeed=false end end
+ if highSpeed then
+  record.supplyLedger={version=1,base=stock}
+  balanceInventory=function()
+   local before=field();local sub=network(SUB);local after=field()
+   return Prep.balance(stock,previous,mapping,before,sub,after)
+  end
+  maybeConvert=function()
+   if prepGateReady and not prepConverting and not record.pending and next(network(SUB))then
+    assert(balanceInventory(),'转换前原液/凝聚物账本不符')
+    record.supplyLedger.converting=true;record.supplyLedger.startedAt=computer.uptime();save('stream-converting');generator(true);prepConverting=true
+   end
+  end
+ end
+end
 local expected,raws={},{} for name,need in pairs(target) do local raw=mapping[name] local batch=units[name] or 144
 local amount=math.ceil(math.max(0,need-(stock[name] or 0))/batch)*batch local existing=previous[raw] or 0 assert(existing<=amount and existing%batch==0,"子网原液超额或非整批: "..raw) if amount>0 then expected[raw]=amount end
 raws[#raws+1]={raw=raw,amount=amount,batch=batch} end for raw in pairs(previous) do local allowed=false
@@ -219,10 +238,11 @@ print("高速供液: "..raw.."；源 "..route.from.." -> 接收 "..route.to) els
 size=math.min(need-(previous[raw] or 0),chunk)})==true,"持续供液配置失败") end print(raw.." 整批目标 "..need.." mB；到账即搬入子网。") local job,status,craft,jobDeadline,doneAt
 local requestChunk=math.floor(2147483647/batch)*batch
 local attempts=0 local attemptLimit=math.ceil(need/requestChunk)+2 local inletOpen=route==nil local deadline=computer.uptime()+1800 while not stopping do
-unchanged();assert(same(field(),stock),"备料时约束场库存变化") assert(same(network(SUB),previous),"备料时子网库存变化") local remaining=need-(previous[raw] or 0) local buffered=route and (network(MAIN)[raw] or 0) or bufferedInlet()
+if maybeConvert then maybeConvert()end
+unchanged();if balanceInventory then waitUntil(10,balanceInventory,unchanged,'并行转换账本')else assert(same(field(),stock),"备料时约束场库存变化");assert(same(network(SUB),previous),"备料时子网库存变化")end local remaining=need-(previous[raw] or 0) local buffered=route and (network(MAIN)[raw] or 0) or bufferedInlet()
 local amount=math.floor(math.min(remaining,buffered,chunk)/batch)*batch if amount>0 then local address,from,to=TRANS,4,5 if route then verifyBulk(route,raw);address,from,to=route.address,route.from,route.to end
 record.pending={raw=raw,amount=amount,address=address,from=from,to=to};save("transfer-pending") local ok,moved=call(address,"transferFluid",from,to,amount) record.transfers[#record.transfers+1]={raw=raw,ok=ok,amount=moved,requested=amount,address=address,from=from,to=to} save("transfer-returned")
-assert(ok==true and moved==amount,"未完整确认搬运，停止且不重试") previous[raw]=(previous[raw] or 0)+amount waitUntil(10,function() return same(network(SUB),previous) end,unchanged) record.pending=nil;record.secured=previous;save("stream-transfer-confirmed")
+assert(ok==true and moved==amount,"未完整确认搬运，停止且不重试") previous[raw]=(previous[raw] or 0)+amount waitUntil(10,balanceInventory or function() return same(network(SUB),previous) end,unchanged) record.pending=nil;record.secured=previous;save("stream-transfer-confirmed");if maybeConvert then maybeConvert()end
 print(raw.." 已入子网 "..previous[raw].." / "..need.." mB") deadline=computer.uptime()+1800 end remaining=need-(previous[raw] or 0)
 if remaining==0 and inletOpen then assert(call(MAIN,"setFluidInterfaceConfiguration",0)==true,"清供液配置失败") record.configOwned=false;inletOpen=false;save("stream-inlet-cleared") waitUntil(20,function() return tanks(4,raw)==0 end,unchanged)
 end if status and job.state=="submitted" then local canceled,why=status.isCanceled() assert(canceled==false,"主网原液申请失败/取消: "..tostring(why))
@@ -240,7 +260,7 @@ job.state="submitted";jobDeadline=computer.uptime()+1800;doneAt=nil save("stream
 end end end assert(computer.uptime()<deadline,"持续收料超时，保留子网已搬入原液")
 tick(0.1) end if inletOpen then assert(call(MAIN,"setFluidInterfaceConfiguration",0)==true,"清供液配置失败")
 record.configOwned=false;save("stream-inlet-cleared") end waitUntil(20,function() return tanks(4,raw)==0 end,unchanged) if stopping then return expected end
-end end assert(same(network(SUB),expected),"整批子网原液不符") record.plan=nil;save("stream-prepared")
+end end if balanceInventory then waitUntil(10,balanceInventory,unchanged,'并行转换账本')else assert(same(network(SUB),expected),"整批子网原液不符")end record.plan=nil;save("stream-prepared")
 return expected end local function completedIdle(state)
 if state~="idle" or not BEC_V2_COHORT_IDLE then return false end
 assert(BEC_V2_COHORT_IDLE());return true
@@ -264,19 +284,59 @@ local function productionSnapshot()
  return v
 end
 local function serve() local waiting={idle=true,["assembler-offline"]=true,unpowered=true,["nanite-tier-too-low"]=true}
-local round=0 while not stopping do local nanitesChecked=false;pause(15); generator(false) local state=call(NODE,"getState")
+local round=0 while not stopping do preparing=Prep~=nil;prepGateReady=false;prepConverting=false;balanceInventory=nil;maybeConvert=nil;local nanitesChecked=false;pause(15); generator(false) local state=call(NODE,"getState")
 if stopping then break end state=call(NODE,"getState")
 if state=="idle" and BEC_V2_COHORT_IDLE then assert(BEC_V2_COHORT_IDLE());print("本批节点已完成，消耗核对通过；结束旧批次并交回设备组调度。") break end
-if state=="paused-immediate" or state=="nanite-tier-too-low" then switchNanites();nanitesChecked=true;state=call(NODE,"getState") end if waiting[state] then
+if not Prep and(state=="paused-immediate" or state=="nanite-tier-too-low")then switchNanites();nanitesChecked=true;state=call(NODE,"getState")end if waiting[state]and not(Prep and state=="nanite-tier-too-low")then
 if state~=record.lastState then print("等待订单/机器就绪: "..state.."；任意数量同配方订单均可，按 Q 停止。") record.lastState=state;save("waiting") end
 field();tick(0.1) else local completed=false;waitUntil(10,function() local v=call(NODE,"getState");completed=completedIdle(v)
-return v=="paused-immediate"or completed,v end,function(v) assert(v=="crafting" or waiting[v],"无法暂停，实际状态: "..tostring(v)) field()
-end,"备料前暂停/完成核对") if completed then print("暂停等待期间本批已完成，消耗核对通过；交回调度。");break end;if not nanitesChecked then switchNanites()end;if stopping then break end record.required,record.remaining=current() local target,count=batchTarget(record.required,record.remaining) local stable=false
+return preparationPaused(v)or completed,v end,function(v) assert(v=="crafting" or waiting[v],"无法暂停，实际状态: "..tostring(v)) field()
+end,"备料前暂停/完成核对") if completed then print("暂停等待期间本批已完成，消耗核对通过；交回调度。");break end;if not nanitesChecked and not Prep then switchNanites()end;if stopping then break end record.required,record.remaining=current() local target,count=batchTarget(record.required,record.remaining) local stable=false
 for i=1,20 do tick(0.25);unchanged() local nextTarget,nextCount=batchTarget(record.required,record.remaining) if same(target,nextTarget) then stable=true;break end
 target,count=nextTarget,nextCount end assert(stable,"主网任务清单持续变化，保持暂停") if stopping then break end
-record.batchCount=count print("本组当前配方 "..count.." 份；当前实际并行 "..checkRecipe(record.required) .."；一次准备整批所需流体。") round=round+1;record.round=round;record.transfers={};record.target=target;record.plan=nil;record.topups={}
-waitUntil(10,function() return call(GEN,"isMachineActive")==false end) emptyConfig();tanks(4,nil);tanks(5,nil) local filters=configureGate(record.required) unchanged()
-if stopping then break end local cached=stockedBatch(target)
+record.batchCount=count print("本组当前配方 "..count.." 份；当前实际并行 "..checkRecipe(record.required) .."；一次准备整批所需流体。") round=round+1;record.round=round;record.transfers={};record.target=target;record.plan=nil;record.topups={};record.supplyLedger=nil
+waitUntil(10,function()return call(GEN,"isMachineActive")==false end);emptyConfig();tanks(4,nil);tanks(5,nil)
+local filters,cached
+if Prep then
+ if BEC_V2_PHASE then BEC_V2_PHASE('nanites')end
+ BEC_V3_PREPARATION_BEGIN()
+ print('并行准备：换蜂、韦门确认、原液备料；门确认后到账即转换，全部完成再放行。')
+ record.preparation=Prep.run({
+  {name='nanites',run=function()switchNanites();nanitesChecked=true end},
+  {name='gate',run=function()filters=configureGate(record.required);prepGateReady=true;BEC_V3_PREPARATION_GATE_READY()end},
+  {name='supply',run=function()
+   cached=stockedBatch(target)
+   if cached then
+    record.expected={};record.secured={};record.plan=nil;save('stream-prepared')
+    print('凝聚物库存满足本批需求；子网为空，无需搬液和纠缠。')
+   else
+    local expected=prepareStreaming(target);if stopping then return end
+    -- Every transfer already confirmed its subnet delta or conversion ledger.
+    -- Replace the old twenty full-cohort polls with a fresh barrier check.
+    while not prepGateReady and not stopping do tick(.1)end
+    if stopping then return end
+    if balanceInventory then waitUntil(10,balanceInventory,unchanged,'转换前账本')else assert(same(network(SUB),expected),'转换前原液变化')end
+    if record.supplyLedger and not prepConverting then record.supplyLedger.startedAt=computer.uptime()end
+    save('converting');if not prepConverting then generator(true);prepConverting=true end
+    local limit=180;for name in pairs(target)do limit=limit+math.ceil((expected[mapping[name]]or 0)/(units[name]or 144))*180 end
+    waitUntil(limit,function()
+     local stock=field();for name,need in pairs(target)do if(stock[name]or 0)<need then return false end end
+     return next(network(SUB))==nil
+    end,unchanged,'并行转换')
+   end
+  end}
+ },{now=computer.uptime,stopping=function()return stopping end,
+  abort=function()stopping=true end,cleanup=BEC_V3_PREPARATION_CLEANUP})
+ if record.supplyLedger then
+  record.preparation.conversionAt=record.supplyLedger.startedAt
+  record.preparation.earlyConversion=record.supplyLedger.startedAt and record.supplyLedger.startedAt<record.preparation.started+(record.preparation.durations.nanites or 0)or false
+ end
+ BEC_V3_PREPARATION_END();preparing=false
+ if stopping then break end
+ print(string.format('并行准备完成：%.2f秒（换蜂%.2f / 门%.2f / 备料转换%.2f；重叠计时不相加）',record.preparation.elapsed,record.preparation.durations.nanites or 0,record.preparation.durations.gate or 0,record.preparation.durations.supply or 0))
+else
+filters=configureGate(record.required) unchanged()
+if stopping then break end cached=stockedBatch(target)
 if cached then
  record.expected={};record.secured={};record.plan=nil;save("stream-prepared")
  print("凝聚物库存满足本批需求；子网为空，无需搬液和纠缠。")
@@ -284,6 +344,7 @@ else
 local expected=prepareStreaming(target) if stopping then break end for i=1,20 do unchanged();assert(same(network(SUB),expected),"原液不稳定");os.sleep(0.25) end
 save("converting");generator(true) local conversionLimit=180 for name,need in pairs(target) do conversionLimit=conversionLimit+math.ceil(need/(units[name] or 144))*180 end waitUntil(conversionLimit,function()
 local stock=field() for name,need in pairs(target) do if (stock[name] or 0)<need then return false end end return true end,unchanged)
+end
 end
 unchanged();generator(false) record.plan=nil;record.lastState=nil;save("watching") if not stopping then verifyGate(filters);unchanged()
 if cached then
@@ -329,21 +390,28 @@ print("子网原液: " .. ser.serialize(network(SUB),false)) if call(NODE,"getSt
 plan(target) end print("预览结束：没有开关、搬液、配置或写日志。") return
 end local waitingStates = {idle=true, ["paused-immediate"]=true, ["assembler-offline"]=true, unpowered=true, ["nanite-tier-too-low"]=true} local initialState = call(NODE,"getState")
 assert(waitingStates[initialState], "节点状态不适合启动: " .. tostring(initialState)) emptyConfig(); tanks(4,nil); tanks(5,nil) if fs.exists(JOURNAL) then local f=assert(io.open(JOURNAL,"r"));local contents=f:read("*a");f:close()
-local old=ser.unserialize(contents) local streaming=type(old)=="table" and type(old.plan)=="table" and (old.stage=="stream-configuring" or old.stage=="stream-transfer-confirmed" or old.stage=="stream-inlet-cleared" or old.stage=="stream-planned")
+local old=ser.unserialize(contents);local liveSupply=Prep and type(old)=='table'and type(old.supplyLedger)=='table'and old.supplyLedger.version==1 and type(old.supplyLedger.base)=='table'and type(old.secured)=='table'and type(old.target)=='table'and type(old.stage)=='string'and(old.stage:match('^stream%-')or old.stage=='converting');local streaming=type(old)=="table" and type(old.plan)=="table" and (old.stage=="stream-configuring" or old.stage=="stream-transfer-confirmed" or old.stage=="stream-inlet-cleared" or old.stage=="stream-planned")
 and type(old.secured)=="table" and type(old.target)=="table" assert(type(old)=="table" and old.version==1 and old.kind=="continuous" and old.pending==nil and (old.configOwned==false or streaming),"日志无效或有未确认操作，禁止重跑") if mode=="resume" or mode=="restock" then
 local stopped=old.stage=="stopped" and old.plan==nil and type(old.transfers)=="table" local preTransfer=(old.stage=="starting" or old.stage=="waiting" or old.stage=="waiting-stock") and old.plan==nil and type(old.transfers)=="table" and next(old.transfers)==nil and (old.requests==nil or next(old.requests)==nil)
 local watching=(old.stage=="watching" or old.stage=="waiting") and old.plan==nil and type(old.transfers)=="table" and type(old.target)=="table" local crafted=old.stage=="craft-done" and old.plan==nil and type(old.transfers)=="table" and next(old.transfers)==nil
 and type(old.requests)=="table" and next(old.requests)~=nil local prepared=old.stage=="stream-prepared" and old.plan==nil and type(old.expected)=="table" and type(old.transfers)=="table" and type(old.target)=="table"
-local converting=old.stage=="converting" and old.plan==nil and type(old.expected)=="table" and type(old.transfers)=="table" and type(old.target)=="table" and type(old.required)=="table" and type(old.remaining)=="table" if stopped or watching or crafted or prepared or converting or streaming then
+local converting=old.stage=="converting" and old.plan==nil and type(old.expected)=="table" and type(old.transfers)=="table" and type(old.target)=="table" and type(old.required)=="table" and type(old.remaining)=="table" if stopped or watching or crafted or prepared or converting or streaming or liveSupply then
 for _,move in ipairs(old.transfers) do assert(move.ok==true and type(move.amount)=="number" and move.amount>0, "旧搬运未确认，禁止恢复") end
 for _,job in ipairs(old.requests or {}) do assert(job.state=="done","原液申请未完成，禁止重复申请") end assert(call(RS,"getOutput",sides.top)==15 and call(GEN,"isWorkAllowed")==false
-and call(GEN,"isMachineActive")==false,"恢复前节点须暂停且纠缠装置已停机") if streaming then local req,remaining=current(true) assert(same(req,old.required) and same(remaining,old.remaining),"供液恢复订单变化，暂停核对")
+and call(GEN,"isMachineActive")==false,"恢复前节点须暂停且纠缠装置已停机")
+if liveSupply then
+ resolveRawNames(old.target);local req,left=current(true)
+ assert(same(req,old.required)and same(left,old.remaining),'并行备料恢复时原批次变化，保留现场')
+ local stock=field();assert(Prep.balance(old.supplyLedger.base,old.secured,mapping,stock,network(SUB),stock),'并行备料恢复原液/凝聚物总账不符，不重复搬入')
+ print('并行备料恢复账本通过；按实际原液与凝聚物抵扣，已确认申请和搬运不重放。')
+end
+if streaming and not liveSupply then local req,remaining=current(true) assert(same(req,old.required) and same(remaining,old.remaining),"供液恢复订单变化，暂停核对")
 assert(same(network(SUB),old.secured),"已确认搬运与子网库存不符，禁止恢复") resolveRawNames(old.target) local expected,stock={},field() for name,need in pairs(old.target) do
 local unit=units[name] or 144 local amount=math.ceil(math.max(0,need-(stock[name] or 0))/unit)*unit local raw=mapping[name];if amount>0 then expected[raw]=amount end local held=old.secured[raw] or 0
 assert(held<=amount and held%unit==0,"供液恢复子网超额或非整批") end for raw in pairs(old.secured) do assert(expected[raw],"供液恢复子网有无关原液") end print("供液恢复核对通过；保留已搬入原液，只补当前缺口。")
 end if crafted then local req,remaining=current(true) assert(same(req,old.required) and same(remaining,old.remaining),"旧申请订单已变化，暂停核对")
-print("已完成原液申请已归档；按当前真实库存重新计算缺口。") end if prepared then current(true)
-assert(same(network(SUB),old.expected),"已备齐原液与日志不符，暂停核对") print("整批原液已在子网，恢复时抵扣，不重复搬料或申请。") end if converting then
+print("已完成原液申请已归档；按当前真实库存重新计算缺口。") end if prepared and not liveSupply then current(true)
+assert(same(network(SUB),old.expected),"已备齐原液与日志不符，暂停核对") print("整批原液已在子网，恢复时抵扣，不重复搬料或申请。") end if converting and not liveSupply then
 local req,remaining=current(true) resolveRawNames(old.target) local target=old.target if not (same(req,old.required) and same(remaining,old.remaining)) then
 local count;target,count=batchTarget(req,remaining) assert(type(old.batchCount)=="number" and count<=old.batchCount, "恢复时订单增加或旧批量缺失，暂停核对") for name,need in pairs(target) do assert(need<=integer(old.target[name]),"恢复需求超过旧整批目标") end
 print("实际并行/消耗已变化，按 AE 剩余订单扣除节点已消耗量核对库存。") end local sub,stock=network(SUB),field() for name,value in pairs(target) do
@@ -352,7 +420,7 @@ local stocked=liquid==0 and condensate>=need
 assert(liquid%unit==0 and condensate%unit==0 and (stocked or liquid+condensate==need or (mode=="restock" and liquid+condensate<need)), "转换恢复库存不符: "..raw.."；子网 "..liquid.." + 凝聚物 "..condensate.."，目标 "..need) if stocked and condensate>need then print(raw.." 原液已清空，凝聚物足量；保留多余库存 "..(condensate-need).." mB。") end if liquid+condensate<need then print(raw.." 当前缺口 "..(need-liquid-condensate).." mB；归档旧操作后重新备料。") end
 end for raw in pairs(sub) do local allowed=false;for _,known in pairs(mapping) do if known==raw then allowed=true end end assert(allowed,"转换恢复子网有无关原液")
 end for name,n in pairs(stock) do assert(n==0 or mapping[name],"转换恢复有无关凝聚物") end print("转换恢复核对通过，抵扣当前库存；已完成的旧申请和搬运记录保留归档。") end
-end assert(stopped or preTransfer or watching or crafted or prepared or converting or streaming,"该阶段存在未确认操作，不能自动恢复") archiveJournal(contents,".before-resume-") else
+end assert(stopped or preTransfer or watching or crafted or prepared or converting or streaming or liveSupply,"该阶段存在未确认操作，不能自动恢复") archiveJournal(contents,".before-resume-") else
 assert(old.stage=="stopped","已有非正常停止日志，请核对后使用 resume，禁止盲目重跑") for _,job in ipairs(old.requests or {}) do assert(job.state=="done","旧日志有未确认的主网申请，禁止重新下单") end
 archiveJournal(contents) end else assert(mode~="resume" and mode~="restock","没有可恢复的日志")
 end record={version=1,kind="continuous",stage="starting",transfers={},requests={},configOwned=false} save("starting");armed=true print("常驻模式：无需填写数量。先只提交原始屏蔽层任务，可先 5 再 10。")

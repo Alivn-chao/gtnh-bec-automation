@@ -96,8 +96,12 @@ function M.environment(cfg,index,engine)
  local native={};for k,v in pairs(c) do native[k]=v end
  local bulk={};for _,a in ipairs(g.bulkTransposers or {}) do bulk[a]=true end
  local function awaitLock() engine.acquire(index) end
- local generatorsChecked=false
+ local generatorsChecked=false;local preparation
  local function generatorsOff(force)
+  if preparation and preparation.gateReady then
+   assert(not task.cancel and engine.groupOwner[n.group]==index and engine.fluidOwner==index,'并行准备资源锁变化')
+   return -- this worker owns both confirmed conversion and paused hive IO
+  end
   if representative and generatorsChecked and not force then return end
   for _,a in ipairs(g.generators)do assert(c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false,'换蜂必须等待全部纠缠器停机')end
   generatorsChecked=true
@@ -235,6 +239,7 @@ function M.environment(cfg,index,engine)
   end
   if a==g.generators[1] then
    if m=='setWorkAllowed' then
+    if args[1]and preparation then assert(preparation.gateReady,'韦门确认前禁止并行转换')end
     generatorsChecked=false
     local intent={version=2,node=index,enabled=args[1],stage='pending'}
     C.write(C.path('state/group-'..n.group..'/generators.dat'),intent)
@@ -243,7 +248,7 @@ function M.environment(cfg,index,engine)
      assert(c.invoke(address,'isWorkAllowed')==args[1],'纠缠器启停回读不符: '..address)
     end
     intent.stage='confirmed';C.write(C.path('state/group-'..n.group..'/generators.dat'),intent)
-    if args[1] then engine.release(index) end
+    if args[1]and not preparation then engine.release(index)end
     return true
    elseif m=='isMachineActive' then
     for _,address in ipairs(g.generators) do if c.invoke(address,m)==true then return true end end;return false
@@ -254,6 +259,32 @@ function M.environment(cfg,index,engine)
   return c.invoke(a,m,table.unpack(args))
  end
  local env=setmetatable({}, {__index=_G});env._ENV=env
+ if representative then
+  local ok,loader=pcall(loadfile,C.path('lib/preparation.lua'))
+  if ok and loader then
+   env.BEC_V3_PREPARATION=loader()
+   env.BEC_V3_PREPARATION_BEGIN=function()
+    assert(not preparation and not task.cancel and engine.fluidOwner==index and engine.groupOwner[n.group]==index,'并行准备未取得本组资源锁')
+    preparation={gateReady=false}
+   end
+   env.BEC_V3_PREPARATION_GATE_READY=function()assert(preparation);preparation.gateReady=true end
+   env.BEC_V3_PREPARATION_END=function()assert(preparation);preparation=nil;engine.release(index)end
+   env.BEC_V3_PREPARATION_CLEANUP=function()
+    local errors={}
+    local function cut(a,m,...)
+     local ok,err=pcall(c.invoke,a,m,...);if not ok then errors[#errors+1]=tostring(err)end
+    end
+    for _,a in ipairs(g.generators)do cut(a,'setWorkAllowed',false)end
+    if g.nanites and g.nanites.mode=='cell-io'then
+     for _,pair in ipairs({{g.nanites.loadRedstone,g.nanites.loadOutputSide},{g.nanites.returnRedstone,g.nanites.returnOutputSide}})do
+      cut(pair[1],'setOutput',pair[2],0)
+      local ok,value=pcall(c.invoke,pair[1],'getOutput',pair[2]);if not ok or value~=0 then errors[#errors+1]='蜂群IO停止回读失败'end
+     end
+    end
+    preparation=nil;assert(#errors==0,table.concat(errors,' / '))
+   end
+  end
+ end
  env.BEC_V3_PRODUCTION_DISCOVERY=function()
   local ok,loader=pcall(loadfile,C.path('lib/fluid_discovery.lua'))
   if not ok or not loader then return{rawNames={}}end
@@ -262,7 +293,7 @@ function M.environment(cfg,index,engine)
  -- Every invocation scans all members anew. The controller may use the fields
  -- together within one decision, but resamples after yielding or changing
  -- hardware. These separate OC reads are not an atomic server-side snapshot.
- env.BEC_V2_PHASE=function(stage)if engine.phase then engine.phase(index,stage)end end
+ env.BEC_V2_PHASE=function(stage)if engine.phase and not preparation then engine.phase(index,stage)end end
  -- OC reads across a cohort can exceed the original single-node 3-second grace.
  env.BEC_V2_RELEASE_GRACE=30
  env.BEC_V2_NODE_SNAPSHOT=nodeSnapshot
