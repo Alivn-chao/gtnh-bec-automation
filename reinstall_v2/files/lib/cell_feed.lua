@@ -146,11 +146,11 @@ function M.new(cfg,group,C,E,resumeAdmission)
   assert(c.invoke(n.address,'getMinParallel')==wanted.min and c.invoke(n.address,'getMaxParallel')==wanted.max,'并行参数回读失败')
  end
  local function restore()
+  record.pending={kind='restore-parallel',nodes=record.members};save('restoring')
   for _,i in ipairs(record.members)do local v=record.limits[i];local q=record.quota[i]
-   record.pending={kind='restore-parallel',node=i};save('restoring')
    parallel(i,{min=q,max=q},v)
-   record.pending=nil;save('restored')
   end
+  record.pending=nil;save('restored')
  end
  if resumeReady then
   -- Explicit ready-checkpoint recovery only: no admission, move or recipe replay.
@@ -269,17 +269,22 @@ function M.new(cfg,group,C,E,resumeAdmission)
    local items=M.describe(captured);local recipe,count=M.match(items,recipes)
    E.log(ids[1],string.format('进料识别：准备检查 %.2f秒 / 搬盘与匹配 %.2f秒；攒料时间保持%d秒',checkedSeconds,clock.uptime()-captureAt,settings.collectSeconds or 10))
    record.items=items;record.recipe=recipe.file;record.count=count;record.condensates=recipe.condensates;record.outputs=recipe.outputs
+   local planningAt=clock.uptime()
    local limits={}
    for _,i in ipairs(ids)do local n=cfg.nodes[i];local lo=c.invoke(n.address,'getMinParallel');local hi=c.invoke(n.address,'getMaxParallel')
     assert(whole(lo)and lo>=1 and whole(hi)and hi>=lo,'节点并行参数无效')
     record.limits[i]={min=lo,max=hi};limits[#limits+1]={index=i,max=settings.maxParallelPerNode or hi}
    end
    record.quota=M.allocate(count,limits);save('planned')
+   local participating={};for _,i in ipairs(ids)do if record.quota[i]>0 then participating[#participating+1]=i end end
+   -- One durable intent covers the entire closed/paused configuration block.
+   -- Partial or unknown results retain this intent and are never replayed.
+   record.pending={kind='set-parallel',nodes=participating};save('configuring')
    for _,i in ipairs(ids)do local q=record.quota[i];if q>0 then
-    local n=cfg.nodes[i];record.pending={kind='set-parallel',node=i,quota=q};save('configuring')
     enabled();parallel(i,record.limits[i],{min=q,max=q})
-    record.pending=nil;record.members[#record.members+1]=i;save('configured')
+    record.members[#record.members+1]=i
    end end
+   record.pending=nil;record.timings={planning=clock.uptime()-planningAt,admissionStarted=clock.uptime()};save('configured')
    record.cursor=1;save('admitting')
    F.message='原料盘已冻结：'..count..'份 / '..#record.members..'台'
    E.log(ids[1],F.message)
@@ -310,6 +315,10 @@ function M.new(cfg,group,C,E,resumeAdmission)
   local disk=stack(settings.productionSide,settings.productionSlot);local _,remaining=M.describe(disk)
   assert(remaining==0,'接单后原料盘有余料，保持整组暂停')
   move(settings.productionSide,settings.sourceSide,settings.productionSlot,settings.sourceSlot,'returning-empty-cell')
+  if record.timings then
+   record.timings.admission=clock.uptime()-record.timings.admissionStarted
+   E.log(ids[1],string.format('并行分配与回读 %.2f秒 / 逐台接单核对与回盘 %.2f秒',record.timings.planning,record.timings.admission))
+  end
   save('ready');F.ready=true;F.since=nil;return true
  end
  function F.finish()

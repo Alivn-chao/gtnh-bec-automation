@@ -298,6 +298,14 @@ function M.environment(cfg,index,engine)
  env.BEC_V2_RELEASE_GRACE=30
  env.BEC_V2_NODE_SNAPSHOT=nodeSnapshot
  if representative then
+  -- The input disk already matched a unique recipe before admitting nodes.
+  if type(task.fixedBatch.recipe)=='string'and type(task.fixedBatch.condensates)=='table'and type(task.fixedBatch.outputs)=='table'then
+   env.BEC_V3_FROZEN_RECIPE=task.fixedBatch
+  end
+  env.BEC_V3_BOUND_COMPONENTS={redstone=n.redstone,generator=g.generators[1],gate=n.gate}
+  env.BEC_V3_STARTUP_STATE=function()return representative.inspection(true).state end
+ end
+ if representative then
   env.BEC_V3_FIXED_BATCH_SNAPSHOT=representative.production
  elseif task.fixedBatch then
   env.BEC_V3_FIXED_BATCH_SNAPSHOT=assert(loadfile(C.path('lib/fixed_batch.lua')))()(c,cfg,members,entries,task,function()return nodeSnapshot()end)

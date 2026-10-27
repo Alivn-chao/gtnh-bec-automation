@@ -1,5 +1,5 @@
 -- BEC_V3_PERFORMANCE_UPDATE_1
-local SELF_SIGNATURE='94765:2787954716'
+local SELF_SIGNATURE='97121:3352650445'
 print('BEC V3 performance preview; Q to exit the old UI first')
 local rows={{name='runtime/controller.lua',source=[=[-- BEC_V3_LARGE_BATCH_1: long-sized totals; bounded per-call fluid requests.
 local c = require("component") local ser = require("serialization") local computer = require("computer") local fs = require("filesystem")
@@ -8,6 +8,7 @@ local MAIN = "3afdc4cf-04e3-4ae9-8be6-e753c23a249d" local SUB = "86311657-33d1-4
 local NODE = "b04787f9-5423-4b03-8549-c786d4ef38d0" local GATE_ADDRESS = "cf2a0c4a-ab8d-4958-b1df-253094d6690c" local RS, GEN, GATE, armed, record local stopping=false
 local NANITES=assert(loadfile("/home/bec_nanites.lua","t",_ENV),"缺少蜂群模块")()
 local lastNaniteTier,lastNaniteFamily
+local startupAt=computer.uptime();local methodLists={};local fastStartup=type(BEC_V3_STARTUP_STATE)=='function'
 local Prep=BEC_V3_PREPARATION;local preparing=false;local prepGateReady=false;local prepConverting=false
 local balanceInventory,maybeConvert
 local function preparationPaused(s)return s=='paused-immediate'or preparing and s=='nanite-tier-too-low'end
@@ -15,7 +16,9 @@ local mapping = { entangled_infinity = "molten.infinity", entangled_chromaticgla
 entangled_dimshiftedsuperfluid = "dimensionallyshiftedsuperfluid", entangled_neutronium="molten.neutronium",entangled_cosmicneutronium="molten.cosmicneutronium", entangled_bedrockium="molten.bedrockium",entangled_celestialtungsten="molten.celestialtungsten", entangled_hypogen="molten.hypogen",entangled_phononmedium="phononmedium",
 entangled_quarkgluonplasma="quarkgluonplasma",entangled_spacetime="molten.spacetime", entangled_time="molten.temporalfluid",entangled_space="molten.spatialfluid", entangled_cosmicsolder="boundlesscosmicsolder", entangled_mhdcsm="molten.magnetohydrodynamicallyconstrainedstarmatter",
 entangled_magmatter="molten.magmatter",entangled_universium="molten.universium", entangled_eternity="molten.eternity" } local units={entangled_dimshiftedsuperfluid=1000,entangled_phononmedium=1000,
-entangled_quarkgluonplasma=1000,entangled_cosmicsolder=1000} local function call(a, m, ...) return c.invoke(a, m, ...) end local function method(a, m) assert(c.methods(a)[m] ~= nil, "组件缺少方法: " .. m)
+entangled_quarkgluonplasma=1000,entangled_cosmicsolder=1000} local function call(a, m, ...) return c.invoke(a, m, ...) end local function method(a, m)
+local methods=fastStartup and methodLists[a];if not methods then methods=assert(c.methods(a),'组件不在线: '..a);if fastStartup then methodLists[a]=methods end end
+assert(methods[m] ~= nil, "组件缺少方法: " .. m)
 end local function resolve(prefix, kind) local address, count = nil, 0 for a, t in c.list() do
 if a:sub(1, #prefix) == prefix and t == kind then address, count = a, count + 1 end end
 assert(count == 1, "目标组件缺失或不唯一: " .. prefix) return address end local function integer(v)
@@ -28,6 +31,7 @@ end
 -- BEC_V3_PERFORMANCE_1: one catalogue per worker/batch. A new worker (including
 -- resume) reloads disk; pattern editing is excluded while a worker is active.
 local recipeIndex
+local frozenRecipe=BEC_V3_FROZEN_RECIPE;local frozenNeeds
 local function recipeKey(needs)
  local names,parts={},{}
  for name in pairs(needs)do names[#names+1]=name end
@@ -36,6 +40,20 @@ local function recipeKey(needs)
  return table.concat(parts,";")
 end
 local function indexedRecipes(needs)
+ if frozenRecipe then
+  if not frozenNeeds then
+   frozenNeeds={}
+   assert(type(frozenRecipe.recipe)=='string'and type(frozenRecipe.condensates)=='table'and #frozenRecipe.condensates>0,'冻结配方登记无效')
+   assert(type(frozenRecipe.outputs)=='table'and #frozenRecipe.outputs==1,'冻结配方产物无效')
+   for _,v in ipairs(frozenRecipe.condensates)do
+    assert(type(v.name)=='string');local n=integer(v.amount or v.size);assert(n>0,'冻结配方流体数量无效')
+    frozenNeeds[v.name]=(frozenNeeds[v.name]or 0)+n
+   end
+   print('复用原料盘已确认配方：'..frozenRecipe.recipe..'；不重扫登记目录。')
+  end
+  assert(same(needs,frozenNeeds),'节点需求与冻结配方登记不符')
+  return {frozenRecipe.outputs[1]}
+ end
  if not recipeIndex then
   local index={}
   if fs.exists("/home/bec/recipes")then
@@ -122,8 +140,8 @@ assert(type(required) == "table" and type(consumed) == "table", "订单需求不
 local remaining, total = {}, 0 for name, amount in pairs(required) do assert(mapping[name], "不支持的凝聚物: " .. tostring(name)) amount = integer(amount)
 local used = integer(consumed[name] or 0) assert(used <= amount, "已消耗数量超过需求") remaining[name] = amount - used; total = total + amount end
 assert(total > 0, "订单没有有效需求") for name, amount in pairs(consumed) do assert(integer(amount) == 0 or required[name], "消耗记录与当前订单不符") end
-checkRecipe(required,parallel,snapshot) return required, remaining end local function queuedRecipes() return 0 end local function batchTarget(required,remaining)
-local parallel=checkRecipe(required) local count=math.max(parallel,queuedRecipes()) local target={} for name,amount in pairs(required) do
+checkRecipe(required,parallel,snapshot) return required, remaining, parallel end local function queuedRecipes() return 0 end local function batchTarget(required,remaining,parallel)
+parallel=parallel or checkRecipe(required) local count=math.max(parallel,queuedRecipes()) local target={} for name,amount in pairs(required) do
 assert(count-parallel<=math.floor((9007199254740991-integer(remaining[name]))/perRecipe[name]),"整批需求超出Lua精确整数范围")
 target[name]=integer(remaining[name]+perRecipe[name]*(count-parallel)) end return target,count
 end local function unchanged() local req, remaining = current() assert(same(req, record.required) and same(remaining, record.remaining), "暂停订单发生变化，停止")
@@ -287,17 +305,21 @@ local function productionSnapshot()
  return v
 end
 local function serve() local waiting={idle=true,["assembler-offline"]=true,unpowered=true,["nanite-tier-too-low"]=true}
-local round=0 while not stopping do preparing=Prep~=nil;prepGateReady=false;prepConverting=false;balanceInventory=nil;maybeConvert=nil;local nanitesChecked=false;pause(15); generator(false) local state=call(NODE,"getState")
-if stopping then break end state=call(NODE,"getState")
+local round=0 while not stopping do preparing=Prep~=nil;prepGateReady=false;prepConverting=false;balanceInventory=nil;maybeConvert=nil;local nanitesChecked=false;pause(15); generator(false) local state=fastStartup and BEC_V3_STARTUP_STATE()or call(NODE,"getState")
+if stopping then break end if not fastStartup then state=call(NODE,"getState")end
 if state=="idle" and BEC_V2_COHORT_IDLE then assert(BEC_V2_COHORT_IDLE());print("本批节点已完成，消耗核对通过；结束旧批次并交回设备组调度。") break end
 if not Prep and(state=="paused-immediate" or state=="nanite-tier-too-low")then switchNanites();nanitesChecked=true;state=call(NODE,"getState")end if waiting[state]and not(Prep and state=="nanite-tier-too-low")then
 if state~=record.lastState then print("等待订单/机器就绪: "..state.."；任意数量同配方订单均可，按 Q 停止。") record.lastState=state;save("waiting") end
-field();tick(0.1) else local completed=false;waitUntil(10,function() local v=call(NODE,"getState");completed=completedIdle(v)
+field();tick(0.1) else local completed=false;waitUntil(10,function() local v=fastStartup and BEC_V3_STARTUP_STATE()or call(NODE,"getState");completed=completedIdle(v)
 return preparationPaused(v)or completed,v end,function(v) assert(v=="crafting" or waiting[v],"无法暂停，实际状态: "..tostring(v)) field()
-end,"备料前暂停/完成核对") if completed then print("暂停等待期间本批已完成，消耗核对通过；交回调度。");break end;if not nanitesChecked and not Prep then switchNanites()end;if stopping then break end record.required,record.remaining=current() local target,count=batchTarget(record.required,record.remaining) local stable=false
+end,"备料前暂停/完成核对") if completed then print("暂停等待期间本批已完成，消耗核对通过；交回调度。");break end;if not nanitesChecked and not Prep then switchNanites()end;if stopping then break end local parallel;record.required,record.remaining,parallel=current() local target,count=batchTarget(record.required,record.remaining,fastStartup and parallel or nil) local stable=false
+-- A closed frozen cell fixes the quantity; there is no growing CPU order to
+-- debounce. current() above still freshly checks every member and consumption.
+if fastStartup and frozenRecipe then stable=true else
 for i=1,20 do tick(0.25);unchanged() local nextTarget,nextCount=batchTarget(record.required,record.remaining) if same(target,nextTarget) then stable=true;break end
 target,count=nextTarget,nextCount end assert(stable,"主网任务清单持续变化，保持暂停") if stopping then break end
-record.batchCount=count print("本组当前配方 "..count.." 份；当前实际并行 "..checkRecipe(record.required) .."；一次准备整批所需流体。") round=round+1;record.round=round;record.transfers={};record.target=target;record.plan=nil;record.topups={};record.supplyLedger=nil
+end
+record.batchCount=count print("本组当前配方 "..count.." 份；当前实际并行 "..(fastStartup and parallel or checkRecipe(record.required)) .."；一次准备整批所需流体。") round=round+1;record.round=round;record.transfers={};record.target=target;record.plan=nil;record.topups={};record.supplyLedger=nil
 waitUntil(10,function()return call(GEN,"isMachineActive")==false end);emptyConfig();tanks(4,nil);tanks(5,nil)
 local filters,cached
 if Prep then
@@ -384,14 +406,16 @@ end end end pause(15);generator(false);record.configOwned=false
 for _,job in ipairs(record.requests) do if job.state~="done" then save("craft-paused") print("服务已暂停；主网原液申请仍需核对，保留日志，不重复下单。")
 return end end save("stopped")
 print("已停止常驻服务：暂停输出 15，纠缠装置关闭；约束场与已有凝聚物保持开启。") end local function main() assert(mode=="preview" or mode=="run" or mode=="resume" or mode=="restock", "用法: preview / run / resume / restock，无需填写数量")
-RS = resolve("266f65b5", "redstone") GEN = resolve("c1ae3f7c", "gt_machine") GATE = resolve(GATE_ADDRESS, "bec_diode") assert(call(GEN, "getName") == "multi.bec.generator", "纠缠装置名称不符")
+local bound=BEC_V3_BOUND_COMPONENTS
+RS = bound and bound.redstone or resolve("266f65b5", "redstone") GEN = bound and bound.generator or resolve("c1ae3f7c", "gt_machine") GATE = bound and bound.gate or resolve(GATE_ADDRESS, "bec_diode") assert(call(GEN, "getName") == "multi.bec.generator", "纠缠装置名称不符")
 for _, item in ipairs({{RS,"setOutput"},{RS,"getOutput"},{GEN,"setWorkAllowed"}, {GEN,"isWorkAllowed"},{GEN,"isMachineActive"},{MAIN,"getFluidsInNetwork"}, {MAIN,"setFluidInterfaceConfiguration"},{MAIN,"getFluidInterfaceConfiguration"}, {SUB,"getFluidsInNetwork"},{TRANS,"transferFluid"},
 {MAIN,"getCraftables"},{MAIN,"getCpus"},{GATE,"getCondensateFilterCount"}, {GATE,"getCondensateFilters"},{GATE,"setCondensateFilters"}, {GATE,"isWorkAllowed"},{GATE,"isMachineActive"}}) do method(item[1],item[2]) end local minimum,maximum=integer(call(NODE,"getMinParallel")),integer(call(NODE,"getMaxParallel"))
-assert(minimum>=1 and maximum>=minimum,"节点并行设置无效") print("远端红石: " .. RS .. "；纠缠装置: " .. GEN) print("节点: " .. call(NODE,"getState") .. "；向上输出: " .. call(RS,"getOutput",sides.top)) print("纠缠装置允许工作: " .. tostring(call(GEN,"isWorkAllowed")))
+local function startupState()return type(BEC_V3_STARTUP_STATE)=='function'and BEC_V3_STARTUP_STATE()or call(NODE,'getState')end
+assert(minimum>=1 and maximum>=minimum,"节点并行设置无效") print("远端红石: " .. RS .. "；纠缠装置: " .. GEN) print("节点: " .. startupState() .. "；向上输出: " .. call(RS,"getOutput",sides.top)) print("纠缠装置允许工作: " .. tostring(call(GEN,"isWorkAllowed")))
 print("麦克斯韦门: "..GATE.."；过滤: "..ser.serialize(call(GATE,"getCondensateFilters"),false) .."；运行: "..tostring(call(GATE,"isMachineActive"))) print("凝聚物库存: " .. ser.serialize(field(),false)) if mode == "preview" then
 print("子网原液: " .. ser.serialize(network(SUB),false)) if call(NODE,"getState") == "paused-immediate" then local required,remaining=current();local target,count=batchTarget(required,remaining) print("本组当前配方 "..count.." 份")
 plan(target) end print("预览结束：没有开关、搬液、配置或写日志。") return
-end local waitingStates = {idle=true, ["paused-immediate"]=true, ["assembler-offline"]=true, unpowered=true, ["nanite-tier-too-low"]=true} local initialState = call(NODE,"getState")
+end local waitingStates = {idle=true, ["paused-immediate"]=true, ["assembler-offline"]=true, unpowered=true, ["nanite-tier-too-low"]=true} local initialState = startupState()
 assert(waitingStates[initialState], "节点状态不适合启动: " .. tostring(initialState)) emptyConfig(); tanks(4,nil); tanks(5,nil) if fs.exists(JOURNAL) then local f=assert(io.open(JOURNAL,"r"));local contents=f:read("*a");f:close()
 local old=ser.unserialize(contents);local liveSupply=Prep and type(old)=='table'and type(old.supplyLedger)=='table'and old.supplyLedger.version==1 and type(old.supplyLedger.base)=='table'and type(old.secured)=='table'and type(old.target)=='table'and type(old.stage)=='string'and(old.stage:match('^stream%-')or old.stage=='converting');local streaming=type(old)=="table" and type(old.plan)=="table" and (old.stage=="stream-configuring" or old.stage=="stream-transfer-confirmed" or old.stage=="stream-inlet-cleared" or old.stage=="stream-planned")
 and type(old.secured)=="table" and type(old.target)=="table" assert(type(old)=="table" and old.version==1 and old.kind=="continuous" and old.pending==nil and (old.configOwned==false or streaming),"日志无效或有未确认操作，禁止重跑") if mode=="resume" or mode=="restock" then
@@ -426,7 +450,7 @@ end for name,n in pairs(stock) do assert(n==0 or mapping[name],"转换恢复有�
 end assert(stopped or preTransfer or watching or crafted or prepared or converting or streaming or liveSupply,"该阶段存在未确认操作，不能自动恢复") archiveJournal(contents,".before-resume-") else
 assert(old.stage=="stopped","已有非正常停止日志，请核对后使用 resume，禁止盲目重跑") for _,job in ipairs(old.requests or {}) do assert(job.state=="done","旧日志有未确认的主网申请，禁止重新下单") end
 archiveJournal(contents) end else assert(mode~="resume" and mode~="restock","没有可恢复的日志")
-end record={version=1,kind="continuous",stage="starting",transfers={},requests={},configOwned=false} save("starting");armed=true print("常驻模式：无需填写数量。先只提交原始屏蔽层任务，可先 5 再 10。")
+end record={version=1,kind="continuous",stage="starting",transfers={},requests={},configOwned=false,startupSeconds=computer.uptime()-startupAt} save("starting");armed=true print(string.format('启动接口与旧记录核对：%.2f秒',record.startupSeconds)) print("常驻模式：无需填写数量。先只提交原始屏蔽层任务，可先 5 再 10。")
 print("按主网 CPU 剩余任务量，一次准备整批原液；追加订单自动补差额。") serve() end local ok, err = xpcall(main, debug.traceback)
 if not ok then if armed then local paused = pcall(pause,15) local stopped = pcall(generator,false)
 local cleaned = true if record and record.configOwned then local success, result = pcall(call,MAIN,"setFluidInterfaceConfiguration",0) cleaned = success and result == true
@@ -1072,6 +1096,14 @@ function M.environment(cfg,index,engine)
  -- OC reads across a cohort can exceed the original single-node 3-second grace.
  env.BEC_V2_RELEASE_GRACE=30
  env.BEC_V2_NODE_SNAPSHOT=nodeSnapshot
+ if representative then
+  -- The input disk already matched a unique recipe before admitting nodes.
+  if type(task.fixedBatch.recipe)=='string'and type(task.fixedBatch.condensates)=='table'and type(task.fixedBatch.outputs)=='table'then
+   env.BEC_V3_FROZEN_RECIPE=task.fixedBatch
+  end
+  env.BEC_V3_BOUND_COMPONENTS={redstone=n.redstone,generator=g.generators[1],gate=n.gate}
+  env.BEC_V3_STARTUP_STATE=function()return representative.inspection(true).state end
+ end
  if representative then
   env.BEC_V3_FIXED_BATCH_SNAPSHOT=representative.production
  elseif task.fixedBatch then
