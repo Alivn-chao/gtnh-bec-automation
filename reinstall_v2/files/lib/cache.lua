@@ -25,7 +25,12 @@ return function(C,B,cfg,storage)
  local function journal(group)return C.path('state/group-'..group..'/cache.journal')end
  local function confirmed(r)
   if not r then return true end
-  if r.kind~='cache'or r.stage~='stopped'or r.pending~=nil or r.plan~=nil or r.configOwned~=false or r.incomplete then return false end
+  if r.kind~='cache'or r.stage~='stopped'or r.pending~=nil or r.plan~=nil or r.configOwned~=false then return false end
+  if r.incomplete then
+   local v=r.reconciliation
+   if not(type(v)=='table'and v.version==1 and v.kind=='confirmed-zero-transfer'and v.aeFinishedByOperator==true
+    and type(v.subnet)=='table'and type(v.archive)=='string'and type(r.requests)=='table'and #r.requests==0 and type(r.transfers)=='table'and #r.transfers==0)then return false end
+  end
   for _,move in ipairs(r.transfers or {})do if move.ok~=true then return false end end
   for _,job in ipairs(r.requests or {})do if job.state~='done'and not(job.state=='rejected'and job.preSubmissionFailed==true)then return false end end
   return true

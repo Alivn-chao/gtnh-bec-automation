@@ -1,4 +1,44 @@
-# 2026-10-28 并行配置与配方检测提速（已安装，新耗时待实测）
+# 2026-10-28 缓存false/0回执修复及手动转换后恢复
+
+用户截图缓存保护暂停。MCP原记录最后一次超时空金属申请搬38992mB，返回false/0；
+前15次明确成功，secured金属2480mB。用户明确说随后手动开启纠缠器，并确认旧
+6408000mB宇宙焊锡AE申请已完成。实际多数原液已转换，子网仅金属32mB。先main pause
+停纠缠器并逐台确认16台idle/RS15/关闭接单，未关机、未取消其他AE任务。另一CPU
+storedItems持有金属36864mB，支持原液被其他任务抢走的判断，但不是原AE句柄证明。
+
+核对本机OpenComputers-1.12.61-GTNH.jar的InventoryTransfer$class实际字节码，
+transferFluid正常返回(moved>0,moved)，false/0是明确零搬运。pipeline与旧顺序缓存
+接受此零值，仍核对整个子网未变化再清意图；false/正数、nil、异常、库存不符仍隔离。
+新增cache_zero_recover.lua preview/run ae-finished，专用于明确零回执，检查全部
+前序回执、secured、原计划、停机、暂停/关闭接单、实际原液<=已确认量，归档原记录
+后保存人工确认AE结束及真实库存信用；不下单/搬液，不伪造旧request自动确认。
+具名恢复凭据可带非整批原液给新pipeline，必须逐字一致；普通非整批库存仍拒绝。
+
+285回归+20核心通过，新增6项覆盖零回执无重复下单、假零回执仍隔离、手动转换后
+原液信用、缺少确认/预览只读、旧账异常拒绝、信用变化拒绝。旧缓存响应包不含新
+pipeline/恢复工具，不能完整安装。实际源码与本地原版本逐字一致后CAS安装4文件，
+原配置、配方、接线和生产控制器未改；私有证据outputs/cache-fault-20261028。
+- cache_zero_recover.lua 5507B，282e557cc310611ea711956341403480603c7b6225b58110c4f1615652fe14d5
+- lib/cache_pipeline.lua 8969B，5cb01baa3a510b037dea13cf701cf2f2f45cbb91cc2e4c7e3a760beb4722a3fc
+- runtime/cache.lua 33518B，9d2d84f40ea6b7398e340f39d632b0a3805d9e0c6f6f8ad0a7ff059276faca74
+- lib/cache.lua 21604B，fa4f2837adcc0fc5bee0dea592c3073c6a2bc47357317c36cf794e5e04a8d9f1
+备份分别lib/.ochd-mcp/8d9ceb5e-af13-430b-ae55-30fb933b663f.bak、
+runtime/.ochd-mcp/d8befc56-93dd-4a47-93f8-f05bc6f082fa.bak、
+lib/.ochd-mcp/b0245399-115f-43a0-98e6-6bc7c9cce5be.bak。另两份旧程序备份先导出
+回读再按长度/Adler删精确旧副本，释放70105B，manifest在本轮私有archived-native-backups。
+
+恢复预览/run实机通过，原fault journal归档cache.journal.before-zero-recovery-1。
+左盘已有待生产原料，故仅用一份实际cache模块工作器先收尾，网页保持结束、16台
+接单关闭，原料盘未搬。因AE已有生产需求，pipeline只新申请112mB，明确done、
+transfer true/112，原32+112=144全部转换；金属凝聚物4961088→4961232，子网空，
+工作器82.25秒正常stopped、纠缠器关闭。没有重放原38992搬运或6408000AE申请。
+原缓存目标/单项设置保留，未满部分待生产后空闲再补。随后恢复唯一标准网页。
+
+# 2026-10-28 并行配置与配方检测提速（已安装，实机已完成一批）
+
+安装后512份原始波导管实机正常完成：16台各32，进料准备2.80秒/搬盘匹配0.70秒，
+并行分配8.70秒、逐台接单核对/回盘25.85秒、detect12.50秒，重叠准备6.40秒，
+工作器43.85秒正常结束；配方与前一批不同，不能当严格同配方提速比例。
 
 用户刚跑512份原始屏蔽层后要求压缩并行和检测。MCP原工作器flow：detect27.0秒、
 nanites9.45秒、produce22.5秒；具体重叠准备日志7.20秒，蜂群4.85秒，门2.05秒。

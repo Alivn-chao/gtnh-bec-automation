@@ -69,7 +69,9 @@ return function(o)
     local ok,moved=o.call(route.address,'transferFluid',route.from,route.to,amount)
     record.transfers[#record.transfers+1]={raw=raw,ok=ok,amount=moved,requested=amount,address=route.address,from=route.from,to=route.to}
     o.save('transfer-returned')
-    assert(ok==true and type(moved)=='number'and moved>=0 and moved<=amount and moved==math.floor(moved),'搬运返回值未确认，停止且不重试')
+    -- GTNH OC 1.12.61 returns (moved > 0, moved). A false/zero is a
+    -- confirmed no-op, still requiring the unchanged subnet proof below.
+    assert((ok==true or ok==false and moved==0)and type(moved)=='number'and moved>=0 and moved<=amount and moved==math.floor(moved),'搬运返回值未确认，停止且不重试')
     if moved>0 then previous[raw]=held+moved;main[raw]=math.max(0,(main[raw]or 0)-moved);item.deadline=o.now()+1800;movedAny=true end
     o.waitUntil(10,function()return o.same(o.network(o.sub),previous)end,o.unchanged)
     if moved==0 then table.remove(record.transfers);record.zeroTransfers=(record.zeroTransfers or 0)+1 end

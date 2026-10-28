@@ -1,5 +1,5 @@
 -- BEC_V3_CACHE_RESPONSE_UPDATE_1
-local SELF_SIGNATURE='85561:3119219193'
+local SELF_SIGNATURE='86954:4074221765'
 print('BEC V3 cache response update; Q to exit the old UI first')
 local function sig(s)local a,b=1,0;for i=1,#s do a=(a+s:byte(i))%65521;b=(b+a)%65521 end;return string.format('%d:%.0f',#s,b*65536+a)end
 local rows={{name='lib/cache.lua',source=[=[-- V1 cache worker, scheduled under the same V2 group and shared-fluid leases.
@@ -29,7 +29,12 @@ return function(C,B,cfg,storage)
  local function journal(group)return C.path('state/group-'..group..'/cache.journal')end
  local function confirmed(r)
   if not r then return true end
-  if r.kind~='cache'or r.stage~='stopped'or r.pending~=nil or r.plan~=nil or r.configOwned~=false or r.incomplete then return false end
+  if r.kind~='cache'or r.stage~='stopped'or r.pending~=nil or r.plan~=nil or r.configOwned~=false then return false end
+  if r.incomplete then
+   local v=r.reconciliation
+   if not(type(v)=='table'and v.version==1 and v.kind=='confirmed-zero-transfer'and v.aeFinishedByOperator==true
+    and type(v.subnet)=='table'and type(v.archive)=='string'and type(r.requests)=='table'and #r.requests==0 and type(r.transfers)=='table'and #r.transfers==0)then return false end
+  end
   for _,move in ipairs(r.transfers or {})do if move.ok~=true then return false end end
   for _,job in ipairs(r.requests or {})do if job.state~='done'and not(job.state=='rejected'and job.preSubmissionFailed==true)then return false end end
   return true
@@ -883,12 +888,17 @@ local function handoff()
  print("已有配方，停止补缓存；仅转换已搬入原液后交回生产。")
  return previous
 end
-if productionWaiting() then return handoff() end
+local partialCredit=false
+if record.initialRawCredit then for name in pairs(target)do local raw=mapping[name];local n=previous[raw]or 0
+ assert(n==(record.initialRawCredit[raw]or 0),'恢复后原液信用变化')
+ if n%(units[name]or 144)~=0 then partialCredit=true end
+end end
+if productionWaiting()and not partialCredit then return handoff() end
 
 for name,need in pairs(target) do local raw=mapping[name]
 local batch=units[name] or 144 local amount=math.ceil(math.max(0,need-(stock[name] or 0))/batch)*batch local existing=previous[raw] or 0
 assert(amount==0 or ports[raw],"缺少高速供液口："..raw.."；禁止普通接口回退")
-assert(existing<=amount and existing%batch==0,"子网原液超额或非整批: "..raw) if amount>0 then expected[raw]=amount end raws[#raws+1]={raw=raw,amount=amount,batch=batch}
+assert(existing<=amount and(existing%batch==0 or record.initialRawCredit and record.initialRawCredit[raw]==existing),"子网原液超额或非整批: "..raw) if amount>0 then expected[raw]=amount end raws[#raws+1]={raw=raw,amount=amount,batch=batch}
 end for raw in pairs(previous) do local allowed=false
 for _,item in ipairs(raws) do if item.raw==raw then allowed=true end end assert(allowed,"子网有无关原液: "..raw) end
 for name,amount in pairs(stock) do assert(amount==0 or mapping[name],"约束场有未知凝聚物") end table.sort(raws,function(a,b) return a.raw<b.raw end) record.plan=raws;record.expected=expected;record.secured=previous;save("stream-planned")
@@ -900,7 +910,7 @@ if BEC_V3_CACHE_PIPELINE then
   requestGuard=BEC_V3_CACHE_REQUEST_GUARD,
   poll=function()assert(same(unchanged(),stock),"备料时约束场库存变化");assert(same(network(SUB),previous),"备料时子网库存变化")end})
 end
-for _,item in ipairs(raws) do if productionWaiting() then return handoff() end local raw,need,batch=item.raw,item.amount,item.batch local route=ports[raw]
+for _,item in ipairs(raws) do if productionWaiting()and not partialCredit then return handoff() end local raw,need,batch=item.raw,item.amount,item.batch local route=ports[raw]
 local chunk=math.floor(2147483647/batch)*batch local function bufferedInlet() return 0 end if (previous[raw] or 0)<need then
 unchanged();emptyConfig();tanks(4,nil) record.configOwned=false;save("stream-configuring")
 assert(route,"高速供液口不可用："..raw);verifyBulk(route,raw,true)
@@ -913,7 +923,7 @@ local remaining=need-(previous[raw] or 0) local settling=(batch-(previous[raw]or
 local buffered=network(MAIN)[raw] or 0 local amount=math.floor(math.min(priority and settling or remaining,buffered,chunk))
 if amount>0 then verifyBulk(route,raw);local address,from,to=route.address,route.from,route.to
 record.pending={raw=raw,amount=amount,address=address,from=from,to=to};save("transfer-pending") local ok,moved=call(address,"transferFluid",from,to,amount) record.transfers[#record.transfers+1]={raw=raw,ok=ok,amount=moved,requested=amount,address=address,from=from,to=to}
-save("transfer-returned") assert(ok==true and type(moved)=="number" and moved>=0 and moved<=amount and moved==math.floor(moved),"搬运返回值未确认，停止且不重试") if moved>0 then previous[raw]=(previous[raw] or 0)+moved end
+save("transfer-returned") assert((ok==true or ok==false and moved==0) and type(moved)=="number" and moved>=0 and moved<=amount and moved==math.floor(moved),"搬运返回值未确认，停止且不重试") if moved>0 then previous[raw]=(previous[raw] or 0)+moved end
 waitUntil(10,function() return same(network(SUB),previous) end,unchanged)
 if moved==0 then table.remove(record.transfers);record.zeroTransfers=(record.zeroTransfers or 0)+1 else deadline=computer.uptime()+1800 end
 record.pending=nil;record.secured=previous;save("stream-transfer-confirmed") print(raw.." 已入子网 "..(previous[raw]or 0).." / "..need.." mB；本次 "..moved.." / "..amount)
@@ -1056,9 +1066,16 @@ end if mode=="preview" then print("只读规划完成，未申请、搬料、转
 assert(BEC_V2_CACHE_GUARD,'缺少V2缓存调度器');BEC_V2_CACHE_GUARD()
 local nodeState=call(NODE,"getState") local blocked={idle=true,["paused-immediate"]=true,["assembler-offline"]=true,unpowered=true,["nanite-tier-too-low"]=true} assert(nodeState=="idle" or (background and blocked[nodeState]),"预缓存须在节点空闲/已暂停时进行")
 assert(call(RS,"getOutput",sides.top)==15 and call(GEN,"isWorkAllowed")==false and call(GEN,"isMachineActive")==false,"预缓存前须暂停并关闭纠缠装置") emptyConfig();tanks(4,nil);tanks(5,nil)
+local initialRawCredit,recoveryArchive
 if fs.exists(JOURNAL) then local f=assert(io.open(JOURNAL,"r"));local text=f:read("*a");f:close() local old=ser.unserialize(text)
 assert(type(old)=="table" and old.kind=="cache" and old.stage=="stopped" and old.pending==nil and old.configOwned==false,"旧缓存有未确认操作，请保留日志核对") for _,job in ipairs(old.requests or {}) do assert(job.state=="done" or (job.state=="rejected" and job.preSubmissionFailed==true),"缓存申请仍未确认") end
-archiveJournal(text) end record={version=1,kind="cache",requests={},transfers={},configOwned=false,target=target,copies=cacheCopies,fixedStock=fixedStock,background=background}
+if old.reconciliation and old.reconciliation.kind=='confirmed-zero-transfer'and old.reconciliation.version==1 then
+ assert(old.reconciliation.aeFinishedByOperator==true and type(old.reconciliation.subnet)=='table','零搬运恢复凭据无效')
+ assert(same(network(SUB),old.reconciliation.subnet),'零搬运恢复后子网库存变化，保留记录')
+ initialRawCredit=old.reconciliation.subnet;recoveryArchive=old.reconciliation.archive
+ assert(BEC_V3_CACHE_PIPELINE,'零搬运恢复需要并行缓存模块；原记录保留')
+end
+archiveJournal(text) end record={version=1,kind="cache",requests={},transfers={},configOwned=false,target=target,copies=cacheCopies,fixedStock=fixedStock,background=background,initialRawCredit=initialRawCredit,recoveryArchive=recoveryArchive}
 save("starting");armed=true local expected=prepareStreaming(target) if not stopping and next(expected) then
 unchanged();save("converting");generator(true);if background then print("后台缓存纠缠转换中；本轮目标已更新。") end local deadline=computer.uptime()+180 for kind in pairs(target) do
 deadline=deadline+math.ceil((expected[mapping[kind]] or 0)/(units[kind] or 144))*180 end while true do
