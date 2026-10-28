@@ -1,3 +1,16 @@
+# 2026-10-29 磁盘旧程序备份外移
+
+用户报告磁盘不足并要求继续。MCP正式盘4MiB、剩513328B（低于512KiB保留线），
+网页binding且启动被空间检查拦截；16台idle/RS15/关闭接单，上一批完整stopped。
+将lib/runtime的42份旧.ochd-mcp程序备份及2份旧web备份全部逐字导出/本地回读，
+保存outputs/disk-20261029/archive及manifest.json（SHA256/Adler/原版本）。删除前
+原位再次校验长度/Adler，精确移除44份已导出副本，释放1008073B；核对剩1537907B。
+当前程序、配置/配方、所有当前/恢复journal未删，保留四份关键native回退副本：
+bridge的2487563e、cache_pipeline的8d9ceb5e、cache.lua的b0245399、runtime/cache的d8befc56。
+其他旧backup即使在下文历史中提到，也可能已外移；以本轮本地manifest为准。
+清单写入/tmp失败遗留的本轮scratch已删除，其他临时文件不动。正常网页start事件
+恢复自动化，未关闭机箱或重启网页，没有修改程序，因此未额外跑代码回归。
+
 # 2026-10-28 缓存false/0回执修复及手动转换后恢复
 
 用户截图缓存保护暂停。MCP原记录最后一次超时空金属申请搬38992mB，返回false/0；
