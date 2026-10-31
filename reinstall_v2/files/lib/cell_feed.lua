@@ -152,6 +152,68 @@ function M.new(cfg,group,C,E,resumeAdmission)
   end
   record.pending=nil;save('restored')
  end
+ -- All participants already have min=max=quota and an immediate-pause
+ -- signal. Open them in one sweep, without waiting for earlier admissions.
+ -- The shared durable intent replaces per-node batch-stop writes here only.
+ local function waveWork(on)
+  local stage=on and 'opening-nodes'or 'closing-nodes'
+  record.pending={kind='admission-wave',enabled=on,nodes=record.members};save(stage)
+  for _,i in ipairs(record.members)do
+   if on then enabled()end
+   local n=cfg.nodes[i]
+   c.invoke(n.address,'setWorkAllowed',on)
+   assert(c.invoke(n.address,'isWorkAllowed')==on,'整组接单许可回读失败：'..i)
+  end
+  if on then record.waveOpened=true else record.waveClosed=true end
+  record.pending=nil;save(on and 'waiting-nodes'or 'nodes-closed')
+ end
+ local verified={}
+ local function checkAdmission(i,state)
+  local n=cfg.nodes[i]
+  if state=='crafting'then
+   assert(c.invoke(n.redstone,'getOutput',n.pauseSide)==15,'接单后暂停信号缺失')
+   F.message='等待节点'..i..'进入暂停状态';return false
+  end
+  assert(state=='paused-immediate'or state=='nanite-tier-too-low','接单状态异常：'..tostring(state))
+  assert(c.invoke(n.address,'getParallelRecipesInProgress')==record.quota[i],'实际接单数量与配额不符')
+  local req=c.invoke(n.address,'getRequiredCondensate');local expected={}
+  for _,v in ipairs(record.condensates)do expected[v.name]=(expected[v.name]or 0)+v.amount*record.quota[i]end
+  assert(type(req)=='table','凝聚物需求不可读')
+  for k,v in pairs(expected)do assert(req[k]==v,'接到的配方与原料盘不符')end
+  for k in pairs(req)do assert(expected[k],'节点接到无关配方')end
+  return true
+ end
+ local function admitWave()
+  if not record.waveOpened then
+   -- Check the whole wave before enabling its first node. Method values may
+   -- be false for non-direct callbacks; presence, not truthiness, matters.
+   for _,i in ipairs(record.members)do local n=cfg.nodes[i]
+    local methods=c.methods(n.address)
+    assert(methods and methods.setWorkAllowed~=nil and methods.isWorkAllowed~=nil,'传送节点缺少启停接口')
+    assert(c.invoke(n.redstone,'getOutput',n.pauseSide)==15,'整组接单前暂停信号缺失')
+    assert(c.invoke(n.address,'getState')=='idle'and c.invoke(n.address,'isWorkAllowed')==false,'整组接单前节点未空闲关闭')
+   end
+   local at=clock.uptime();waveWork(true);record.timings.opening=clock.uptime()-at
+   return false
+  end
+  if not record.waveClosed then
+   local waiting=false
+   for _,i in ipairs(record.members)do local n=cfg.nodes[i];local state=c.invoke(n.address,'getState')
+    if state=='idle'then waiting=true
+    else
+     assert(state=='crafting'or state=='paused-immediate'or state=='nanite-tier-too-low','接单状态异常：'..tostring(state))
+    end
+   end
+   if waiting then F.message='固定配额同时接单：等待其余节点';return false end
+   local at=clock.uptime();waveWork(false);record.timings.closing=clock.uptime()-at
+  end
+  local complete=true
+  for _,i in ipairs(record.members)do if not verified[i]then
+   if checkAdmission(i,c.invoke(cfg.nodes[i].address,'getState'))then verified[i]=true else complete=false end
+  end end
+  if not complete then return false end
+  record.cursor=#record.members+1;save('nodes-admitted');return true
+ end
  if resumeReady then
   -- Explicit ready-checkpoint recovery only: no admission, move or recipe replay.
   assert(cohort and cohort.version==2 and type(cohort.members)=='table'and type(cohort.entries)=='table'and type(cohort.normalized)=='table','生产组记录不可核对')
@@ -285,9 +347,12 @@ function M.new(cfg,group,C,E,resumeAdmission)
     record.members[#record.members+1]=i
    end end
    record.pending=nil;record.timings={planning=clock.uptime()-planningAt,admissionStarted=clock.uptime()};save('configured')
-   record.cursor=1;save('admitting')
+   record.cursor=1;record.admissionMode=settings.concurrentAdmission~=false and 'quota-wave'or nil;save('admitting')
    F.message='原料盘已冻结：'..count..'份 / '..#record.members..'台'
    E.log(ids[1],F.message)
+  end
+  if record.admissionMode=='quota-wave'then
+   if not admitWave()then return false end
   end
   local i=record.members[record.cursor]
   if i then
@@ -298,26 +363,18 @@ function M.new(cfg,group,C,E,resumeAdmission)
    end
    if state=='idle'then return false end
    E.nodeWork(i,false)
-   if state=='crafting'then
-    assert(c.invoke(n.redstone,'getOutput',n.pauseSide)==15,'接单后暂停信号缺失')
-    F.message='等待节点'..i..'进入暂停状态';return false
-   end
-   assert(state=='paused-immediate'or state=='nanite-tier-too-low','接单状态异常：'..tostring(state))
-   assert(c.invoke(n.address,'getParallelRecipesInProgress')==record.quota[i],'实际接单数量与配额不符')
-   local req=c.invoke(n.address,'getRequiredCondensate');local expected={}
-   for _,v in ipairs(record.condensates)do expected[v.name]=(expected[v.name]or 0)+v.amount*record.quota[i]end
-   assert(type(req)=='table','凝聚物需求不可读')
-   for k,v in pairs(expected)do assert(req[k]==v,'接到的配方与原料盘不符')end
-   for k in pairs(req)do assert(expected[k],'节点接到无关配方')end
+   if not checkAdmission(i,state)then return false end
    record.openNode=nil;record.cursor=record.cursor+1;save('node-admitted');return false
   end
-  closeAll()
+  -- The wave's closing transaction has already confirmed all participants;
+  -- unused nodes have remained closed/paused since captureReady().
+  if record.admissionMode~='quota-wave'then closeAll()end
   local disk=stack(settings.productionSide,settings.productionSlot);local _,remaining=M.describe(disk)
   assert(remaining==0,'接单后原料盘有余料，保持整组暂停')
   move(settings.productionSide,settings.sourceSide,settings.productionSlot,settings.sourceSlot,'returning-empty-cell')
   if record.timings then
    record.timings.admission=clock.uptime()-record.timings.admissionStarted
-   E.log(ids[1],string.format('并行分配与回读 %.2f秒 / 逐台接单核对与回盘 %.2f秒',record.timings.planning,record.timings.admission))
+   E.log(ids[1],string.format('并行分配与回读 %.2f秒 / %s接单核对与回盘 %.2f秒',record.timings.planning,record.admissionMode=='quota-wave'and '固定配额同时'or '逐台',record.timings.admission))
   end
   save('ready');F.ready=true;F.since=nil;return true
  end

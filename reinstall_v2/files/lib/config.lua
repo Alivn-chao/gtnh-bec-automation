@@ -69,6 +69,7 @@ function M.validate(cfg,live)
    assert(integer(f.collectSeconds,1,60),'攒料时间需为1到60秒')
    assert(f.maxParallelPerNode==nil or integer(f.maxParallelPerNode,1,2147483647),'节点自动并行上限无效')
    assert(f.representativeChecks==nil or type(f.representativeChecks)=='boolean','代表节点检查设置无效')
+   assert(f.concurrentAdmission==nil or type(f.concurrentAdmission)=='boolean','同时接单设置无效')
    if live then
     methods(f.transposer,{'transferItem','getStackInSlot','getInventoryName','getInventorySize'},'原料盘转运器')
     for _,side in ipairs({f.sourceSide,f.productionSide})do assert(c.invoke(f.transposer,'getInventoryName',side)=='tile.appliedenergistics2.BlockDrive'and c.invoke(f.transposer,'getInventorySize',side)==10,'原料两侧必须是ME驱动器')end

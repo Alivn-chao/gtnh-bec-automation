@@ -48,8 +48,10 @@ F=M.new(cfg,1,C,E)
 '''
 
 class CellFeedTests(unittest.TestCase):
- def world(self):
-  l=fixture();l.execute(SETUP);return l
+ def world(self,concurrent=True):
+  l=fixture();l.execute(SETUP)
+  if not concurrent:l.execute('cfg.groups[1].cellFeed.concurrentAdmission=false')
+  return l
 
  def test_balanced_1000_and_small_batches(self):
   l=self.world();l.execute(r'''
@@ -136,7 +138,7 @@ for _,n in pairs(nodes)do assert(n.workAllowed==false and n.max==256)end
 ''')
 
  def test_transient_crafting_during_admission_waits_for_pause(self):
-  l=self.world();l.execute(r'''
+  l=self.world(False);l.execute(r'''
 F.step();s.now=10;F.step();assert(admitted==1)
 local c=require('component');local old=c.invoke;local once=true
 c.invoke=function(a,m,...)if a=='node1'and m=='getState'and once then once=false;return 'crafting'end;return old(a,m,...)end
@@ -145,7 +147,7 @@ assert(not F.step());assert(F.plan().cursor==2 and admitted==1)
 ''')
 
  def test_explicit_confirmed_admission_resume_does_not_replay_first_node(self):
-  l=self.world();l.execute(r'''
+  l=self.world(False);l.execute(r'''
 F.step();s.now=10;F.step();assert(admitted==1 and moves==1)
 E.nodeWork(1,false)
 local next=M.new(cfg,1,C,E,true)
@@ -156,7 +158,7 @@ assert(next.ready and admitted==16 and moves==2)
 
  def test_admission_resume_rejects_consumption_or_wrong_remaining_stock(self):
   for bad in ('consumption','remaining'):
-   l=self.world();l.globals().bad=bad;l.execute(r'''
+   l=self.world(False);l.globals().bad=bad;l.execute(r'''
 F.step();s.now=10;F.step();E.nodeWork(1,false)
 if bad=='consumption'then nodes.node1.consumed={entangled_chromaticglass=1}else disk[5]=makeDisk(999)end
 assert(not pcall(M.new,cfg,1,C,E,true));assert(admitted==1 and moves==1)

@@ -13,7 +13,7 @@ runpy.run_path(str(ROOT/'reinstall_v2/build_web.py'),run_name='__main__')
 runpy.run_path(str(HERE/'build_cache_response_update.py'),run_name='__main__')
 modules=['test_read_optimization','test_hive_inspection','test_stage_latency',
  'test_cell_io','test_cell_bridge','test_dynamic_nanites','test_completion_pause',
- 'test_idle_cohort','test_two_recipe_pipeline','test_batch_stop','test_cache_management',
+ 'test_idle_cohort','test_two_recipe_pipeline','test_batch_stop','test_cache_management','test_quota_admission',
  'test_cache_catalogue','test_cache_parallel','test_cache_partial','test_cache_zero','test_cache_recover','test_web_session','test_web_latency',
  'test_web_transport','test_performance','test_update','test_cache_response','test_cache_response_update','test_web_single_instance',
  'test_pause_response','test_cache_discovery','test_cell_feed','test_feed_detection','test_fixed_batch','test_representative','test_phase_catchup','test_ready_resume','test_hive_detection','test_fixed_hive_checks','test_batch_overhead','test_production_routes','test_preparation','test_admission_speed','test_storage']

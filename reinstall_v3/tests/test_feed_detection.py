@@ -31,6 +31,7 @@ class FeedDetectionTests(unittest.TestCase):
    if old:
     l.globals().s.files['/home/bec_v2/lib/cell_feed.lua']=subprocess.check_output(['git','show','20eb39a:reinstall_v2/files/lib/cell_feed.lua'],cwd=ROOT).decode()
     l.execute("M=loadfile('/home/bec_v2/lib/cell_feed.lua')();F=M.new(cfg,1,C,E)")
+   l.globals().expectedAdmissions=1 if old else 16
    l.execute(r"""
 local c=require('component');local invoke=c.invoke;calls,reads,writes=0,0,0
 c.invoke=function(a,m,...)calls=calls+1;if m=='setOutput'or m=='setWorkAllowed'then writes=writes+1 else reads=reads+1 end;return invoke(a,m,...)end
@@ -38,7 +39,7 @@ c.invoke=function(a,m,...)calls=calls+1;if m=='setOutput'or m=='setWorkAllowed't
 E.nodeWork=function(i,on)local n=cfg.nodes[i];if c.invoke(n.address,'isWorkAllowed')~=on then c.invoke(n.address,'setWorkAllowed',on);assert(c.invoke(n.address,'isWorkAllowed')==on)end end
 F.step();s.now=9.99;F.step();assert(moves==0)
 local match=M.match;M.match=function(...)atMatch={calls=calls,reads=reads,writes=writes};return match(...)end
-calls,reads,writes=0,0,0;s.now=10;F.step();assert(atMatch and moves==1 and admitted==1)
+calls,reads,writes=0,0,0;s.now=10;F.step();assert(atMatch and moves==1 and admitted==expectedAdmissions)
 """)
    results.append({k:int(v)for k,v in l.globals().atMatch.items()})
   self.assertLess(results[1]['calls'],results[0]['calls'])
@@ -54,7 +55,7 @@ calls,reads,writes=0,0,0;s.now=10;F.step();assert(atMatch and moves==1 and admit
   l=self.world();l.execute(r"""
 local c=require('component');local invoke=c.invoke
 c.invoke=function(a,m,...)if m=='getAllStacks'then error('not supported')end;return invoke(a,m,...)end
-F.step();s.now=10;F.step();assert(moves==1 and admitted==1)
+F.step();s.now=10;F.step();assert(moves==1 and admitted==16)
 """)
 
  def test_closing_admission_race_is_observed_before_moving_disk(self):
