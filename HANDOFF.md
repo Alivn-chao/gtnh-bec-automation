@@ -1,3 +1,45 @@
+# 2026-11-01 GTNH 2.9.0 正式版兼容（已安装）
+
+客户端迁移F:/prism/290；旧b3 MCP端口拒绝连接，改用290/.minecraft/ochd-mcp/ochd_mcp.py
+及config/ochd-mcp-client.json，电脑ID仍ebf6f77d-6aa4-425e-8984-3d9533d15c2f:c3c8b166-8dce-4f64-88ea-1e67510967a6。
+不要输出配置token。私有bridge290.py在outputs/compat-290-20261101；旧helper仍指b3。
+GitHub无新提交，实际待改config/cell_feed/web及bridge/controller/cache等原程序与已部署
+版本逐字匹配。实际模组GT5.09.54.265/OC1.12.68/Computronics1.9.13/AE2beta1095/AE2FC1.5.116。
+实际节点setMin/MaxParallel、门setCondensateFilters均direct=true，与新版协议一致。
+
+核对tag源码及实际JAR：节点并行/门过滤用OC.scheduleServer，机器启停用Computronics
+ServerThread.schedule。config组件包装器共享内存queued目标，既有回读若不符才等
+0.05秒，5游戏秒/100轮后保留意图报错；只发一次写，不套用搬盘/搬液/AE请求。
+同步回读不额外调用/睡眠，暂停可覆盖旧目标。cell_feed先提交整组许可再统一回读，
+避免新等待串行化开放；开放完检查取消，防止最后一条与暂停相遇留下许可。
+web的C.wait=T.poll，延迟回读期间仍收网页/Q事件。原无配方运行超时/代表检测/
+重叠准备/阶段追赶不改。
+
+最初实体蜂群第4面返回no inventory、阵列0；用户确认旧奇点总线升级后没了并重新装了。
+随后原面读到gt.blockmachines/3槽，现空仓，绑定不改。银行已变为27槽木桶，程序按
+实际大小且仅管理前10槽，原模式兼容。蜂群枚举/阶段/搬液返回协议未变；正式版
+装配机仍封顶30720。没有因为空仓伪造蜂群成功或主动搬蜂。
+
+311回归+20核心通过（11项延迟回读及4项专用更新器事务新增）；同步调用次数保持，
+异步范围顺序、还原、全部先开放、未知不重发、暂停覆盖和网页请求保留覆盖。
+新build_release_update.py生成update_290.lua，只支持ff5da13固定配额V3，三文件
+事务备份/回读/失败回滚，拒绝活动网页/未结束生产IOAE、未知版本或不足空间。
+旧缓存响应包随web变更重建，但不包含config/cell_feed，仍不是完整兼容安装包。
+
+正常网页pause并等待缓存/全生产结束，核对所有记录/IO/节点后只结束标准网页线程。
+CAS备份安装并逐字回读三文件，config.dat原文4453B/553eddb5780944ad93e6b9f5c16c9a4d822a64180c8ac1433a1c80b64ef1fbbe未改：
+- lib/config.lua 11519B，76b50648243b59b62380a7257db3738cfb12f5926e532ef9d42e66c9b775c3e7
+- lib/cell_feed.lua 24735B，823e4a7327ff06d2f9c186c871bf16514446704fabb09ac62e85574e221506be
+- web.lua 3288B，6e71fef7397dbc08e24474a26c613be3fa8ef281780f745f83d38a955962c5d9
+备份分别lib/.ochd-mcp/a6623808-8bb9-47b2-84be-1c46c0ff55ef.bak、
+lib/.ochd-mcp/b665041e-4d81-4051-94cd-468f6a59f51d.bak、
+.ochd-mcp/d7847734-ff83-4e24-82ce-a9b9a7234f5b.bak。
+原生语法/绑定/16台idle/关闭/RS15和新总线3槽通过。在全组关闭空闲下临时把节点1
+min1→2→1，首次0.10秒确认并完整还原，未开放接单；证明
+diagnostics/release-290-installed-20261101.dat，stage=confirmed无pending，余1405288B。
+按原running恢复唯一标准网页，机箱未关。下一批完整生产/性能待真实订单，不冒充
+已实测。源码对照、原文件/版本、接线读取、回执和测试在私有outputs/compat-290-20261101。
+
 # 2026-10-31 固定配额同时开放接单
 
 用户明确要求改为先定配额、同时开放多个节点。GitHub无新提交，MCP实际cell_feed/

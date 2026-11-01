@@ -1,5 +1,5 @@
 -- BEC_V3_CACHE_RESPONSE_UPDATE_1
-local SELF_SIGNATURE='86954:4074221765'
+local SELF_SIGNATURE='87036:565169620'
 print('BEC V3 cache response update; Q to exit the old UI first')
 local function sig(s)local a,b=1,0;for i=1,#s do a=(a+s:byte(i))%65521;b=(b+a)%65521 end;return string.format('%d:%.0f',#s,b*65536+a)end
 local rows={{name='lib/cache.lua',source=[=[-- V1 cache worker, scheduled under the same V2 group and shared-fluid leases.
@@ -686,6 +686,7 @@ H.snapshot=function(...)
  return data
 end
 local T=module('web_transport')(panel,event,W,address);C.pulse=T.pulse
+C.wait=T.poll -- Preserve web requests/Q while waiting for a server-thread write.
 T.snapshot=function()return H.snapshot(true)end
 T.observe=H.observe
 T.canServe=H.canServeFast

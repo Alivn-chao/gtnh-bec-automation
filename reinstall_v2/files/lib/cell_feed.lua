@@ -162,8 +162,13 @@ function M.new(cfg,group,C,E,resumeAdmission)
    if on then enabled()end
    local n=cfg.nodes[i]
    c.invoke(n.address,'setWorkAllowed',on)
+  end
+  -- Submit the entire wave before any delayed readback can wait for a tick.
+  for _,i in ipairs(record.members)do
+   local n=cfg.nodes[i]
    assert(c.invoke(n.address,'isWorkAllowed')==on,'整组接单许可回读失败：'..i)
   end
+  if on then enabled()end
   if on then record.waveOpened=true else record.waveClosed=true end
   record.pending=nil;save(on and 'waiting-nodes'or 'nodes-closed')
  end

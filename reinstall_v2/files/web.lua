@@ -26,6 +26,7 @@ H.snapshot=function(...)
  return data
 end
 local T=module('web_transport')(panel,event,W,address);C.pulse=T.pulse
+C.wait=T.poll -- Preserve web requests/Q while waiting for a server-thread write.
 T.snapshot=function()return H.snapshot(true)end
 T.observe=H.observe
 T.canServe=H.canServeFast

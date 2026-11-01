@@ -2,15 +2,50 @@ local c=require('component')
 local fs=require('filesystem')
 local ser=require('serialization')
 local M={ROOT='/home/bec_v2'}
+-- OC 1.12.68 / Computronics 1.9.13 enqueue these setters on the server.
+-- Keep the caller's single write and confirm only when it asks for readback.
+-- This is in-memory coordination; durable intents remain owned by callers.
+local queued={}
+local readback={setMinParallel='getMinParallel',setMaxParallel='getMaxParallel',
+ setWorkAllowed='isWorkAllowed',setCondensateFilters='getCondensateFilters'}
+local function equal(a,b)
+ if type(a)~='table'or type(b)~='table'then return a==b end
+ for k,v in pairs(a)do if b[k]~=v then return false end end
+ for k,v in pairs(b)do if a[k]~=v then return false end end;return true
+end
 -- Keep a web lease alive between callbacks; never mutate global component.
 function M.component(native)
  local proxy={};for k,v in pairs(native)do proxy[k]=v end
  setmetatable(proxy,{__index=native})
  for _,name in ipairs({'invoke','methods','list'})do
   proxy[name]=function(...)
-   if not M.pulse then return native[name](...)end
-   M.pulse();local values=table.pack(native[name](...))
-   if name=='invoke'then M.pulse(false,select(1,...),select(2,...),values[1])else M.pulse()end
+   if M.pulse then M.pulse()end
+   local address,method=...;local key=name=='invoke'and type(address)=='string'and type(method)=='string'and(address..'\0'..method)
+   local pending=key and queued[key]
+   local values=table.pack(native[name](...))
+   local getter=name=='invoke'and readback[method]
+   if getter then
+    local expected=select(3,...)
+    if type(expected)=='table'then local copy={};for k,v in pairs(expected)do copy[k]=v end;expected=copy end
+    queued[address..'\0'..getter]={expected=expected}
+   end
+   local function pulse()
+    if M.pulse then if name=='invoke'then M.pulse(false,address,method,values[1])else M.pulse()end end
+   end
+   pulse()
+   if pending then
+    local clock=require('computer');local deadline=clock.uptime()+5
+    for poll=1,101 do
+     -- A pause handled by the heartbeat may have superseded this write.
+     -- Read its actual result; never wait for or reissue the old target.
+     if queued[key]~=pending then values=table.pack(native[name](...));break end
+     if equal(values[1],pending.expected)then queued[key]=nil;break end
+     local label=method=='isWorkAllowed'and '启停回读不符'or '服务器写入回读尚未确认'
+     assert(poll<=100 and clock.uptime()<deadline,label..'：'..method..'；保留意图，不重复下发')
+     local wait=M.wait or os.sleep;wait(.05)
+     values=table.pack(native[name](...));pulse()
+    end
+   end
    return table.unpack(values,1,values.n)
   end
  end
