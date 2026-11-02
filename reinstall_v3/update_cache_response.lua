@@ -1,5 +1,5 @@
 -- BEC_V3_CACHE_RESPONSE_UPDATE_1
-local SELF_SIGNATURE='175237:1812600371'
+local SELF_SIGNATURE='194249:1109264713'
 print('BEC V3 cache response update; Q to exit the old UI first')
 local function sig(s)local a,b=1,0;for i=1,#s do a=(a+s:byte(i))%65521;b=(b+a)%65521 end;return string.format('%d:%.0f',#s,b*65536+a)end
 local rows={{name='lib/cache.lua',added=false,source=[=[-- V1 cache worker, scheduled under the same V2 group and shared-fluid leases.
@@ -328,7 +328,7 @@ return function(C,B,cfg,storage)
  function K.close()if active then active.stop=true;stopGenerators(active.group)end end
  return K
 end
-]=],supported={['15289:2748686704']=true,['15885:712537433']=true,['21604:3646529438']=true}},{name='lib/web_session.lua',added=false,source=[=[-- HTML is a data client. Only this Lua allowlist can save bindings or run V2.
+]=],supported={['15289:2748686704']=true,['15885:712537433']=true,['21604:3646529438']=true,['22629:3551022135']=true}},{name='lib/web_session.lua',added=false,source=[=[-- HTML is a data client. Only this Lua allowlist can save bindings or run V2.
 local c=require('component');local clock=require('computer');local ser=require('serialization')
 return function(C,B,W,options)
  local c=C.component and C.component(c)or c
@@ -450,13 +450,14 @@ return function(C,B,W,options)
     if P and P.co then P.stop=true;P.message='正在停止，当前槽位完成核对后退出';return P.message end
     return '没有正在执行的样板处理'
    end
-   idleEditor();assert(args.mode=='preview'or args.mode=='run','仅支持预览或处理一次')
+   idleEditor();assert(args.mode=='preview'or args.mode=='run'or args.mode=='replace','仅支持预览、处理一次或覆盖单槽')
+   if args.mode=='replace'then assert(type(args.slot)=='number'and args.slot%1==0 and args.slot>=1 and args.slot<=9,'覆盖槽位须为1–9')end
    assert(args.revision==revision(),'绑定已变化，请等待保存并应用后再试');cleanDraft()
    assert(cfg.workshopInterface and cfg.workshopInterface~='','先绑定并应用独立的样板工坊ME接口')
    local formal=expected;local mode=args.mode;scan=nil
-   P={mode=mode,status='running',slot=0,logs={},rows={},message=mode=='preview'and '正在只读预览'or '正在处理样板副本'}
+   P={mode=mode,status='running',slot=0,logs={},rows={},message=mode=='preview'and '正在只读预览'or mode=='replace'and '正在备份并覆盖所选槽位登记'or '正在处理样板副本'}
    P.co=coroutine.create(function()
-    local hooks={raiseErrors=true,shouldStop=function()return P.stop==true end,
+    local hooks={raiseErrors=true,onlySlot=mode=='replace'and args.slot or nil,shouldStop=function()return P.stop==true end,
      beforeSlot=function(slot)
       assert(B.read(path)==formal,'样板处理期间正式配置变化，保留现场停止');P.slot=slot
       if mode=='run'then local disk=storage.status();assert(disk.known and disk.ok,'磁盘空间不足，停止样板处理并保留记录')end
@@ -644,7 +645,7 @@ return function(C,B,W,options)
  function H.engine()return E end
  return H
 end
-]=],supported={['18504:2508797642']=true,['19392:3751895150']=true,['19680:2005263336']=true}},{name='lib/web_transport.lua',added=false,source=[=[-- Heartbeats while large OC reads run. Receipt is not operation completion.
+]=],supported={['18504:2508797642']=true,['19392:3751895150']=true,['19680:2005263336']=true,['20817:38585011']=true}},{name='lib/web_transport.lua',added=false,source=[=[-- Heartbeats while large OC reads run. Receipt is not operation completion.
 local clock=require('computer')
 return function(panel,event,W,address)
  local T={queue={},next=0,last={mode='binding',values={},group=1,groupCount=1,configured=false,notice='正在读取 OC 配置和设备状态'},stopping=false}
@@ -757,7 +758,7 @@ local success,reason=xpcall(session,debug.traceback)
 owner.closed=true
 if rawget(panel,'_becWebOwner')==owner then rawset(panel,'_becWebOwner',nil)end
 assert(success,reason)
-]=],supported={['2184:2645903512']=true,['2306:1012168104']=true,['3206:2519455272']=true,['3288:275313463']=true}},{name='lib/web_page.html',added=false,source=(function()local f=assert(io.open('/home/bec_v2/lib/web_page.html','r'));local old=f:read('*a');f:close();old=old:gsub('\r\n','\n');if sig(old)=='234743:4111998488'then return old end;local known={['232745:4075596562']=true,['233112:3384946455']=true};assert(known[sig(old)],'未知本地网页，保留未覆盖');local new=old:sub(1,198594)..[=[,recheck_all:'正在全量重新检查设备和运行记录…'}[actPending]):actMessage?actMessage.text:reason;hint.classList.toggle('action-error',!!(actMessage&&actMessage.bad&&!actPending));hint.setAttribute('role',actMessage&&actMessage.bad?'alert':'status');$('start-run').textContent=!online?'状态待确认':running?'运行中':'启动自动化';$('start-run').disabled=!online||running||!!actPending||patternBusy||saving();$('start-run').title=reason;$('apply-config').disabled=!online||running||!!actPending||patternBusy||saving();$('stop-run').disabled=!online||!running||!!actPending;$('recheck-all').disabled=!online||running||!!actPending||patternBusy||saving();$('recheck-again').disabled=$('recheck-all').disabled;if(actPending==='recheck_all')$('recheck-report').textContent='正在检查全部设备和记录，请稍候…';else if(last&&last.recheck){var r=last.recheck;$('recheck-report').textContent=(r.ok?'全量检查通过，可启动自动化。':'全量检查未通过，请处理以下项目后再检查。')+'\n检查 '+r.checked+' 项\n'+list(r.issues).join('\n')+(r.more?'\n另有 '+r.more+' 项，完整报告在 OC diagnostics/recheck-last.dat':'');}}
+]=],supported={['2184:2645903512']=true,['2306:1012168104']=true,['3206:2519455272']=true,['3288:275313463']=true,['3302:3130325022']=true}},{name='lib/web_page.html',added=false,source=(function()local f=assert(io.open('/home/bec_v2/lib/web_page.html','r'));local old=f:read('*a');f:close();old=old:gsub('\r\n','\n');if sig(old)=='235463:1015834595'then return old end;local known={['232745:4075596562']=true,['233112:3384946455']=true,['234743:4111998488']=true};assert(known[sig(old)],'未知本地网页，保留未覆盖');local new=old:sub(1,198594)..[=[,recheck_all:'正在全量重新检查设备和运行记录…'}[actPending]):actMessage?actMessage.text:reason;hint.classList.toggle('action-error',!!(actMessage&&actMessage.bad&&!actPending));hint.setAttribute('role',actMessage&&actMessage.bad?'alert':'status');$('start-run').textContent=!online?'状态待确认':running?'运行中':'启动自动化';$('start-run').disabled=!online||running||!!actPending||patternBusy||saving();$('start-run').title=reason;$('apply-config').disabled=!online||running||!!actPending||patternBusy||saving();$('stop-run').disabled=!online||!running||!!actPending;$('recheck-all').disabled=!online||running||!!actPending||patternBusy||saving();$('recheck-again').disabled=$('recheck-all').disabled;if(actPending==='recheck_all')$('recheck-report').textContent='正在检查全部设备和记录，请稍候…';else if(last&&last.recheck){var r=last.recheck;$('recheck-report').textContent=(r.ok?'全量检查通过，可启动自动化。':'全量检查未通过，请处理以下项目后再检查。')+'\n检查 '+r.checked+' 项\n'+list(r.issues).join('\n')+(r.more?'\n另有 '+r.more+' 项，完整报告在 OC diagnostics/recheck-last.dat':'');}}
 function send(name,args){if(!online)return Promise.reject(Error('OC 未连接，未执行操作'));args=args||{};var token=String(Date.now())+'-'+(++seq);args._token=token;return new Promise(function(resolve,reject){requests[token]={resolve:resolve,reject:reject};OC.emit(name,args).then(function(r){if(r&&r.message==='BEC_REQUEST_ACCEPTED')return;if(requests[token]){delete requests[token];resolve(r||{});}}).catch(function(e){if(requests[token]){delete requests[token];reject(e);}});});}
 function disconnect(){Object.keys(requests).forEach(function(k){var p=requests[k];delete requests[k];p.reject({message:'OC连接中断，操作结果待核对'});});}
 function reply(r){if(!r)return;var p=requests[r.token];if(p){delete requests[r.token];r.ok?p.resolve(r):p.reject(r);}if(r.token===actTok){actPending=null;showAction(r.message,!r.ok);}if(r.token===cacheTok){cacheWait=false;cacheMessage=(r.ok?'':'未执行：')+r.message;}}
@@ -795,16 +796,19 @@ function action(name){if(actPending)return;if(saving()){showAction('请先等待
 if(name==='start'&&last&&!last.configured){showAction('尚未应用绑定：请先点击「应用绑定」。如果校验失败，这里会显示具体原因。',true);return;}
 if(name==='apply_bindings'){var issues=bindingIssues();if(issues.length){showIssues(issues);return;}}
 actMessage=null;actPending=name;buttons();var args={revision:last&&last.revision},request=send(name,args);actTok=args._token;request.then(function(r){actPending=null;showAction(r.message||'请求已确认，等待 OC 状态更新。',false);}).catch(function(e){actPending=null;showAction((name==='apply_bindings'?'应用绑定失败：':name==='start'?'启动失败：':'暂停失败：')+e.message,true);});}
-function renderPatterns(){var p=last&&last.patterns,busy=p&&p.status==='running';$('patterns-status').textContent=p?({running:'进行中',done:'已完成',failed:'处理失败',stopped:'已停止'}[p.status]||p.status)+' · 槽位 '+p.slot+' / 9 · '+p.message:!last||!last.configured?'请先绑定并应用独立的样板工坊 ME 接口。':'先预览工坊接口内的样板，再处理原样板的副本。';$('patterns-log').textContent=p?(list(p.rows).join('\n')+'\n'+list(p.logs).join('\n')):'';['patterns-preview','patterns-run'].forEach(function(id){$(id).disabled=!online||!last||last.mode==='running'||!last.configured||busy||patPending||saving();});$('patterns-stop').disabled=!online||!busy||patPending;$('patterns-open').textContent=busy?'样板处理中':'样板处理';$('patterns-target').textContent=last?'工坊接口：'+(last.values.workshopInterface||'未绑定')+' · 配方目录：'+(last.values.recipeDirectory||'未设置'):'';}
+function renderPatterns(){var p=last&&last.patterns,busy=p&&p.status==='running';$('patterns-status').textContent=p?({running:'进行中',done:'已完成',failed:'处理失败',stopped:'已停止'}[p.status]||p.status)+' · 槽位 '+p.slot+' / 9 · '+p.message:!last||!last.configured?'请先绑定并应用独立的样板工坊 ME 接口。':'先预览工坊接口内的样板，再处理原样板的副本。';$('patterns-log').textContent=p?(list(p.rows).join('\n')+'\n'+list(p.logs).join('\n')):'';['patterns-preview','patterns-run','patterns-replace','patterns-replace-slot'].forEach(function(id){$(id).disabled=!online||!last||last.mode==='running'||!last.configured||busy||patPending||saving();});$('patterns-stop').disabled=!online||!busy||patPending;$('patterns-open').textContent=busy?'样板处理中':'样板处理';$('patterns-target').textContent=last?'工坊接口：'+(last.values.workshopInterface||'未绑定')+' · 配方目录：'+(last.values.recipeDirectory||'未设置'):'';}
 function patternAction(mode){if(patPending)return;if(mode!=='stop'&&saving()){$('patterns-status').textContent='请先等待草稿保存完成。';return;}
-patPending=true;renderPatterns();$('patterns-status').textContent=mode==='stop'?'正在请求停止…':'正在提交样板操作…';send('patterns',{mode:mode,revision:last&&last.revision}).then(function(r){patPending=false;renderPatterns();$('patterns-status').textContent=r.message||'请求已确认，等待处理状态。';}).catch(function(e){patPending=false;renderPatterns();$('patterns-status').textContent='未执行：'+e.message;showAction('样板操作失败：'+e.message,true);});}
+var args={mode:mode,revision:last&&last.revision};if(mode==='replace'){args.slot=Number($('patterns-replace-slot').value);if(!Number.isInteger(args.slot)||args.slot<1||args.slot>9){$('patterns-status').textContent='请选择覆盖槽位 1–9。';return;}}
+patPending=true;renderPatterns();$('patterns-status').textContent=mode==='stop'?'正在请求停止…':'正在提交样板操作…';send('patterns',args).then(function(r){patPending=false;renderPatterns();$('patterns-status').textContent=r.message||'请求已确认，等待处理状态。';}).catch(function(e){patPending=false;renderPatterns();$('patterns-status').textContent='未执行：'+e.message;showAction('样板操作失败：'+e.message,true);});}
 function settings(){if(!last)return;var specs=[['recipeDirectory','配方目录']];for(var i=1;i<=Math.max(4,last.generatorSlots||4);i++)specs.push(['g'+group+'.generator'+i,'纠缠器 '+i+'（多余可空）']);$('extra-fields').innerHTML=specs.map(function(f){return'<label>'+f[1]+'<input data-config="'+f[0]+'" value="'+esc(last.values[f[0]]||'')+'" maxlength="160" spellcheck="false"></label>';}).join('');$('extra-fields').querySelectorAll('input').forEach(function(input){input.onchange=function(){queue[input.dataset.config]=input.value;pump();};});$('runtime-settings').showModal();}
 document.querySelector('.top-actions').innerHTML='<span id="save-status" class="save-status">等待 OC 连接</span><button class="button quiet" id="patterns-open">样板处理</button><button class="button quiet" id="global-settings">公共设置</button><button class="button quiet" id="apply-config">应用绑定</button><button class="button quiet" id="recheck-all">全量重新检查</button><button class="button primary run-button" id="start-run">启动自动化</button><button class="button quiet stop-button" id="stop-run">暂停</button>';var recheckDialog=document.createElement('dialog');recheckDialog.id='recheck-dialog';recheckDialog.className='runtime-settings';recheckDialog.innerHTML='<h2>全量重新检查</h2><p>检查全部设备组、节点、供液、蜂群、盘位和运行记录。修好设备后可再次检查；未确认申请或搬运会继续保留保护。</p><pre id="recheck-report" style="white-space:pre-wrap">等待检查</pre><footer><button id="recheck-again" class="button">再次检查</button><button id="recheck-close" class="button primary">关闭</button></footer>';document.body.appendChild(recheckDialog);$('recheck-all').onclick=function(){$('recheck-dialog').showModal();$('recheck-report').textContent='正在检查全部设备和记录，请稍候…';action('recheck_all');};$('recheck-again').onclick=function(){action('recheck_all');};$('recheck-close').onclick=function(){$('recheck-dialog').close();};var feedback=document.createElement('div');feedback.id='action-feedback';feedback.className='action-feedback';feedback.textContent='等待 OC 连接…';feedback.setAttribute('aria-live','polite');document.body.appendChild(feedback);var tabs=document.createElement('nav');tabs.className='runtime-tabs';tabs.innerHTML='<button class="active" data-tab="structure">结构 / 绑定</button><button data-tab="flow">运行流程</button><button data-tab="cache">缓存管理</button>';document.querySelector('.topbar').insertBefore(tabs,document.querySelector('.top-actions'));var cacheUI={},cacheRead=false,cacheReadNext=null,cacheWait=false,cacheWaiting=null,cacheMessage='',cachePageMessage='',cacheStamp='',cachePanel=document.createElement('section');cachePanel.id='cache-panel';cachePanel.innerHTML='<h1>缓存管理</h1><p>只补已登记配方流体，生产优先。单项留空用默认值，0 停补；按转换批量向上取整，库存可略超目标。</p><div class="cache-actions"><label>默认库存目标（mB） <input id="cache-default" inputmode="numeric" maxlength="10"></label><button id="cache-save-default" class="button">保存默认值</button><button id="cache-enable" class="button primary">启用自动补库</button><button id="cache-disable" class="button">停止补库</button><button id="cache-refresh" class="button">刷新库存</button></div><p id="cache-status" role="status"></p><p id="cache-feedback" role="status"></p><div id="cache-rows"></div><div id="cache-nav" class="cache-actions"><button id="cache-prev" class="button">上一页</button><span id="cache-page"></span><button id="cache-next" class="button">下一页</button></div><pre id="cache-log"></pre>';document.body.appendChild(cachePanel);function cacheState(){var k=last.cache,u=cacheUI[group];if(!u)u=cacheUI[group]={page:k.page,pages:{},edits:{},total:k.total};return u;}
 function cacheBrowse(page){if(!last||!last.cache)return;var u=cacheState();u.page=Math.max(0,Math.min(page,Math.max(0,Math.ceil(u.total/8)-1)));cacheStamp='';cacheView();if(online&&!Array.isArray(last.cache.catalogue)){cacheReadNext={group:group,page:u.page};cacheReadPage();}}
 function cacheReadPage(){if(cacheRead||!cacheReadNext||!online)return;var q=cacheReadNext;cacheReadNext=null;if(q.group!==group)return;cacheRead=true;send('cache',{mode:'page',page:q.page,group:q.group}).then(function(){cacheRead=false;cachePageMessage='';cacheReadPage();cacheView();}).catch(function(e){cacheRead=false;if(q.group===group)cachePageMessage='翻页未确认：'+e.message;cacheReadPage();cacheView();});}
 function cacheAction(mode,name,value,page){if(cacheWait||!last||!last.cache)return;cacheWait=true;cacheWaiting=last.cache.revision;cacheMessage='正在提交…';cacheView();var args={mode:mode,name:name,value:value,page:page,group:group,revision:last.cache.revision},request=send('cache',args);cacheTok=args._token;request.then(function(r){cacheWait=false;cacheMessage=r.message||'已确认，等待库存更新';cacheView();}).catch(function(e){cacheWait=false;cacheMessage='未执行：'+e.message;cacheView();});}
 function cacheView(){var k=last&&last.cache;if(!k)return;$('cache-status').textContent=(!online?'离线，显示最后状态 · ':last.transportBusy?'OC正在读取，显示上次机器状态 · ':'')+(k.enabled?'自动补库已启用':'自动补库未启用')+' · '+(last.mode==='running'?'自动化运行中':'启动自动化后开始补库')+' · '+(k.busy?'设备组 '+k.group+' 补库中 · ':'')+k.message;var u=cacheState();if(u.total!==k.total){u.pages={};u.total=k.total;u.page=Math.min(u.page,Math.max(0,Math.ceil(k.total/8)-1));}u.pages[k.page]=list(k.rows);var allRows=Array.isArray(k.catalogue)?k.catalogue.map(function(r){return{name:r[0],label:r[1],stock:r[2],override:r[3]===false?null:r[3],target:r[3]===false?k.target:r[3]};}):null;if(allRows){u.pages={};for(var page=0;page<Math.ceil(allRows.length/8);page++)u.pages[page]=allRows.slice(page*8,page*8+8);}
-(allRows||list(k.rows)]=]..old:sub(-9689);assert(sig(new)=='234743:4111998488','网页补丁核对失败，原文件未改');return new end)(),supported={['232745:4075596562']=true,['233112:3384946455']=true}},{name='runtime/cache.lua',added=false,source=[=[-- V2 adapter of V1 bec_cache.lua; original transfer/AE/conversion protocol retained.
+(allRows||list(k.rows)).forEach(function(r){if(u.edits[r.name]===String(r.override==null?'':r.override))delete u.edits[r.name];});$('cache-feedback').textContent=cacheMessage+(cachePageMessage?' · '+cachePageMessage:'');$('cache-log').textContent=list(k.logs).join('\n');if(u.defaultEdit===String(k.target))delete u.defaultEdit;if(u.defaultEdit!=null)$('cache-default').value=u.defaultEdit;else if(cacheWaiting!==k.revision&&document.activeElement!==$('cache-default'))$('cache-default').value=k.target;var rows=u.pages[u.page]||[],stamp=JSON.stringify([group,u.page,rows]);if(stamp!==cacheStamp&&!document.querySelector('#cache-rows input:focus')){cacheStamp=stamp;$('cache-rows').innerHTML=rows.map(function(r,i){var edited=Object.prototype.hasOwnProperty.call(u.edits,r.name)?u.edits[r.name]:(r.override==null?'':r.override);return'<div class="cache-row"><div><strong>'+esc(r.label||r.name.replace(/^entangled_/,''))+'</strong><small>'+esc(r.name)+'</small></div><span>'+r.stock+' / '+r.target+' mB</span><input data-cache-index="'+i+'" inputmode="numeric" maxlength="10" placeholder="默认 '+k.target+'" aria-label="'+esc(r.name)+' 单项目标" value="'+esc(edited)+'"><button class="button" data-cache-save="'+i+'">保存</button></div>';}).join('')||(k.total?'<p>正在读取这一页；可返回已读取的页面。</p>':'<p>尚无已登记配方；请先通过样板处理登记需求，再刷新。</p>');$('cache-rows').querySelectorAll('[data-cache-index]').forEach(function(input){var name=rows[Number(input.dataset.cacheIndex)].name;input.oninput=function(){u.edits[name]=input.value;};});$('cache-rows').querySelectorAll('[data-cache-save]').forEach(function(b){var i=Number(b.dataset.cacheSave),name=rows[i].name;b.onclick=function(){var value=$('cache-rows').querySelector('[data-cache-index="'+i+'"]').value;u.edits[name]=value;cacheAction('save',name,value);};});}
+$('cache-page').textContent=(u.page+1)+' / '+Math.max(1,Math.ceil(k.total/8));['cache-save-default','cache-enable','cache-disable','cache-refresh'].forEach(function(id){$(id).disabled=!online||cacheWait;});$('cache-prev').disabled=u.page===0||(!online&&!u.pages[u.page-1]);$('cache-next').disabled=(u.page+1)*8>=k.total||(!online&&!u.pages[u.page+1]);$('cache-rows').querySelectorAll('[data-cache-save]').forEach(function(b){b.disabled=!online||cacheWait;});$('cache-enable').disabled=!online||cacheWait||!!k.blocked||k.enabled;}
+$('cache-default').oninput=function(){if(last&&last.cache)cacheState().defaultEdit=this.value;};$('cache-save-default').onclick=function(){cacheAction('save','default',$('cache-default').value);};$('cache-enable').onclick=function(){cacheAction('enable');};$('cache-disable').onclick=function(){cacheAction('disable');};$('cache-refresh').onclick=function(){cacheAction('refresh',null,null,last&&last.cache&&cacheState().page);};$('cache-prev').onclick=function(){cacheBrowse(cacheState().page-1);};$('cache-next').onclick=function(){cacheBrowse(cacheState().page+1);};var flowPanel=document.createElement('section');flowPanel.className='flow-panel';flowPanel.id='flow-panel';flowPanel.innerHTML='<div class="flow-title"><div><h2>自动化流程 <span id="flow-current">等待 OC</span></h2><p id="flow-stage-time">当前步骤 —</p></div><div><div class="elapsed" id="flow-elapsed">0.0s</div><small>当前 / 最近批次总耗时</small></div></div><div class="flow-path" id="flow-steps"></div><div class="flow-bottom"><div><h4>TRANSFER NODES / 接单控制</h4><div class="node-list" id="node-status-list"></div><div class="runtime-legend"><b>绿色：机器回读运行中</b> · <em>金色：当前步骤使用的外设</em><br>外设阶段占用不等同于硬件正在搬运</div></div><div><h4>EXECUTION / 阶段时间线</h4><div id="runtime-log" class="runtime-log" style="white-space:pre-wrap"></div></div></div>';document.querySelector('.main').appendChild(flowPanel);var notice=document.createElement('div');notice.id='runtime-notice';notice.className='runtime-notice';notice.textContent='等待 OC 数据，网页预览不控制机器。';document.querySelector('.main').appendChild(notice);var patternsDialog=document.createElement('dialog');patternsDialog.id='patterns-dialog';patternsDialog.className='runtime-settings';patternsDialog.innerHTML='<h2>样板处理</h2><p>将完整 BEC 加工样板副本放入独立工坊 ME 接口。兼容旧版凝聚物和新版 NEI 原液格式，自动保存凝聚物需求并去除流体输入。请先暂停生产和纠缠器。</p><p id="patterns-target"></p><div id="patterns-status" role="status" aria-live="polite"></div><pre id="patterns-log"></pre><p><label>覆盖槽位 <input id="patterns-replace-slot" type="number" min="1" max="9" step="1" value="1" style="width:64px"></label><button id="patterns-replace" class="button">备份并覆盖此槽</button></p><p>仅覆盖所选槽位对应的已完成登记，旧记录会备份。未完成批次需先处理；不补猜被删掉的凝聚物需求。</p><footer><button id="patterns-preview" class="button">只读预览</button><button id="patterns-run" class="button primary">处理一次</button><button id="patterns-stop" class="button">停止处理</button><button id="patterns-close" class="button">关闭</button></footer>';document.body.appendChild(patternsDialog);$('patterns-open').onclick=function(){$('patterns-dialog').showModal();renderPatterns();};$('patterns-close').onclick=function(){$('patterns-dialog').close();};$('patterns-preview').onclick=function(){patternAction('preview');};$('patterns-run').onclick=function(){patternAction('run');};$('patterns-stop').onclick=function(){patternAction('stop');};$('patterns-replace').onclick=function(){patternAction('replace]=]..old:sub(-4451);assert(sig(new)=='235463:1015834595','网页补丁核对失败，原文件未改');return new end)(),supported={['232745:4075596562']=true,['233112:3384946455']=true,['234743:4111998488']=true}},{name='runtime/cache.lua',added=false,source=[=[-- V2 adapter of V1 bec_cache.lua; original transfer/AE/conversion protocol retained.
 local c = require("component") local ser = require("serialization") local computer = require("computer")
 local fs = require("filesystem") local sides = require("sides") local event = require("event")
 local mode, cacheCopies = ... mode=mode or "preview" local fixedStock -- BEC_V1_CACHE_CUSTOM_V1
@@ -1174,7 +1178,7 @@ end local ok,err=xpcall(cacheMain,debug.traceback) if not ok then
 if armed then pcall(pause,15);pcall(generator,false) if record.configOwned then pcall(call,MAIN,"setFluidInterfaceConfiguration",0) end
 end print("预缓存停止："..tostring(err));print("保留 "..JOURNAL.." 和库存，不删除日志重跑。") end
 return ok,err
-]=],supported={['28964:1580602570']=true,['33518:3060193974']=true}},{name='runtime/controller.lua',added=false,source=[=[-- BEC_V3_LARGE_BATCH_1: long-sized totals; bounded per-call fluid requests.
+]=],supported={['28964:1580602570']=true,['33518:3060193974']=true,['34192:3141719133']=true}},{name='runtime/controller.lua',added=false,source=[=[-- BEC_V3_LARGE_BATCH_1: long-sized totals; bounded per-call fluid requests.
 local c = require("component") local ser = require("serialization") local computer = require("computer") local fs = require("filesystem")
 local sides = require("sides") local event = require("event") local mode = (...) or "preview" local JOURNAL = "/home/bec_auto.journal"
 local MAIN = "3afdc4cf-04e3-4ae9-8be6-e753c23a249d" local SUB = "86311657-33d1-41b5-a0d9-0aee7b5c2c50" local TRANS = "66fb280f-080d-4623-8d54-0dffd5cd5aad" local STORAGE = "237a9cac-118a-4b74-8755-0d0b0ad216c0"
@@ -1635,7 +1639,7 @@ if not ok then if armed then local paused = pcall(pause,15) local stopped = pcal
 local cleaned = true if record and record.configOwned then local success, result = pcall(call,MAIN,"setFluidInterfaceConfiguration",0) cleaned = success and result == true
 end print("恢复暂停: " .. tostring(paused) .. "；关闭纠缠装置: " .. tostring(stopped) .. "；清供液配置: " .. tostring(cleaned)) if not paused then print("请手动提供控制仓暂停信号。") end end
 print("程序停止: " .. tostring(err)) print("保留现场与日志；不要删除日志盲目重跑。约束场保持开启。") end
-]=],supported={['40703:4045976240']=true,['40716:3145313717']=true,['51037:689723367']=true}},{name='lib/recheck.lua',added=true,source=[=[-- Explicit full inspection. Reads hardware only; never repairs/replays journals.
+]=],supported={['40703:4045976240']=true,['40716:3145313717']=true,['51037:689723367']=true,['51502:990183969']=true}},{name='lib/recheck.lua',added=true,source=[=[-- Explicit full inspection. Reads hardware only; never repairs/replays journals.
 return function(C,cfg,E,storage,catalogue)
  local native=require('component');local c=C.component and C.component(native)or native;local clock=require('computer')
  local report={version=1,checked=0,issues={},at=clock.uptime(),routes={}}
@@ -1766,7 +1770,225 @@ return function(C,cfg,E,storage,catalogue)
  if cfg.workshopInterface and cfg.workshopInterface~=''then check('样板工坊',function()assert(type(c.invoke(cfg.workshopInterface,'getItemsInNetwork'))=='table','工坊接口不可读')end)end
  report.ok=#report.issues==0;return report
 end
-]=],supported={['0:1']=true}}}
+]=],supported={['0:1']=true,['8875:3526786699']=true}},{name='lib/patterns.lua',added=false,source=[=[local c=require('component')
+return function(C,mode,options)
+ options=options or {}
+ assert(mode=='preview'or mode=='run'or mode=='watch'or mode=='replace','用法：patterns preview / run / watch / replace')
+ local cfg=C.load();local address=assert(cfg.workshopInterface,'先setup绑定专用工坊ME接口')
+ assert(address~=cfg.mainInterface,'工坊接口不能用主网供液接口')
+ local function guard()
+ if mode=='replace'then
+  local function stopped(path)
+   local r=C.read(C.path(path));assert(not r or r.stage=='stopped'and not r.pending and not r.plan and not r.incomplete,'仍有未完成批次或未确认操作，不能覆盖登记：'..path)
+   for _,j in pairs(r and r.requests or{})do assert(j.state=='done'or j.state=='rejected'and j.preSubmissionFailed,'AE申请尚未确认，不能覆盖登记')end
+  end
+  for group in ipairs(cfg.groups)do
+   stopped('state/group-'..group..'/cell-feed.journal');stopped('state/group-'..group..'/cohort.dat');stopped('state/group-'..group..'/cache.journal')
+  end
+  for i,n in ipairs(cfg.nodes)do
+   stopped('state/node-'..i..'/production.journal')
+   assert(c.invoke(n.address,'getState')=='idle'and c.invoke(n.address,'getParallelRecipesInProgress')==0 and c.invoke(n.address,'isWorkAllowed')==false,'先结束批次并关闭节点接单，再覆盖登记')
+  end
+ end
+ for group,g in ipairs(cfg.groups)do
+  assert(address~=g.subInterface,'工坊接口不能用原液子网接口')
+  for _,n in ipairs(cfg.nodes)do if n.group==group then
+   local state=c.invoke(n.address,'getState')
+   assert(mode=='preview'or (state=='idle'or state=='paused-immediate'or state=='nanite-tier-too-low'),'先暂停生产再处理样板')
+  end end
+  for _,a in ipairs(g.generators)do
+   assert(mode=='preview'or (c.invoke(a,'isWorkAllowed')==false and c.invoke(a,'isMachineActive')==false),'先关闭纠缠器再处理样板')
+  end
+ end
+ end
+ guard()
+ local f=assert(io.open(C.path('runtime/patterns.lua'),'r'));local text=f:read('*a');f:close()
+ text=text:gsub('local ADDRESS="[^"]+"',function()return 'local ADDRESS='..string.format('%q',address)end,1)
+ text=text:gsub('local DIR="[^"]+"',function()return 'local DIR='..string.format('%q',cfg.recipeDirectory)end,1)
+ local env=options.print and setmetatable({print=options.print},{__index=_ENV})or _ENV
+ local hooks=options.hooks
+ if hooks then local before=hooks.beforeSlot;hooks.beforeSlot=function(slot)guard();if before then before(slot)end end end
+ assert(load(text,'V2样板处理','t',env))(mode,hooks)
+end
+]=],supported={['1565:1253859302']=true}},{name='runtime/patterns.lua',added=false,source=[=[-- Automatic workshop pattern registration. Never touches the production interface.
+local mode,hooks=...
+mode=mode or "preview";hooks=hooks or {}
+local c=require("component")
+local fs=require("filesystem")
+local ser=require("serialization")
+local event=require("event")
+local ADDRESS="72994a02-7bff-41cb-bfc7-8a541036d7ad"
+local DIR="/home/bec/recipes"
+local announced={}
+-- GTNH 2.9 NEI exports source fluids for BEC recipes. Both forms represent
+-- the same mB demand; only named BEC source fluids may be removed.
+local sourceKinds={['molten.infinity']='infinity',['molten.chromaticglass']='chromaticglass',
+ ['molten.transcendentmetal']='transcendentmetal',dimensionallyshiftedsuperfluid='dimshiftedsuperfluid',
+ ['molten.neutronium']='neutronium',['molten.cosmicneutronium']='cosmicneutronium',
+ ['molten.bedrockium']='bedrockium',['molten.celestialtungsten']='celestialtungsten',
+ ['molten.hypogen']='hypogen',phononmedium='phononmedium',quarkgluonplasma='quarkgluonplasma',
+ ['molten.spacetime']='spacetime',temporalfluid='time',spatialfluid='space',
+ ['molten.temporalfluid']='time',['molten.spatialfluid']='space',boundlesscosmicsolder='cosmicsolder',
+ ['molten.magnetohydrodynamicallyconstrainedstarmatter']='mhdcsm',['molten.magmatter']='magmatter',
+ ['molten.universium']='universium',['molten.eternity']='eternity'}
+local function equal(a,b)
+ if type(a)~=type(b) then return false end
+ if type(a)~="table" then return a==b end
+ for k,v in pairs(a) do if not equal(v,b[k]) then return false end end
+ for k in pairs(b) do if a[k]==nil then return false end end
+ return true
+end
+local function read(slot) return c.invoke(ADDRESS,"getInterfacePattern",slot) end
+local function load(path)
+ local f=assert(io.open(path,"r"));local text=f:read("*a");f:close()
+ local value=ser.unserialize(text);assert(type(value)=="table","配方记录损坏，保留原文件")
+ return value
+end
+local function save(path,record)
+ local text=ser.serialize(record,false)
+ local f=assert(io.open(path..".tmp","w"))
+ assert(f:write(text),"配方记录写入失败");assert(f:flush(),"配方记录刷新失败")
+ local closed,reason=f:close();assert(closed~=false and reason==nil,"配方记录关闭失败")
+ local check=assert(io.open(path..".tmp","r"));local copy=check:read("*a");check:close()
+ assert(copy==text and type(ser.unserialize(copy))=="table","配方记录回读失败")
+ local backup
+ if fs.exists(path) then
+  local n=1;while fs.exists(path..".backup-"..n) do n=n+1 end
+  backup=path..".backup-"..n;assert(fs.rename(path,backup),"旧配方记录归档失败")
+ end
+ local ok,err=fs.rename(path..".tmp",path)
+ if not ok then if backup then fs.rename(backup,path) end;error(err or "配方记录保存失败") end
+end
+local function inspect(p)
+ assert(p.isCraftable==false,"仅处理加工样板")
+ assert(type(p.inputs)=="table" and type(p.outputs)=="table" and #p.outputs==1,"仅处理单产物加工样板")
+ local out=p.outputs[1]
+ assert(type(out.name)=="string" and not out.hasTag,"产物标识无效或带NBT，暂不登记")
+ local ordinary,fluids={},{}
+ local tail=false
+ for index,input in ipairs(p.inputs) do
+  assert(type(input)=="table" and type(input.name)=="string","输入标识无效")
+  local raw=input.name:gsub('^fluid%.','');local source=sourceKinds[raw]
+  if input.name:sub(1,10)=="entangled_"or source then
+   tail=true
+   local n=tonumber(input.amount or input.size)
+   assert(n and n>0 and n==math.floor(n),"凝聚物数量无效")
+   assert(not (input.size and input.amount) or input.size==input.amount,"凝聚物数量字段不一致")
+   fluids[#fluids+1]={name=source and 'entangled_'..source or input.name,amount=n,index=index}
+  else
+   assert(input.amount==nil,"不支持的BEC原液 "..input.name.."；保留样板，不猜测对应凝聚物")
+   assert(not tail,"凝聚物后还有普通输入，保留样板不处理")
+   ordinary[#ordinary+1]=input
+  end
+ end
+ local key=out.name:gsub("[^%w_]","_").."_"..tostring(out.damage or 0).."_"..tostring(out.size or 1)
+ return DIR.."/"..key..".dat",ordinary,fluids
+end
+local function notify(slot,text)
+ if announced[slot]~=text then print("槽 "..slot.."："..text);announced[slot]=text end
+end
+local function process(slot)
+ local p=read(slot)
+ if p==nil then announced[slot]=nil;return end
+ assert(type(p)=="table","样板不可读")
+ local path,ordinary,fluids=inspect(p)
+ local existing=fs.exists(path) and load(path)
+ if #fluids==0 then
+  if existing then
+   assert(existing.state=="converted" and equal(p.inputs,existing.ordinaryInputs)
+    and equal(p.outputs,existing.outputs),"现有样板与登记记录不符；覆盖需要保留全部流体需求的完整BEC原始样板")
+   notify(slot,"已转换并登记，无需重复处理")
+  else notify(slot,"没有凝聚物输入，也无原始需求记录；不猜测配方") end
+  return
+ end
+ assert(#ordinary>0,"不能移除全部样板输入")
+ local replacing=false
+ if existing then
+  assert(existing.state=="converted","旧转换尚未完成，保留样板和记录，不允许覆盖")
+  local same=equal(existing.original,p)and equal(existing.ordinaryInputs,ordinary)and equal(existing.condensates,fluids)
+  replacing=not same
+  assert(same or mode=="replace"or mode=="preview","同产物登记已变化，请使用备份并覆盖此槽")
+ end
+ local name=tostring(p.outputs[1].label or p.outputs[1].name)
+ if mode=="preview" then
+  print("槽 "..slot.."："..name.."，普通输入 "..#ordinary.." 项，凝聚物 "..#fluids.." 项")
+  if replacing then print("  与旧登记不同；覆盖此槽会先备份旧记录")end
+  for _,f in ipairs(fluids) do print("  "..f.name.." "..f.amount.." mB") end
+  return
+ end
+ assert(equal(read(slot),p),"登记前样板已变化")
+ local writeRecord=not existing or replacing
+ local record=not writeRecord and existing or {version=1,state="prepared",interface=ADDRESS,slot=slot,
+  original=p,ordinaryInputs=ordinary,outputs=p.outputs,condensates=fluids}
+ if writeRecord then assert(fs.makeDirectory(DIR)~=false,"创建配方目录失败");save(path,record) end
+ local changed=false
+ local ok,err=xpcall(function()
+  for i=#fluids,1,-1 do
+   local before=read(slot)
+   local expected={};for index=1,fluids[i].index do expected[index]=p.inputs[index] end
+   assert(type(before)=="table" and before.isCraftable==p.isCraftable and equal(before.inputs,expected)
+    and equal(before.outputs,p.outputs),"转换途中样板变化")
+   changed=true
+   assert(c.invoke(ADDRESS,"clearInterfacePatternInput",slot,fluids[i].index)~=false,"清除凝聚物输入失败")
+  end
+  local after=read(slot)
+  assert(type(after)=="table" and after.isCraftable==p.isCraftable and equal(after.inputs,ordinary) and equal(after.outputs,p.outputs),"转换结果不符")
+  if writeRecord then record.state="converted";save(path,record) end
+ end,debug.traceback)
+ if not ok then
+  if changed then
+   local restored,restoreErr=pcall(function()
+    local after=read(slot)
+    assert(type(after)=="table" and after.isCraftable==p.isCraftable and equal(after.outputs,p.outputs),"样板已被替换，不能自动还原")
+    assert(type(after.inputs)=="table" and #after.inputs>=#ordinary and #after.inputs<=#p.inputs,"输入数量变化")
+    for i,input in ipairs(after.inputs) do assert(equal(input,p.inputs[i]),"输入内容变化，不能自动还原") end
+    for index=#after.inputs+1,#p.inputs do
+     local input=p.inputs[index]
+     assert(c.invoke(ADDRESS,"setInterfacePatternInput",slot,index,
+      {name=input.name,size=input.size or input.amount,amount=input.amount or input.size},"fluid")~=false,"还原失败")
+    end
+    assert(equal(read(slot),p),"还原核对失败")
+   end)
+   if writeRecord then
+    record.state=restored and "restored" or "needs_manual_restore"
+    record.error=tostring(err);record.restoreError=not restored and tostring(restoreErr) or nil
+    local saved=pcall(save,path,record)
+    if replacing and restored and saved then
+     assert(pcall(save,path,existing),"原样板已还原，但恢复旧登记失败；保留归档核对")
+    end
+   end
+   error(tostring(err)..(restored and "；原样板已还原" or "；请保留此槽和记录，人工核对"))
+  end
+  error(err)
+ end
+ notify(slot,(replacing and "旧登记已备份，覆盖完成："or "转换完成并登记：")..name)
+end
+local function main()
+ assert(mode=="preview" or mode=="run" or mode=="watch"or mode=="replace","用法: preview / run / watch / replace")
+ if mode=="replace"then assert(type(hooks.onlySlot)=="number"and hooks.onlySlot%1==0 and hooks.onlySlot>=1 and hooks.onlySlot<=9,"请选择一个覆盖槽位（1–9）")end
+ local methods=c.methods(ADDRESS)
+ for _,m in ipairs({"getInterfacePattern","clearInterfacePatternInput","setInterfacePatternInput"}) do
+  assert(methods[m]~=nil,"工作接口缺少方法："..m)
+ end
+ print("BEC 样板自动处理：工作接口 "..ADDRESS)
+ print(mode=="preview" and "只读预览，不修改样板或记录" or "放入原加工样板的副本，自动去除凝聚物输入并保存需求")
+ repeat
+  for slot=mode=="replace"and hooks.onlySlot or 1,mode=="replace"and hooks.onlySlot or 9 do
+   if hooks.shouldStop and hooks.shouldStop()then print("样板处理已停止，已完成槽位和需求记录保留");return end
+   if hooks.beforeSlot then hooks.beforeSlot(slot)end
+   local ok,err=pcall(process,slot)
+   if not ok then notify(slot,"暂停处理："..tostring(err));if hooks.raiseErrors then error(err)end;return end
+   if hooks.onSlot then hooks.onSlot(slot)end
+  end
+  if mode~="watch" then break end
+  local _,_,char=event.pull(1,"key_down")
+  if char==113 or char==81 then break end
+ until false
+ print("样板处理已结束；转换样板仍在工作接口，需求记录在 "..DIR)
+end
+local ok,err=xpcall(main,debug.traceback)
+if not ok then print("样板服务停止："..tostring(err));if hooks.raiseErrors then error(err)end end
+]=],supported={['7842:1953465280']=true}}}
 
 local fs=require('filesystem');local root='/home/bec_v2/'
 local function read(p)local f=io.open(p,'r');if not f then return end;local s=f:read('*a');f:close();return s end

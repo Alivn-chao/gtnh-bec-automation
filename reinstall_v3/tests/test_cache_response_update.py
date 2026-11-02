@@ -29,7 +29,7 @@ class CacheResponseUpdateTests(unittest.TestCase):
         count=l.eval('count');l.execute(SCRIPT);self.assertEqual(l.eval('count'),count)
         for name,value in [('config.dat','incomplete-keep'),('bindings.draft.dat','draft-keep'),('state/node-1/production.journal','pending-keep'),('cache.config','cache-settings-keep'),('state/group-1/cache.journal','pending-cache-keep')]:
             self.assertEqual(l.globals().files['/home/bec_v2/'+name],value)
-        self.assertLess(len(SCRIPT.encode()),180000)
+        self.assertLess(len(SCRIPT.encode()),205000)
 
     def test_each_rename_failure_restores_every_file(self):
         for failure in range(1,2*len(NAMES)+1):
@@ -62,5 +62,12 @@ class CacheResponseUpdateTests(unittest.TestCase):
         l.execute(SCRIPT)
         for name in NAMES:self.assertEqual(l.globals().files['/home/bec_v2/'+name],(ROOT/'reinstall_v2/files'/name).read_text(encoding='utf-8'))
         self.assertIn('BEC_V3_WEB_SINGLE_INSTANCE_1',l.globals().files['/home/bec_v2/web.lua'])
+
+    def test_deployed_full_recheck_can_upgrade_with_pattern_runtime_together(self):
+        l=self.make()
+        for name in NAMES:
+            l.globals().files['/home/bec_v2/'+name]=subprocess.check_output(['git','show','44f3901:reinstall_v2/files/'+name],cwd=ROOT).decode('utf-8')
+        l.execute(SCRIPT)
+        for name in NAMES:self.assertEqual(l.globals().files['/home/bec_v2/'+name],(ROOT/'reinstall_v2/files'/name).read_text(encoding='utf-8'))
 
 if __name__=='__main__':unittest.main()

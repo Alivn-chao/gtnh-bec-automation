@@ -1,3 +1,50 @@
+# 2026-11-02 新版NEI/覆盖已安装，用户关游戏，待重连核对
+
+最新用户确认“这就是BEC配方页录出”“新版本改了样板nei”，最后说“我把游戏线关了，你先准备好”。
+**当前不再调用MCP，不再尝试连接/生产；准备离线包、文档并在原分支提交。重连须先读状态，不能重放。**
+关游戏前已安装4文件并逐字回读，网页单实例重开且paused。新工坊槽1被读到16项物品+
+4项molten.*原液，产物6个tectech:gt.godforgecasing:0；第二物品变成256个基岩超致密板，
+旧盘则是2个无尽超致密板，旧登记含entangled_bedrockium2359296，新NEI含molten.infinity18432。
+新版NEI原液已支持明确19种映射/时间空间别名/可选fluid.前缀，数量1:1；未知原液拒绝，
+没有流体的冲突样板不猜需求。原始完整p保留raw名用于rollback；condensates规范entangled名。
+
+新增patterns mode=replace且必须指定slot1–9，仅处理选中槽，旧converted归档.backup-N，
+prepared先落盘，再清除输入/回读并converted。转换失败还原完整新原样板，恢复旧converted
+登记（保留失败档案）；旧未完成转换/生产/feed/cache记录拒绝。普通run仍拒绝不同登记。
+H/Web事件和页面“覆盖槽位+备份并覆盖此槽”已配套；cacheCatalogue在结束后失效重建。
+
+旧5份等待记录：第一次retire_unadmitted_4因盘已外部取出，verifyCell未通过，未修改现场。
+第二次_5验证双盘均空，在写原文备份后assert(file.close())遇到OC无返回值而停，begun=false，
+runner已恢复。_6对已存在备份逐字核对，正确检查close~=false/无reason后完成：原文
+/home/bec_v2/state/group-1/cell-feed.journal.before-recipe-replace-1 保留；16台idle/0/关闭/RS15，
+cohort和各生产/cache已stopped无pending。双驱动器全部20槽空；未搬/删原料。原配额成员1–5
+已恢复原parallel min/max并回读，等待记录写stopped+retired(unadmitted-recipe-changed,
+completed=false,materialLocation=externally-removed-cell,expectedOldMaterialCount=530)。
+证明diagnostics/recipe-replace-retired-20261102.dat。旧5份不是已完成，原料去向在用户取出的盘。
+
+CAS安装逐字回读（配置和退役feed字节不变），本机outputs/fault-20261102/overwrite-installed.json：
+- runtime/patterns.lua 9865B SHA256 4c3b5380f5491ba605994aab70eeb07a935747f1394d3e2a63209067d1a2a8d6
+- lib/patterns.lua 2510B 572dbf2c046c3099eb5c637267f027a73a8aed14d8a78fff1b962214b0d6b45f
+- lib/web_session.lua 21109B 55c9e5da68d8f0e9203ae8c89054426f39df66096af5692a962b330fd5ccac20
+- lib/web_page.html 235463B 7bda64bf29583f77f5104e0f7a81b14ca99e75813829bca60bfca6e06ca11e43
+备份分别runtime/.ochd-mcp/aeaebb72-26d7-4971-b49f-491eb55bdd97.bak，
+lib/.ochd-mcp/12aa67aa-ea74-40d4-b0e0-595a30b369a2.bak、ecceb4b9-af72-4847-be79-4eaae8ef3648.bak、
+eeade3e0-f89e-47ea-ba18-1293cdf8b8e1.bak。其他原生产/换蜂模块未改，机箱未关闭。
+
+start_pattern_replace_4成功重开paused网页。request_pattern_replace_4检查槽1完整20项/
+4项原液/第二物品基岩256/旧feed已退役，计划用原生patterns事件replace slot1 request21110291
+（token mcp-nei290-replace-slot1-4）。job e2f6e09d-b368-4c1d-aee8-a3c26758a46f回传assertion failed，
+没有REPLACE_SLOT1_SUBMITTED成功输出，未取得登记完成核对，不能说已覆盖；下一只读
+inspect请求随后连接10061被拒绝，operation ID 6a6a6990-d2ff-45af-a724-8d49c0992106。
+用户确认关游戏。重连先读取原登记/currentpattern、归档/回执及盘位，不重放请求。
+如果工坊已成功转换/新登记已converted，不能重复转；若未做，使用新UI显式单槽覆盖。
+需要把处理好的样板换到实际投料接口，旧AE任务/旧料不能自动变新，空原料盘回左缓存盘位。
+
+333回归/20核心通过(outputs/fault-20261102/overwrite-tests-final.txt)，Node页面检查通过，
+pattern-preview.png(1779x994)已看。10文件update_cache_response现含pattern runtime/lib，支持
+44f3901及历史基线；新基线全套升级及20个rename失败回滚通过。payload193KB，HTML235463B。
+详细fixes/pattern_replace/README.md。私有outputs和MCP客户端token绝不能上传。
+
 # 2026-11-02 后续5份等待接单（尚未解决）
 
 用户报告收尾后不动。MCP重新确认原13份完成，后续5份已冻结于右盘，530件/16种

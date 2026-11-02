@@ -120,13 +120,14 @@ return function(C,B,W,options)
     if P and P.co then P.stop=true;P.message='正在停止，当前槽位完成核对后退出';return P.message end
     return '没有正在执行的样板处理'
    end
-   idleEditor();assert(args.mode=='preview'or args.mode=='run','仅支持预览或处理一次')
+   idleEditor();assert(args.mode=='preview'or args.mode=='run'or args.mode=='replace','仅支持预览、处理一次或覆盖单槽')
+   if args.mode=='replace'then assert(type(args.slot)=='number'and args.slot%1==0 and args.slot>=1 and args.slot<=9,'覆盖槽位须为1–9')end
    assert(args.revision==revision(),'绑定已变化，请等待保存并应用后再试');cleanDraft()
    assert(cfg.workshopInterface and cfg.workshopInterface~='','先绑定并应用独立的样板工坊ME接口')
    local formal=expected;local mode=args.mode;scan=nil
-   P={mode=mode,status='running',slot=0,logs={},rows={},message=mode=='preview'and '正在只读预览'or '正在处理样板副本'}
+   P={mode=mode,status='running',slot=0,logs={},rows={},message=mode=='preview'and '正在只读预览'or mode=='replace'and '正在备份并覆盖所选槽位登记'or '正在处理样板副本'}
    P.co=coroutine.create(function()
-    local hooks={raiseErrors=true,shouldStop=function()return P.stop==true end,
+    local hooks={raiseErrors=true,onlySlot=mode=='replace'and args.slot or nil,shouldStop=function()return P.stop==true end,
      beforeSlot=function(slot)
       assert(B.read(path)==formal,'样板处理期间正式配置变化，保留现场停止');P.slot=slot
       if mode=='run'then local disk=storage.status();assert(disk.known and disk.ok,'磁盘空间不足，停止样板处理并保留记录')end

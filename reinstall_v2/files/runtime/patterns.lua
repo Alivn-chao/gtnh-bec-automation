@@ -8,6 +8,17 @@ local event=require("event")
 local ADDRESS="72994a02-7bff-41cb-bfc7-8a541036d7ad"
 local DIR="/home/bec/recipes"
 local announced={}
+-- GTNH 2.9 NEI exports source fluids for BEC recipes. Both forms represent
+-- the same mB demand; only named BEC source fluids may be removed.
+local sourceKinds={['molten.infinity']='infinity',['molten.chromaticglass']='chromaticglass',
+ ['molten.transcendentmetal']='transcendentmetal',dimensionallyshiftedsuperfluid='dimshiftedsuperfluid',
+ ['molten.neutronium']='neutronium',['molten.cosmicneutronium']='cosmicneutronium',
+ ['molten.bedrockium']='bedrockium',['molten.celestialtungsten']='celestialtungsten',
+ ['molten.hypogen']='hypogen',phononmedium='phononmedium',quarkgluonplasma='quarkgluonplasma',
+ ['molten.spacetime']='spacetime',temporalfluid='time',spatialfluid='space',
+ ['molten.temporalfluid']='time',['molten.spatialfluid']='space',boundlesscosmicsolder='cosmicsolder',
+ ['molten.magnetohydrodynamicallyconstrainedstarmatter']='mhdcsm',['molten.magmatter']='magmatter',
+ ['molten.universium']='universium',['molten.eternity']='eternity'}
 local function equal(a,b)
  if type(a)~=type(b) then return false end
  if type(a)~="table" then return a==b end
@@ -45,13 +56,15 @@ local function inspect(p)
  local tail=false
  for index,input in ipairs(p.inputs) do
   assert(type(input)=="table" and type(input.name)=="string","输入标识无效")
-  if input.name:sub(1,10)=="entangled_" then
+  local raw=input.name:gsub('^fluid%.','');local source=sourceKinds[raw]
+  if input.name:sub(1,10)=="entangled_"or source then
    tail=true
    local n=tonumber(input.amount or input.size)
    assert(n and n>0 and n==math.floor(n),"凝聚物数量无效")
    assert(not (input.size and input.amount) or input.size==input.amount,"凝聚物数量字段不一致")
-   fluids[#fluids+1]={name=input.name,amount=n,index=index}
+   fluids[#fluids+1]={name=source and 'entangled_'..source or input.name,amount=n,index=index}
   else
+   assert(input.amount==nil,"不支持的BEC原液 "..input.name.."；保留样板，不猜测对应凝聚物")
    assert(not tail,"凝聚物后还有普通输入，保留样板不处理")
    ordinary[#ordinary+1]=input
   end
@@ -71,26 +84,31 @@ local function process(slot)
  if #fluids==0 then
   if existing then
    assert(existing.state=="converted" and equal(p.inputs,existing.ordinaryInputs)
-    and equal(p.outputs,existing.outputs),"现有样板与登记记录不符，请保留并核对")
+    and equal(p.outputs,existing.outputs),"现有样板与登记记录不符；覆盖需要保留全部流体需求的完整BEC原始样板")
    notify(slot,"已转换并登记，无需重复处理")
   else notify(slot,"没有凝聚物输入，也无原始需求记录；不猜测配方") end
   return
  end
  assert(#ordinary>0,"不能移除全部样板输入")
+ local replacing=false
  if existing then
-  assert(existing.state=="converted" and equal(existing.original,p),"同产物记录冲突或有未完成转换，保留记录")
-  assert(equal(existing.ordinaryInputs,ordinary) and equal(existing.condensates,fluids),"登记需求不一致")
+  assert(existing.state=="converted","旧转换尚未完成，保留样板和记录，不允许覆盖")
+  local same=equal(existing.original,p)and equal(existing.ordinaryInputs,ordinary)and equal(existing.condensates,fluids)
+  replacing=not same
+  assert(same or mode=="replace"or mode=="preview","同产物登记已变化，请使用备份并覆盖此槽")
  end
  local name=tostring(p.outputs[1].label or p.outputs[1].name)
  if mode=="preview" then
   print("槽 "..slot.."："..name.."，普通输入 "..#ordinary.." 项，凝聚物 "..#fluids.." 项")
+  if replacing then print("  与旧登记不同；覆盖此槽会先备份旧记录")end
   for _,f in ipairs(fluids) do print("  "..f.name.." "..f.amount.." mB") end
   return
  end
  assert(equal(read(slot),p),"登记前样板已变化")
- local record=existing or {version=1,state="prepared",interface=ADDRESS,slot=slot,
+ local writeRecord=not existing or replacing
+ local record=not writeRecord and existing or {version=1,state="prepared",interface=ADDRESS,slot=slot,
   original=p,ordinaryInputs=ordinary,outputs=p.outputs,condensates=fluids}
- if not existing then assert(fs.makeDirectory(DIR)~=false,"创建配方目录失败");save(path,record) end
+ if writeRecord then assert(fs.makeDirectory(DIR)~=false,"创建配方目录失败");save(path,record) end
  local changed=false
  local ok,err=xpcall(function()
   for i=#fluids,1,-1 do
@@ -103,7 +121,7 @@ local function process(slot)
   end
   local after=read(slot)
   assert(type(after)=="table" and after.isCraftable==p.isCraftable and equal(after.inputs,ordinary) and equal(after.outputs,p.outputs),"转换结果不符")
-  if not existing then record.state="converted";save(path,record) end
+  if writeRecord then record.state="converted";save(path,record) end
  end,debug.traceback)
  if not ok then
   if changed then
@@ -119,19 +137,23 @@ local function process(slot)
     end
     assert(equal(read(slot),p),"还原核对失败")
    end)
-   if not existing then
+   if writeRecord then
     record.state=restored and "restored" or "needs_manual_restore"
     record.error=tostring(err);record.restoreError=not restored and tostring(restoreErr) or nil
-    pcall(save,path,record)
+    local saved=pcall(save,path,record)
+    if replacing and restored and saved then
+     assert(pcall(save,path,existing),"原样板已还原，但恢复旧登记失败；保留归档核对")
+    end
    end
    error(tostring(err)..(restored and "；原样板已还原" or "；请保留此槽和记录，人工核对"))
   end
   error(err)
  end
- notify(slot,"转换完成并登记："..name)
+ notify(slot,(replacing and "旧登记已备份，覆盖完成："or "转换完成并登记：")..name)
 end
 local function main()
- assert(mode=="preview" or mode=="run" or mode=="watch","用法: preview / run / watch")
+ assert(mode=="preview" or mode=="run" or mode=="watch"or mode=="replace","用法: preview / run / watch / replace")
+ if mode=="replace"then assert(type(hooks.onlySlot)=="number"and hooks.onlySlot%1==0 and hooks.onlySlot>=1 and hooks.onlySlot<=9,"请选择一个覆盖槽位（1–9）")end
  local methods=c.methods(ADDRESS)
  for _,m in ipairs({"getInterfacePattern","clearInterfacePatternInput","setInterfacePatternInput"}) do
   assert(methods[m]~=nil,"工作接口缺少方法："..m)
@@ -139,7 +161,7 @@ local function main()
  print("BEC 样板自动处理：工作接口 "..ADDRESS)
  print(mode=="preview" and "只读预览，不修改样板或记录" or "放入原加工样板的副本，自动去除凝聚物输入并保存需求")
  repeat
-  for slot=1,9 do
+  for slot=mode=="replace"and hooks.onlySlot or 1,mode=="replace"and hooks.onlySlot or 9 do
    if hooks.shouldStop and hooks.shouldStop()then print("样板处理已停止，已完成槽位和需求记录保留");return end
    if hooks.beforeSlot then hooks.beforeSlot(slot)end
    local ok,err=pcall(process,slot)
