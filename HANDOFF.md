@@ -1,3 +1,48 @@
+# 最新：磁物质矿辞别名已装，原23份实机恢复，用户要求优先实测
+
+用户加了磁物质后报unknown hive4143。MCP确认盘库9为15个gregtech:gt.metaitem.03:4143，
+唯一矿辞naniteMagmatter；代码只有MagMatter。枚举NaniteTier.MagMatter对应Materials.MagMatter，
+标准tier10/familyMagMatter不变。是矿辞字母大小写别名遗漏，不是混料或蜂群搬运故障。
+盘库与实体hive_transposer都加Magmatter={10,'MagMatter'}。基础/刷新/检测/固定检查6份
+类型表同步；未放宽未知、NBT、混料、数量和未确认IO保护，未新增ID4143兜底。
+
+现场原23份tectech_gt_blockcasingsBA0_12_1.dat，quota前7台2、后9台1；cohort interrupted
+leader6，全部nanite-tier-too-low/关闭/RS15、零消耗，feed ready，双IO24槽空、子网空，
+换蜂done/holding Carbon65812/home1。节点6生产journal是starting、无pending/plan/申请/搬运。
+首次pause_magmatter23_10调用M.new(...,'ready')因不支持starting生产记录被拒，未改变现场。
+随后_11单独逐项核对该pre-operation starting记录，保留同一E和F，不改任何流水账，
+存diagnostics/magmatter-alias-before23-20261103.dat，p._becMagmatter23Engine10持原E，
+正常pause request21110502/token mcp-magmatter-23-pause-11。
+
+paused后暂挂web线程，精确修两文件各一处别名表。源现场20425B=f72d3fe...，
+确证为fixes/fixed_hive_checks/files/runtime/nanites_cell.lua规范LF版（原磁盘文件CRLF20827）；
+没有拿reinstall_v2较旧17489B基础版覆盖：
+- runtime/nanites_cell.lua 20452B SHA256 e48c67a061b080c78ef1ab93d065186a55013d5556441fb08851b53cfb4a21fd，
+  备份runtime/.ochd-mcp/b72acb28-0363-4e57-9ccb-76ac95b56dd3.bak。
+- lib/hive_transposer.lua 1713B 3e9a34d9f7fcd661381837e9d958b54b5b1d119fd1516f1b9e120ef8f4368630，
+  备份lib/.ochd-mcp/26a0693c-7fad-492f-b6d6-1d5362f35ba1.bak。
+逐字回读完成，正式config.dat、feed/cohort/蜂群及节点6生产journal与装前字节相同。
+
+resume_magmatter23_11先resume线程再同一次job发start，push=true但网页后续回复仍是pause，
+模式binding，说明该次start未被处理；没有新蜂群操作。期间一次HTTP503很快自行恢复，
+无关机/重装。单独新job在确认runner running/同一E ready23后发start request21110504，
+token mcp-magmatter-live-start-12，push=true，已实际恢复。用户这时明确说“你改好就是了，
+测试直接实际测试就行”，后续以实机观察为主，偏好已补AGENTS。
+
+实际新工作器：T1回收65812到home1，装T4 Transcendent31104、阵列确认，蜂群检查10.35秒；
+门1.65秒，库存命中无搬液/纠缠，重叠准备12.20秒后整组放行，继续T1等后续阶段，fault=false。
+独立native只读盘库9依然15个naniteMagmatter，网页running/produce/fault=false，
+写diagnostics/magmatter-alias-live-20261103.dat；证明completed=false、原批23尚未宣称全完成。
+T10实物未被强行装载，当前配方需要低阶蜂群；最低64个装载规则保留。
+磁盘最新free约555583B(542KiB)，高于512KiB但余量不多，不要随意累加整套程序备份。
+当前只是运行中的23份，本轮未重投/重接单，也未删除AE任务、物料或运行记录。
+
+私有全部证据在outputs/magmatter-hive-20261103：before文件/版本、installed.json、实机日志、
+resume/start回执、live-proof.json。测试344+20已在用户要求前跑完，此后未加跑模拟。
+新增4项test_magmatter_hive覆盖15个备用不阻挡、实际矿辞T10/物理展示、未知依旧拒绝。
+不能把旧故障日志残留或显示缓存offline当成当前故障，须看当前fault/阶段和实际机器。
+继续原分支提交，不上传outputs或MCP配置/token。
+
 # 最新：供液槽位兼容已修复，原114份已完成，下一批1085生产中
 
 用户报告停住，MCP原web running/fault，114份tectech_gt_blockcasingsBA0_12_1.dat已经完整

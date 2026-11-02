@@ -6,7 +6,7 @@ return function(c,n)
  local kinds={Carbon={1,'Carbon'},Glowstone={1,'Glowstone'},Silver={2,'Silver'},Neutronium={2,'Neutronium'},
   Gold={3,'Gold'},TranscendentMetal={4,'Transcendent'},SixPhasedCopper={5,'SixPhasedCopper'},
   WhiteDwarfMatter={6,'WhiteDwarf'},BlackDwarfMatter={7,'BlackDwarf'},Universium={8,'Universium'},
-  Eternity={9,'Eternity'},MagMatter={10,'MagMatter'}}
+  Eternity={9,'Eternity'},MagMatter={10,'MagMatter'},Magmatter={10,'MagMatter'}}
  local function read()
   assert(c.invoke(n.transposer,'getInventoryName',side)=='gt.blockmachines'and c.invoke(n.transposer,'getInventorySize',side)==3,'实体蜂群收容总线缺失或布局变化')
   local item=c.invoke(n.transposer,'getStackInSlot',side,3)

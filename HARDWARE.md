@@ -1,5 +1,9 @@
 # 接线与组件地址
 
+2026-11-03 实机盘库9号为15个磁物质蜂群，gregtech:gt.metaitem.03:4143，
+矿辞naniteMagmatter（不是naniteMagMatter）。盘库和物理展示读取已补该别名，统一
+T10/MagMatter；新增盘未搬动。本轮原23份任务已恢复并处于生产阶段，无当前故障。
+
 最新供液槽位实测：MAIN 3afdc4cf-04e3-4ae9-8be6-e753c23a249d 原生配置槽是1–6，
 0和7以上越界，六槽全空；转运器66fb280f两侧4/5仍各6槽，方向不变。C.component现将
 内部旧0–5映射到该API，getter/setter/clear统一，旧0–5协议仍支持。原114份已从原ready

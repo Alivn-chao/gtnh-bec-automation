@@ -6,7 +6,7 @@ return function(c,n,cacheLayout)
  local kinds={Carbon={1,'Carbon'},Glowstone={1,'Glowstone'},Silver={2,'Silver'},Neutronium={2,'Neutronium'},
   Gold={3,'Gold'},TranscendentMetal={4,'Transcendent'},SixPhasedCopper={5,'SixPhasedCopper'},
   WhiteDwarfMatter={6,'WhiteDwarf'},BlackDwarfMatter={7,'BlackDwarf'},Universium={8,'Universium'},
-  Eternity={9,'Eternity'},MagMatter={10,'MagMatter'}}
+  Eternity={9,'Eternity'},MagMatter={10,'MagMatter'},Magmatter={10,'MagMatter'}}
  local layoutChecked=false
  local function read()
   if not cacheLayout or not layoutChecked then
