@@ -3,7 +3,7 @@
 local mode,ack,group=...;mode=mode or 'preview';group=tonumber(group)or 1
 assert(mode=='preview'or mode=='run','用法: preview / run ae-finished [设备组]')
 local C=assert(loadfile('/home/bec_v2/lib/config.lua'))();local cfg=C.load();C.validate(cfg,false)
-local c=require('component');local fs=require('filesystem');local clock=require('computer');local g=assert(cfg.groups[group])
+local c=C.component(require('component'));local fs=require('filesystem');local clock=require('computer');local g=assert(cfg.groups[group])
 local path=C.path('state/group-'..group..'/cache.journal')
 local function bytes(p)local f=assert(io.open(p,'r'));local text=f:read('*a');f:close();return text end
 local original=bytes(path);local formal=bytes(C.path('config.dat'));local old=C.read(path)

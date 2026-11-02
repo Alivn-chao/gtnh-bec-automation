@@ -10,7 +10,7 @@ ROOT=HERE.parent
 sys.path.insert(0,str(ROOT/'reinstall_v2'))
 from build import literal
 
-NAMES=['lib/config.lua','lib/cell_feed.lua','web.lua']
+NAMES=['lib/config.lua','lib/cell_feed.lua','web.lua','cache_zero_recover.lua']
 BASE='ff5da13'
 def signature(data):return str(len(data))+':'+str(zlib.adler32(data)&0xffffffff)
 
@@ -43,9 +43,10 @@ end
 def build():
  rows=[]
  for name in NAMES:
-  old=subprocess.check_output(['git','show',BASE+':reinstall_v2/files/'+name],cwd=ROOT)
+  old=[subprocess.check_output(['git','show',ref+':reinstall_v2/files/'+name],cwd=ROOT)for ref in (BASE,'2adf11f','0848982')]
   text=(ROOT/'reinstall_v2/files'/name).read_text(encoding='utf-8')
-  rows.append('{name='+repr(name)+',source='+literal(text)+',supported={['+repr(signature(old))+']=true}}')
+  known=','.join('['+repr(s)+']=true'for s in sorted({signature(v)for v in old}))
+  rows.append('{name='+repr(name)+',source='+literal(text)+',supported={'+known+'}}')
  tree=ast.parse((ROOT/'reinstall_v2/build_cache_update.py').read_text(encoding='utf-8'))
  body=next(ast.literal_eval(n.value)for n in tree.body if isinstance(n,ast.Assign)and any(isinstance(t,ast.Name)and t.id=='body'for t in n.targets))
  for old,new in [('BEC_V2_CACHE_UPDATE_1','BEC_RELEASE_290_UPDATE_1'),('/home/bec_cache_update.lua','/home/bec_290_update.lua'),('before-cache-','before-release290-'),('cache-new-','release290-new-'),('cache-failed-','release290-failed-')]:body=body.replace(old,new)

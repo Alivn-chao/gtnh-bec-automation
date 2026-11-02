@@ -1,3 +1,54 @@
+# 最新：供液槽位兼容已修复，原114份已完成，下一批1085生产中
+
+用户报告停住，MCP原web running/fault，114份tectech_gt_blockcasingsBA0_12_1.dat已经完整
+接单/回空盘，ready cursor17、quota=8,8,7×14；runtime/controller.lua:129 emptyConfig
+读取MAIN第0槽报index out of bounds，在本批生产journal创建前停止（node1仍是原13份
+stopped记录）。cohort=interrupted，所有节点立即暂停/关闭、凝聚物零消耗，无本批新申请/
+搬运意图。左盘为下一配方1085份/104160件，右盘空。
+
+实际readonly探测：MAIN0越界，1–6合法且全空，7–10越界；主/子常规接口tankCount6。
+当前本地OpenComputers1.12.68的正确类是li.cil.oc.integration.ae2fc.DriverBlockFluidInterface
+$Environment，getter/setter显式参数减1、getter默认1。旧outputs/compat-290目录误命名的
+290-DriverInterface$Environment.javap是空文件，不可当源码。此次正确javap在
+outputs/stalled-after-replace-20261102/FluidInterface.javap。具体当前为什么此前0号未报错
+不作猜测，只以当前实物与driver为准。期间MCP HTTP503，用户说重连后已恢复，未关机箱。
+
+修复lib/config.lua C.component：仅供液配置getter/setter显式logical0–5读识别后映射，支持
+旧0–5/实际1–6；识别只读，非index out of bounds错误不降级，未知/false写回执不重放；
+base按地址共享缓存。旧协议首次get0复用探测返回，避免增加回调/时序（初次实现多读一次
+触发已有pipeline模拟边界，复用后全套通过）。所有转运器side/RS/盘位均不改。
+cache_zero_recover.lua改用C.component，生产/缓存/全量检查本来已用包装器，无需改各调用点。
+
+恢复先调用M.new(...,'ready')只读核对原114配方、绑定、每台需求/配额/零消耗及盘位，
+并正常pause，原引擎临时存p._becFault114Engine8。证明
+diagnostics/fluid-slots-before-batch114-20261102.dat。全部工作器无co/无资源锁后结束web
+线程，E.shutdown确认paused/closed，原feed字节不变，机箱不关。CAS备份2文件并逐字回读：
+- lib/config.lua 12620B SHA256 f45226fda4d772b5112e36986213c301398408a9262285cfd23203640c0d98b3，
+  备份lib/.ochd-mcp/79ca165d-72a0-4254-a38a-00f917fb72fb.bak。
+- cache_zero_recover.lua 5520B b4f035df03ad8d1ed08c1e50740b29eb1ee12db7bf3708062143edefd4431df7，
+  备份.ochd-mcp/3b1627b7-0921-4db6-9c1d-62ce5a19aee8.bak。
+正式config.dat、ready feed字节保持。新C包装器读全部6槽为空，不再越界。
+
+start_ready114_slots_8因gsub未转义括号在创建线程前失败，没有启动/修改流水账；
+_9修正后成功重开web，仅内存把H options.engine设为一次性ready恢复（成功构造后回普通
+工厂）；磁盘web.lua没变。新C/Bridge均重新载入，不复用旧组件包装器。正常start request
+21110403/token mcp-ready114-slots-start-9明确push=true，从原ready任务继续，未重搬盘/接单。
+新开始时间约694775，恢复后多阶段换蜂正常，最后114工作器elapsed约209.15秒。
+
+原114份已真实完成：从cohort.dat.previous找到stopped16台，逐台finished、parallel匹配原
+8/8/7×14、每种consumed>=required，配方normalized匹配原114。消耗总计neutronium16809984、
+cosmicneutronium16809984、spacetime2101248、bedrockium4202496。独立证明已落盘
+diagnostics/fluid-slots-batch114-completed-20261102.dat，输出
+BATCH114_COMPLETED_AND_CONSUMPTION_VERIFIED，无异常。最新web running/produce/fault=false，
+next feed为1085份tectech_gt_godforgecasing_3_12.dat；不宣称1085已完成。
+缓存视图states offline可能是显示采样过期，不等于16台真实离线，别据此断电/清状态。
+
+340回归+20核心通过，Node页面通过。新增6项test_fluid_slots涵盖旧/新编号、末槽脏配置、
+共享缓存、只读检测和不重发写、完整生产controller；2.9 updater4文件支持旧固定配额
+ff5da13及已安装2adf11f/0848982、8个rename回滚位置。普通更新守卫仍拒绝未完成任务。
+此次特殊ready恢复仅用于已完整验证的114，不能推广为自动重放。私有证据/程序副本/
+回执/日志/测试在outputs/stalled-after-replace-20261102，禁止上传，token不打印。
+
 # 2026-11-02 重连后槽1已实际覆盖完成（最新）
 
 用户说继续，恢复MCP；同一OC已在线无lastError。先只读确认旧登记仍converted，工坊槽1仍

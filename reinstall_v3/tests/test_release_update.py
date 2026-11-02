@@ -5,7 +5,7 @@ import unittest
 from test_web_update import fixture
 
 ROOT=Path(__file__).resolve().parents[2]
-NAMES=['lib/config.lua','lib/cell_feed.lua','web.lua']
+NAMES=['lib/config.lua','lib/cell_feed.lua','web.lua','cache_zero_recover.lua']
 OLD={name:subprocess.check_output(['git','show','ff5da13:reinstall_v2/files/'+name],cwd=ROOT).decode()for name in NAMES}
 SCRIPT=(ROOT/'reinstall_v3/update_290.lua').read_text(encoding='utf-8')
 
@@ -44,8 +44,8 @@ package.preload.component=function()return c end;package.loaded.component=nil
   for name,text in [('config.dat','incomplete-keep'),('bindings.draft.dat','draft-keep'),('state/node-1/production.journal','pending-keep'),('recipes/a.dat','recipe-keep')]:
    self.assertEqual(l.globals().files['/home/bec_v2/'+name],text)
 
- def test_each_rename_failure_rolls_back_all_three_programs(self):
-  for failure in range(1,7):
+ def test_each_rename_failure_rolls_back_all_programs(self):
+  for failure in range(1,2*len(NAMES)+1):
    l=self.make();l.globals().failure=failure
    l.execute("local fs=require('filesystem');local rename=fs.rename;local n=0;fs.rename=function(a,b)n=n+1;if n==failure then return false end;return rename(a,b)end")
    with self.assertRaisesRegex(Exception,'旧程序已恢复'):l.execute(SCRIPT)
@@ -67,6 +67,12 @@ package.preload.component=function()return c end;package.loaded.component=nil
    l=self.make();l.execute(mutation);before={name:l.globals().files['/home/bec_v2/'+name]for name in NAMES}
    with self.assertRaises(Exception):l.execute(SCRIPT)
    for name in NAMES:self.assertEqual(l.globals().files['/home/bec_v2/'+name],before[name])
+
+ def test_deployed_290_base_can_upgrade_without_changing_config(self):
+  l=self.make()
+  for name in NAMES:l.globals().files['/home/bec_v2/'+name]=subprocess.check_output(['git','show','0848982:reinstall_v2/files/'+name],cwd=ROOT).decode()
+  l.execute(SCRIPT)
+  for name in NAMES:self.assertEqual(l.globals().files['/home/bec_v2/'+name],(ROOT/'reinstall_v2/files'/name).read_text(encoding='utf-8'))
 
 
 if __name__=='__main__':unittest.main()
