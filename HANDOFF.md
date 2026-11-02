@@ -1,3 +1,24 @@
+# 2026-11-02 后续5份等待接单（尚未解决）
+
+用户报告收尾后不动。MCP重新确认原13份完成，后续5份已冻结于右盘，530件/16种
+原料完整不减，cell-feed=waiting-nodes/waveOpened，无pending；节点1–5 allowed=true、
+parallel=0/state=idle，6–16关闭。E任务未故障、未禁用，feed.message为固定配额同时
+接单等待其余节点；页面沿用上一工作器phase=finish是展示问题，不能说本批在收尾。
+用户确认ME输入总线自动拉取已开且能看到新原料，随后发了节点GUI：idle、30720T4、
+无需求、上次关闭36分前；该截图没有配方检查失败原因，也未确认截图是哪台节点。
+节点1 getSensorInformation为valid/Problems0，min=max=1，未暴露配方失败原因。
+单次验证节点1空闲/0并行/配额1/RS15后关闭并重开接单，回执两次均确认，仍idle/0；
+未动盘、批次或原料/生产记录，未重复投料。证明diagnostics/rearm-idle-node-20261102.dat。
+仍需核对节点ME输入总线16种原料的实际显示、输出总线及主阵列输入电压/结构条件。
+生产驱动器adapter自身无component.methods，MCP无法直接从该地址读AE网或总线内容。
+当前程序保留运行/接单等候，不能称5份成功。后续证据outputs/fault-20261102/stuck-*。
+
+更正此前“后续5份Celestial Magnetic Chassis”是从文件名误猜：该登记文件
+tectech_gt_godforgecasing_0_6.dat实际outputs为Singularity Reinforced Stellar Shielding
+Casing（damage0,size6）。本机正式版jar的BECRecipes.runLateRecipes物品16种数量与
+登记一致，但Infinity18432替代旧登记Bedrockium2359296。服务器是否同样配方尚未
+验证，不能仅以本机jar重写游戏登记；若能接单，旧登记可能触发凝聚物需求不符保护。
+
 # 2026-11-02 缓存故障恢复、全量检查按钮及原13份完成
 
 用户要求MCP诊断，原mode=binding，cache.blocked=true，历史runtime/cache.lua:103
