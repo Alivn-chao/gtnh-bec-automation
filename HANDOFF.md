@@ -1,3 +1,58 @@
+# 2026-11-02 缓存故障恢复、全量检查按钮及原13份完成
+
+用户要求MCP诊断，原mode=binding，cache.blocked=true，历史runtime/cache.lua:103
+“高速供液口重复绑定: temporalfluid”。原journal为stopped/incomplete=false、永恒
+5000112mB明确成功、requests空；16台idle/关闭接单，子网空、纠缠器停。MCP当前
+10个转运器扫描无重复，用户表示没有调整过，未证实历史瞬间的具体重复来源。
+此前一直等QGP口，用户截图后第6个转运器底0已可见quarkgluonplasma（0量、类型
+已配置，主网现货）；原配置/config4453B不改。实际修复缓存和生产扫描：只对本次
+所需的重复原液报错；无关重复不阻断、不任意选路、不保存歧义路；相同物理路线
+重复枚举可去重。所需原液/别名重复仍在任何新请求/搬运前拒绝。
+
+用户纠正要“重新检查所有”而非只查供液：新增lib/recheck.lua、右上角“全量重新
+检查”及结果对话框/事件recheck_all。只在暂停、样板/缓存工作器均已收尾时执行，
+遍历全部已绑定组件/16台、生产/盘批次/缓存/蜂群记录、供液/韦门/IO/盘位/缺库原液
+等，收集异常，完整报告diagnostics/recheck-last.dat。检查不写硬件，不删/改生产
+或缓存journal；报告落盘且全部通过后才clearCheckedFault，清旧缓存内存故障和
+已结束的cache-N资源锁、重建发现缓存，不自动启动。未确认/未完成、子网余液、
+旧持蜂记录与空实体仓冲突等拒绝解除；现有启动入口用于后续恢复。
+主阵列未接独立OC适配器，gt_machine只有纠缠器，空闲检查不能证明主机已开启。
+
+正常暂停/确认全部stopped后只结束标准网页线程，CAS备份安装7文件，逐字回读；
+机箱未关，配置/配方/缓存目标和原运行记录不变。回读证明full-recheck-installed-
+20261102.dat，余1016949B，原故障状态另存duplicate-route-before-recheck-20261102.dat。
+实际使用同一网页事件执行全量检查，57项/0问题，旧缓存保护解除。随后恢复启动。
+
+恢复后自然进入13份Rough Sensor Array（gregtech_gt_metaitem_03_32327_1.dat），
+13台各1已接到、全assembler-offline；用户确认忘开阵列，后手动开启。逐台核对
+原配方/配额、消耗0、右盘空、全组RS15/关闭，并保存assembler-online-batch13-
+20261102.dat；沿用同一E/Feed正常pause/start，未改盘/生产记录、不重复接单。
+然后遇上旧蜂群done记录holding=30745T4但实物0：上轮适配漏了旧记录迁移。用户
+已确认旧总线升级消失并重装，实际实体/16台阵列均0、IO全空、旧record无pending，
+原13份仍零消耗。原文归档nanites-cell.journal.before-external-hatch-1，经原文回读
+后仅把done持蜂基线改为空，附external-hatch-replaced-empty具名凭据/旧holding，
+不假造旧蜂群已回收。证明replaced-hive-reconciled-20261102.dat。再次沿用同一E
+正常pause/start，从原ready/cohort继续，未重投/改生产journal。真实T4装入31104，
+阵列确认、重叠准备11.05秒、原13份完整消耗核对通过，工作器43.15秒正常完成。
+已继续自然接5份tectech_gt_godforgecasing_0_6.dat；最后快照waiting-nodes，不能
+宣称这后续5份已完成。feed的admission=785秒包含人工开机/诊断等待，不是提速指标。
+
+322回归+20核心通过；Node页面测试通过，1779×994预览按钮布局通过。新11项测试
+覆盖全量读/多错误/重读、旧锁保护、未知/未完成不重放、旧蜂群空仓冲突、缓存与
+生产歧义范围、真实H事件不自动启动。8文件缓存响应包加入recheck/controller、
+2adf11f已安装基线及多旧HTML共享替换区间，覆盖16个rename失败回滚。
+辅助证据、快照/版本/回执、截图、脚本及测试均在outputs/fault-20261102，不能上传。
+当前实际模块（以最终hot readback为准）：
+- lib/recheck.lua 8875B，1d6371b4f6571561bf576305ed9c5d28de1b24cf7ed419be9e46b0354f6c2336
+- lib/cache.lua 22629B，86dde0c98588995a4af6d7b19a3bc70abd21ad3af0dd8b4283c60ba2c0b8f558
+- lib/web_session.lua 20817B，245ce9e954a3120d9f0710e43825d72ea1ab919018a7bd8e2485b2a641849d09
+- runtime/cache.lua 34192B，47d742b3f54599a3e747c7e43b8c1bf2c7ca9cc0fe24146607dc31ef5bb1a294
+- runtime/controller.lua 51502B，3a99379fa751055fe7a865b05dd508816ec56b50ff0f02bed073bfe817ea6f3d
+- web.lua 3302B，b3a53db0c71db7d7d845b820410b3b8c8e1dfcace6c819bb71e443b594214a32
+- lib/web_page.html 234743B，678a2ccfa3a9616100a3850531188c7f46236d68f1c80220f48b8eb721b36ab9
+程序备份在installed.json，新增检查模块另有b0bd0b59本轮hot更新备份。正式config
+校验553eddb5780944ad93e6b9f5c16c9a4d822a64180c8ac1433a1c80b64ef1fbbe不变。
+
 # 2026-11-01 GTNH 2.9.0 正式版兼容（已安装）
 
 客户端迁移F:/prism/290；旧b3 MCP端口拒绝连接，改用290/.minecraft/ochd-mcp/ochd_mcp.py

@@ -99,7 +99,19 @@ return function(C,B,W,options)
  function H.handle(name,args,request)
   assert(type(args)=='table','页面参数必须为对象')
   assert(type(request)=='number'and request==math.floor(request)and request>0,'请求编号无效')
-  if name=='cache'then
+  if name=='recheck_all'then
+   assert(not H.running and not(P and P.co),'请先暂停自动化并等待工作器收尾')
+   assert(not cache().busy,'缓存工作器尚未收尾，请稍候再检查')
+   assert(args.revision==revision(),'绑定已变化，请等待最新页面');cleanDraft()
+   cache().action({mode='refresh'})
+   local result=assert(loadfile(C.path('lib/recheck.lua')))()(C,cfg,E,storage,cache().inspectionCatalogue())
+   local disk=storage.status();assert(disk.known and disk.ok,'磁盘不足，无法保存检查报告')
+   C.write(C.path('diagnostics/recheck-last.dat'),result)
+   H.recheck=result
+   assert(result.ok,'全量检查未通过：'..table.concat(result.issues,'；'):sub(1,320))
+   cache().clearCheckedFault(E);displayed={};displayJobs=nil
+   H.notice='全量检查通过（'..result.checked..'项），可点击启动自动化。';return H.notice
+  elseif name=='cache'then
    if args.mode=='page'or args.mode=='save'then assert(args.group==nil or args.group==H.group,'设备组已变化，忽略旧缓存请求')end
    if args.mode=='enable'then cleanDraft();C.validate(cfg,true)end
    H.notice=cache().action(args);return H.notice
@@ -241,6 +253,10 @@ return function(C,B,W,options)
   local out={mode=H.running and 'running'or 'binding',revision=revision(),values=values,group=H.group,groupCount=#cfg.groups,
    configured=expected~=nil,notice=H.notice,scan=scanSnapshot(),now=now,machines={},nodes={},flow={},timeline={},logs={},disk=fast and displayedDisk or storage.status()}
   out.cache=cache().snapshot(H.group,fast)
+  if H.recheck then out.recheck={ok=H.recheck.ok,checked=H.recheck.checked,at=H.recheck.at,issues={}}
+   for i=1,math.min(24,#H.recheck.issues)do out.recheck.issues[i]=H.recheck.issues[i]end
+   out.recheck.more=math.max(0,#H.recheck.issues-24)
+  end
   if P then out.patterns={mode=P.mode,status=P.status,slot=P.slot,message=P.message,logs=P.logs,rows=P.rows}end
   local g=cfg.groups[H.group];out.groupName=g.name or ('设备组 '..H.group);out.generatorSlots=math.max(4,#g.generators);local selected
   if E then local owner=E.groupOwner[H.group];selected=owner and E.tasks[owner]

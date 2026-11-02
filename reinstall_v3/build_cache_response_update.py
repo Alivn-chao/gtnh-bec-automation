@@ -12,10 +12,10 @@ V2=ROOT/'reinstall_v2'
 sys.path.insert(0,str(V2))
 from build import literal
 
-NAMES=['lib/cache.lua','lib/web_session.lua','lib/web_transport.lua','web.lua','lib/web_page.html','runtime/cache.lua']
+NAMES=['lib/cache.lua','lib/web_session.lua','lib/web_transport.lua','web.lua','lib/web_page.html','runtime/cache.lua','runtime/controller.lua','lib/recheck.lua']
 BASE='0e3926a'
 def signature(data):return str(len(data))+':'+str(zlib.adler32(data)&0xffffffff)
-def baseline(name):return subprocess.check_output(['git','show',BASE+':reinstall_v2/files/'+name],cwd=ROOT).decode('utf-8')
+def baseline(name):return ''if name=='lib/recheck.lua'else subprocess.check_output(['git','show',BASE+':reinstall_v2/files/'+name],cwd=ROOT).decode('utf-8')
 
 def build():
     rows=[]
@@ -24,19 +24,22 @@ def build():
         text=(V2/'files'/name).read_text(encoding='utf-8')
         source=literal(text)
         if name.endswith('.html'):
-            # Keep the unchanged embedded 3-D model out of the download.
-            prefix=os.path.commonprefix([old,text])
-            suffix=os.path.commonprefix([old[::-1],text[::-1]])
-            count=min(len(suffix),len(old)-len(prefix),len(text)-len(prefix))
+            # One shared replacement span covers all supported controls.
+            bases=[subprocess.check_output(['git','show',ref+':reinstall_v2/files/'+name],cwd=ROOT).decode('utf-8')for ref in (BASE,'499d433','2e3dc3c','2adf11f')]
+            prefix=os.path.commonprefix(bases+[text]);suffix=os.path.commonprefix([x[::-1]for x in bases+[text]])
+            count=min([len(suffix)]+[len(x)-len(prefix)for x in bases+[text]])
             middle=text[len(prefix):len(text)-count if count else len(text)]
             tail="..old:sub(-"+str(len(text[-count:].encode()))+")"if count else ''
-            source="(function()local f=assert(io.open('/home/bec_v2/lib/web_page.html','r'));local old=f:read('*a');f:close();old=old:gsub('\\r\\n','\\n');if sig(old)=="+repr(signature(text.encode()))+"then return old end;assert(sig(old)=="+repr(signature(old.encode()))+",'未知本地网页，保留未覆盖');local new=old:sub(1,"+str(len(prefix.encode()))+").."+literal(middle)+tail+";assert(sig(new)=="+repr(signature(text.encode()))+",'网页补丁核对失败，原文件未改');return new end)()"
+            knownHtml=','.join('['+repr(k)+']=true'for k in sorted({signature(x.encode())for x in bases}))
+            source="(function()local f=assert(io.open('/home/bec_v2/lib/web_page.html','r'));local old=f:read('*a');f:close();old=old:gsub('\\r\\n','\\n');if sig(old)=="+repr(signature(text.encode()))+"then return old end;local known={"+knownHtml+"};assert(known[sig(old)],'未知本地网页，保留未覆盖');local new=old:sub(1,"+str(len(prefix.encode()))+").."+literal(middle)+tail+";assert(sig(new)=="+repr(signature(text.encode()))+",'网页补丁核对失败，原文件未改');return new end)()"
         # The first response patch (499d433) is also a supported upgrade base.
-        previous=subprocess.check_output(['git','show','499d433:reinstall_v2/files/'+name],cwd=ROOT)
+        added=name=='lib/recheck.lua'
+        previous=b''if added else subprocess.check_output(['git','show','499d433:reinstall_v2/files/'+name],cwd=ROOT)
         known={signature(old.encode()),signature(previous)}
-        known.add(signature(subprocess.check_output(['git','show','2e3dc3c:reinstall_v2/files/'+name],cwd=ROOT)))
+        for ref in ('2e3dc3c','2adf11f'):
+            known.add(signature(b''if added else subprocess.check_output(['git','show',ref+':reinstall_v2/files/'+name],cwd=ROOT)))
         supported=','.join('['+repr(k)+']=true'for k in sorted(known))
-        rows.append('{name='+repr(name)+',source='+source+',supported={'+supported+'}}')
+        rows.append('{name='+repr(name)+',added='+('true'if added else'false')+',source='+source+',supported={'+supported+'}}')
     tree=ast.parse((V2/'build_cache_update.py').read_text(encoding='utf-8'))
     body=next(ast.literal_eval(n.value)for n in tree.body if isinstance(n,ast.Assign)and any(isinstance(t,ast.Name)and t.id=='body'for t in n.targets))
     body=body.replace('/home/bec_cache_update.lua','/home/bec_v3_cache_update.lua')
@@ -48,7 +51,7 @@ def build():
     body=body.replace('缓存管理已安装：顶部缓存管理设置目标，启动自动化后空闲补库。','V3缓存响应修复已安装：本地翻页，后台读取间隙处理缓存值保存。')
     sig="local function sig(s)local a,b=1,0;for i=1,#s do a=(a+s:byte(i))%65521;b=(b+a)%65521 end;return string.format('%d:%.0f',#s,b*65536+a)end\n"
     payload="print('BEC V3 cache response update; Q to exit the old UI first')\n"+sig+'local rows={'+','.join(rows)+'}\n'+body
-    assert len(payload.encode())<100000,'Compact update unexpectedly large'
+    assert len(payload.encode())<180000,'Update unexpectedly large'
     (HERE/'update_cache_response.lua').write_text('-- BEC_V3_CACHE_RESPONSE_UPDATE_1\nlocal SELF_SIGNATURE='+repr(signature(payload.encode()))+'\n'+payload,encoding='utf-8',newline='\n')
     print('Built V3 cache response updater:',len(payload.encode()),'payload bytes;',len(NAMES),'programs')
 

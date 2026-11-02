@@ -10,10 +10,14 @@ function saving(){return inflight||!!waiting||!!Object.keys(queue).length;}
 function showAction(message,bad){actMessage={text:message,bad:!!bad};buttons();}
 function buttons(){
  var patternBusy=last&&last.patterns&&last.patterns.status==='running';var running=last&&last.mode==='running',reason=!online?'OC 未连接，暂不能启动。':running?'自动化运行中。':patternBusy?'样板处理中，请在样板处理窗口等待完成或停止。':saving()?'正在保存草稿，请稍候。':!last.configured?'草稿已保存还不等于绑定已应用。请先点击「应用绑定」，校验通过后再启动。':'绑定已应用，可以启动；修改地址后需重新应用绑定。';
- var hint=$('action-feedback');hint.textContent=actPending?({'apply_bindings':'正在校验并应用绑定…',start:'正在启动自动化…',pause:'正在暂停自动化…'}[actPending]):actMessage?actMessage.text:reason;
+ var hint=$('action-feedback');hint.textContent=actPending?({'apply_bindings':'正在校验并应用绑定…',start:'正在启动自动化…',pause:'正在暂停自动化…',recheck_all:'正在全量重新检查设备和运行记录…'}[actPending]):actMessage?actMessage.text:reason;
  hint.classList.toggle('action-error',!!(actMessage&&actMessage.bad&&!actPending));hint.setAttribute('role',actMessage&&actMessage.bad?'alert':'status');
  $('start-run').textContent=!online?'状态待确认':running?'运行中':'启动自动化';$('start-run').disabled=!online||running||!!actPending||patternBusy||saving();$('start-run').title=reason;
  $('apply-config').disabled=!online||running||!!actPending||patternBusy||saving();$('stop-run').disabled=!online||!running||!!actPending;
+ $('recheck-all').disabled=!online||running||!!actPending||patternBusy||saving();
+ $('recheck-again').disabled=$('recheck-all').disabled;
+ if(actPending==='recheck_all')$('recheck-report').textContent='正在检查全部设备和记录，请稍候…';
+ else if(last&&last.recheck){var r=last.recheck;$('recheck-report').textContent=(r.ok?'全量检查通过，可启动自动化。':'全量检查未通过，请处理以下项目后再检查。')+'\n检查 '+r.checked+' 项\n'+list(r.issues).join('\n')+(r.more?'\n另有 '+r.more+' 项，完整报告在 OC diagnostics/recheck-last.dat':'');}
 }
 function send(name,args){
  if(!online)return Promise.reject(Error('OC 未连接，未执行操作'));args=args||{};var token=String(Date.now())+'-'+(++seq);args._token=token;
@@ -128,7 +132,9 @@ function patternAction(mode){
  send('patterns',{mode:mode,revision:last&&last.revision}).then(function(r){patPending=false;renderPatterns();$('patterns-status').textContent=r.message||'请求已确认，等待处理状态。';}).catch(function(e){patPending=false;renderPatterns();$('patterns-status').textContent='未执行：'+e.message;showAction('样板操作失败：'+e.message,true);});
 }
 function settings(){if(!last)return;var specs=[['recipeDirectory','配方目录']];for(var i=1;i<=Math.max(4,last.generatorSlots||4);i++)specs.push(['g'+group+'.generator'+i,'纠缠器 '+i+'（多余可空）']);$('extra-fields').innerHTML=specs.map(function(f){return '<label>'+f[1]+'<input data-config="'+f[0]+'" value="'+esc(last.values[f[0]]||'')+'" maxlength="160" spellcheck="false"></label>';}).join('');$('extra-fields').querySelectorAll('input').forEach(function(input){input.onchange=function(){queue[input.dataset.config]=input.value;pump();};});$('runtime-settings').showModal();}
-document.querySelector('.top-actions').innerHTML='<span id="save-status" class="save-status">等待 OC 连接</span><button class="button quiet" id="patterns-open">样板处理</button><button class="button quiet" id="global-settings">公共设置</button><button class="button quiet" id="apply-config">应用绑定</button><button class="button primary run-button" id="start-run">启动自动化</button><button class="button quiet stop-button" id="stop-run">暂停</button>';
+document.querySelector('.top-actions').innerHTML='<span id="save-status" class="save-status">等待 OC 连接</span><button class="button quiet" id="patterns-open">样板处理</button><button class="button quiet" id="global-settings">公共设置</button><button class="button quiet" id="apply-config">应用绑定</button><button class="button quiet" id="recheck-all">全量重新检查</button><button class="button primary run-button" id="start-run">启动自动化</button><button class="button quiet stop-button" id="stop-run">暂停</button>';
+var recheckDialog=document.createElement('dialog');recheckDialog.id='recheck-dialog';recheckDialog.className='runtime-settings';recheckDialog.innerHTML='<h2>全量重新检查</h2><p>检查全部设备组、节点、供液、蜂群、盘位和运行记录。修好设备后可再次检查；未确认申请或搬运会继续保留保护。</p><pre id="recheck-report" style="white-space:pre-wrap">等待检查</pre><footer><button id="recheck-again" class="button">再次检查</button><button id="recheck-close" class="button primary">关闭</button></footer>';document.body.appendChild(recheckDialog);
+$('recheck-all').onclick=function(){$('recheck-dialog').showModal();$('recheck-report').textContent='正在检查全部设备和记录，请稍候…';action('recheck_all');};$('recheck-again').onclick=function(){action('recheck_all');};$('recheck-close').onclick=function(){$('recheck-dialog').close();};
 var feedback=document.createElement('div');feedback.id='action-feedback';feedback.className='action-feedback';feedback.textContent='等待 OC 连接…';feedback.setAttribute('aria-live','polite');document.body.appendChild(feedback);
 var tabs=document.createElement('nav');tabs.className='runtime-tabs';tabs.innerHTML='<button class="active" data-tab="structure">结构 / 绑定</button><button data-tab="flow">运行流程</button><button data-tab="cache">缓存管理</button>';document.querySelector('.topbar').insertBefore(tabs,document.querySelector('.top-actions'));
 var cacheUI={},cacheRead=false,cacheReadNext=null,cacheWait=false,cacheWaiting=null,cacheMessage='',cachePageMessage='',cacheStamp='',cachePanel=document.createElement('section');cachePanel.id='cache-panel';

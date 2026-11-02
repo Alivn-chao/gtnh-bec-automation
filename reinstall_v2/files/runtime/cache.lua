@@ -91,7 +91,7 @@ local function bulkPorts(required)
   if valid then return discovery.ports end
   discovery.ports=nil;discovery.rawNames={}
  end
- local allowed,ports={},{}
+ local allowed,ports,ambiguous={},{},{}
 for _,raw in pairs(mapping) do allowed[raw]=true;allowed["fluid."..raw]=true end
 for _,raw in ipairs({"spatialfluid","fluid.spatialfluid","temporalfluid","fluid.temporalfluid"}) do allowed[raw]=true end for address,kind in c.list("transposer") do if kind=="transposer" and address~=TRANS then
 local sources,receivers={},{} for side=0,5 do local ok,count=pcall(call,address,"getTankCount",side)
@@ -100,8 +100,15 @@ local f=call(address,"getFluidInTank",side,1) if type(f)=="table" and type(f[1])
 end elseif ok and count==6 then local readable,capacity=pcall(call,address,"getTankCapacity",side,1)
 if readable and capacity==16000 then receivers[#receivers+1]=side end end end
 if #sources>0 then assert(#receivers==1,"高速供液口接收方向缺失或不唯一: "..address) for _,source in ipairs(sources) do
-assert(not ports[source.raw],"高速供液口重复绑定: "..source.raw) ports[source.raw]={address=address,from=source.from,to=receivers[1]} end
+local previous=ports[source.raw]
+if previous and(previous.address~=address or previous.from~=source.from or previous.to~=receivers[1])then ambiguous[source.raw]=true;ports[source.raw]=nil
+elseif not ambiguous[source.raw]then ports[source.raw]={address=address,from=source.from,to=receivers[1]}end end
 end end end
+-- Alias discovery scans all configured ports, even when only one kind is
+-- missing. Omit unrelated ambiguous sources; never choose one arbitrarily.
+for raw in pairs(ambiguous)do for kind in pairs(required or{})do local base=mapping[kind]
+local needed=raw==base or raw=='fluid.'..base or kind=='entangled_time'and(raw=='temporalfluid'or raw=='fluid.temporalfluid')or kind=='entangled_space'and(raw=='spatialfluid'or raw=='fluid.spatialfluid')
+assert(not needed,'高速供液口重复绑定: '..raw)end end
 if discovery then discovery.ports=ports;if BEC_V3_CACHE_SAVE_DISCOVERY then BEC_V3_CACHE_SAVE_DISCOVERY()end end
 return ports end local function verifyBulk(route,raw,allowEmpty)
 local f=call(route.address,"getFluidInTank",route.from,1) if type(f)=="table" and type(f[1])=="table" then f=f[1] end assert(type(f)=="table" and (f.name==raw or allowEmpty and not f.name and integer(f.amount or 0)==0)

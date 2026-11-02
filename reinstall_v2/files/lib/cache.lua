@@ -56,6 +56,23 @@ return function(C,B,cfg,storage)
   assert(not K.blocked,'缓存操作未确认，保留记录核对：'..tostring(K.blocked))
   for group in ipairs(cfg.groups)do assert(confirmed(C.read(journal(group))),'设备组 '..group..' 有未确认缓存操作，保留 cache.journal 核对，禁止重复申请')end
  end
+ function K.clearCheckedFault(E)
+  assert(not active and not K.busy,'缓存工作器尚未收尾')
+  for group in ipairs(cfg.groups)do
+   local r=C.read(journal(group));assert(confirmed(r)and not(r and r.incomplete),'缓存记录仍需人工核对')
+   if E then
+    assert(not E.groupOwner[group]or E.groupOwner[group]=='cache-'..group,'资源正被生产占用')
+   end
+  end
+  if E then
+   for _,t in ipairs(E.tasks)do assert(not t.co,'生产工作器尚未收尾')end
+   assert(not E.fluidOwner or tostring(E.fluidOwner):match('^cache%-%d+$'),'供液资源正被生产占用')
+   for group in ipairs(cfg.groups)do if E.groupOwner[group]=='cache-'..group then E.groupOwner[group]=nil end end
+   if E.fluidOwner then E.fluidOwner=nil end
+  end
+  K.blocked=nil;discoveryByGroup={};skipSavedDiscovery=true;nextScan=0
+  log('全量检查通过，已解除旧缓存故障；可启动自动化。')
+ end
  local function scan(force)
   if catalogueReady and not force then return end
   if force then discoveryByGroup={};skipSavedDiscovery=true end
@@ -86,6 +103,7 @@ return function(C,B,cfg,storage)
  -- Only these small settings/page operations may run between worker reads.
  function K.canServeFast(args)return catalogueReady and (args.mode=='page'or args.mode=='save')end
  function K.catalogueStep()scan()end
+ function K.inspectionCatalogue()scan();local rows={};for _,name in ipairs(names)do rows[#rows+1]={name}end;return rows end
  function K.refreshStock(group)
   local ok,stock=pcall(c.invoke,cfg.groups[group].storage,'getStoredCondensate')
   displayedStock[group]=ok and type(stock)=='table'and stock or {}

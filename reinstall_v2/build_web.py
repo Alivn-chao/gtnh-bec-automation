@@ -36,7 +36,7 @@ def build():
  html=html.replace('</body>','<script>'+compact('input-controls.js')+'</script><script>'+compact('control.js')+'</script></body>',1)
  html=html.replace('BEC 结构配置台 · 交互原型','BEC V2 · 结构绑定与自动化流程')
  html=re.sub(r'>\s+<','><',html)
- package={'id':'bec-v2-studio','title':'BEC V2 结构绑定与运行','entry':'index.html','files':{'index.html':html},'events':['save_field','apply_bindings','start','pause','select_group','refresh','scan_components','patterns','cache']}
+ package={'id':'bec-v2-studio','title':'BEC V2 结构绑定与运行','entry':'index.html','files':{'index.html':html},'events':['save_field','apply_bindings','start','pause','select_group','refresh','scan_components','patterns','cache','recheck_all']}
  encoded=json.dumps(package,ensure_ascii=False,separators=(',',':')).encode()
  assert len(encoded)<262144, f'OCHD encoded package too large: {len(encoded)}'
  target=HERE/'files/lib/web_page.html';target.write_text(html,encoding='utf-8',newline='\n')

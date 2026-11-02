@@ -1,5 +1,5 @@
 -- BEC_V3_PERFORMANCE_UPDATE_1
-local SELF_SIGNATURE='97121:3352650445'
+local SELF_SIGNATURE='97586:2207911175'
 print('BEC V3 performance preview; Q to exit the old UI first')
 local rows={{name='runtime/controller.lua',source=[=[-- BEC_V3_LARGE_BATCH_1: long-sized totals; bounded per-call fluid requests.
 local c = require("component") local ser = require("serialization") local computer = require("computer") local fs = require("filesystem")
@@ -197,7 +197,7 @@ local function bulkPorts(required)
   if valid then return discovery.ports end
   discovery.ports=nil
  end
- local allowed,ports={},{}
+ local allowed,ports,ambiguous={},{},{}
  for _,raw in pairs(baseMapping)do allowed[raw]=true;allowed['fluid.'..raw]=true end
  for _,raw in ipairs({'spatialfluid','fluid.spatialfluid','temporalfluid','fluid.temporalfluid'})do allowed[raw]=true end
  for address,kind in c.list('transposer')do if kind=='transposer'and address~=TRANS then
@@ -212,9 +212,15 @@ local function bulkPorts(required)
    elseif ok and count==6 then local readable,capacity=pcall(call,address,'getTankCapacity',side,1);if readable and capacity==16000 then receivers[#receivers+1]=side end end
   end
   if #sources>0 then assert(#receivers==1,'高速供液口接收方向缺失或不唯一: '..address)
-   for _,source in ipairs(sources)do assert(not ports[source.raw],'高速供液口重复绑定: '..source.raw);ports[source.raw]={address=address,from=source.from,to=receivers[1]}end
+   for _,source in ipairs(sources)do local previous=ports[source.raw]
+    if previous and(previous.address~=address or previous.from~=source.from or previous.to~=receivers[1])then ambiguous[source.raw]=true;ports[source.raw]=nil
+    elseif not ambiguous[source.raw]then ports[source.raw]={address=address,from=source.from,to=receivers[1]}end
+   end
   end
  end end
+ -- An unused duplicate must not block another recipe. Required duplicates
+ -- still stop before any request or transfer, including raw-name aliases.
+ for raw in pairs(ambiguous)do for kind in pairs(required)do assert(not rawAlias(kind,raw),'高速供液口重复绑定: '..raw)end end
  for kind in pairs(required)do
   local raw=mapping[kind]
   if not ports[raw]then local found,n=nil,0;for name in pairs(ports)do if rawAlias(kind,name)then found=name;n=n+1 end end
