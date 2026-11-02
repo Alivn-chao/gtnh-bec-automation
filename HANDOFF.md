@@ -1,3 +1,27 @@
+# 2026-11-02 重连后槽1已实际覆盖完成（最新）
+
+用户说继续，恢复MCP；同一OC已在线无lastError。先只读确认旧登记仍converted，工坊槽1仍
+完整20输入（16物品+4molten原液），确证上次未覆盖。16台idle/0/接单false，旧feed已retired/
+stopped。左驱动器slot1现有空16M盘，右侧空。磁盘free667043B。原生runtime/patterns9865和
+lib/patterns2510逐字匹配0848982。
+
+新网页patterns事件request21110301，token mcp-nei290-replace-slot1-7，mode=replace/slot1/
+revision43141301，pushSignal明确accepted=true，未重放旧请求。网页返回status=done、旧登记
+已备份/覆盖完成。独立回读新登记converted、16普通输入、第二输入基岩超致密板6395×256；
+4凝聚物为entangled_hypogen576、entangled_infinity18432、entangled_celestialtungsten294912、
+entangled_neutronium294912。original保留完整20输入和原molten名；实体工坊槽1已去除4流体，
+逐项name/size/damage与新普通输入一致，无amount，产出仍6个Singularity Reinforced Stellar
+Shielding Casing。旧converted在tectech_gt_godforgecasing_0_6.dat.backup-2（6397×2已核对），
+新prepared为backup-3，原backup-1仍在。全部16台再次idle/0/关闭，网页binding暂停。
+
+写证明diagnostics/nei290-replacement-confirmed-20261102.dat，写前free648600B，输出
+NEI290_SLOT1_REPLACEMENT_CONFIRMED。未启动生产、未动盘或AE订单。私有证据在
+outputs/resume-pattern-20261102，禁止上传。submit_pattern_replace_7不可重放。
+
+待用户把工坊槽1转换好的样板换到实际投料接口；旧AE订单若仍挂着先取消，再用新样板下单/
+启动。左侧空盘已放好。本轮实际验证仅样板转换与登记覆盖，不是新版配方生产成功。
+无程序修改，不需重跑已通过333+20模拟；仅补充实机证据和文档。
+
 # 2026-11-02 新版NEI/覆盖已安装，用户关游戏，待重连核对
 
 最新用户确认“这就是BEC配方页录出”“新版本改了样板nei”，最后说“我把游戏线关了，你先准备好”。
