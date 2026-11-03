@@ -14,7 +14,7 @@ local function sameBinding(old)
  return #old==#binding
 end
 local CELL='appliedenergistics2:item.ItemExtremeStorageCell.Singularity'
-local DISPLAY_CAP,MIN=cfg.hiveSource=='transposer'and 64 or 30720,64 -- Display limit, not a transfer limit.
+local DISPLAY_CAP=cfg.hiveSource=='transposer'and 64 or 30720 -- Display limit, not a transfer limit.
 -- NaniteTier enum -> material ore name. Labels may be localized.
 local tiers={Carbon={1,'Carbon'},Glowstone={1,'Glowstone'},Silver={2,'Silver'},
  Neutronium={2,'Neutronium'},Gold={3,'Gold'},TranscendentMetal={4,'Transcendent'},
@@ -215,7 +215,7 @@ local function choose(cells,need,family)
   local item=disk.item;seen[item.key]=true
   local picked,n=pack(cells,item.key)
   local exact=item.tier==need and item.family==family
-  if item.tier>=need and n>=MIN and (not best or exact and not best.exact
+  if item.tier>=need and n>0 and (not best or exact and not best.exact
    or exact==best.exact and (item.tier<best.item.tier or item.tier==best.item.tier and n>best.count)) then
    best={item=item,count=n,picked=picked,exact=exact}
   end
@@ -337,9 +337,7 @@ function M.ensure(ctx)
  -- A saturated node reading cannot prove the current raw quantity. Recover to
  -- read the actual quantity before another operation, even with an old record.
  if not (known and known.count==h and h<DISPLAY_CAP and p and known.family==p.name and known.tier==p.tier) then known=nil end
- local sameFamily=0
- if p then for _,disk in ipairs(cells) do if disk.item and disk.item.family==p.name then sameFamily=sameFamily+disk.count end end end
- local keeping=h>0 and p.tier>=need and h+sameFamily>=MIN
+ local keeping=h>0 and p.tier>=need
   and (not best or best.item.tier>=p.tier and not(best.exact and p.name~=family))
  -- A mandatory type change will refresh every array after loading.
  -- Read old array caches only when considering keeping this hive.
@@ -355,8 +353,8 @@ function M.ensure(ctx)
    print('现有蜂群满足需求，无需搬盘；共享仓、盘库与IO已核对。')
    return false
   end
- else assert(best or refresh and h>=MIN and p.tier>=need,
-  '硬盘盒缺少满足T'..need..'的至少64个蜂群') end
+ else assert(best or refresh and h>0 and p.tier>=need,
+  '硬盘盒缺少满足T'..need..'的可用蜂群') end
  if h>0 and (not keeping or not known) then
   local hasEmpty=false;for _,disk in ipairs(cells) do if disk.empty then hasEmpty=true;break end end
   assert(hasEmpty,'缺少可接收新类型的空数字奇点盘，旧蜂群未搬运')
@@ -369,7 +367,7 @@ function M.ensure(ctx)
   if keeping and known then picked=extra else picked=best.picked end
   for _,disk in ipairs(picked) do loadCell(disk) end
   emptyPorts();guard()
-  local n,t=hive();assert(n>=MIN and t.tier>=need,'换蜂后数量或等级不足')
+  local n,t=hive();assert(n>0 and t.tier>=need,'换蜂后数量或等级不足')
   assert(record.holding and math.min(record.holding.count,DISPLAY_CAP)==n and record.holding.family==t.name,'换蜂后身份核对失败')
   if cfg.arrayHiveReady then
    save('verifying-array')

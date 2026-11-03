@@ -25,7 +25,7 @@ class MagmatterHiveTests(unittest.TestCase):
   for path in VERSIONS:
    with self.subTest(path=path):
     f=self.world(path);f.lua.execute(r'''
-need=10;inv[0][8]=disk(64,'Magmatter',4143)
+need=10;inv[0][8]=disk(15,'Magmatter',4143)
 local c=require('component');local invoke=c.invoke
 c.invoke=function(a,m,...)
  if a==NODE and m=='getProvidedTier'and heldCount>0 then return{tier=10,name='MagMatter'}end
@@ -35,7 +35,23 @@ end
     self.assertTrue(f.module.ensure())
     self.assertEqual(f.record()['holding']['family'],'MagMatter')
     self.assertEqual(f.record()['holding']['tier'],10)
-    self.assertEqual(f.lua.globals().heldCount,64)
+    self.assertEqual(f.lua.globals().heldCount,15)
+
+ def test_single_t8_can_load_and_remain_installed(self):
+  for path in VERSIONS:
+   with self.subTest(path=path):
+    f=self.world(path);f.lua.execute(r'''
+need=8;inv[0][8]=disk(1,'Universium',4144)
+local c=require('component');local invoke=c.invoke
+c.invoke=function(a,m,...)
+ if a==NODE and m=='getProvidedTier'and heldCount>0 then return{tier=8,name='Universium'}end
+ return invoke(a,m,...)
+end
+''')
+    self.assertTrue(f.module.ensure())
+    self.assertEqual(f.record()['holding']['count'],1)
+    self.assertFalse(f.module.ensure())
+    self.assertEqual(f.lua.globals().moves,2)
 
  def test_physical_display_maps_same_alias_and_rejects_unknown_ore(self):
   f=self.world(VERSIONS[0]);f.lua.execute(r'''
