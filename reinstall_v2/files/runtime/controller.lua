@@ -106,7 +106,7 @@ if NANITES.handlesPhase then
 end
 print(string.format("蜂群检查/换盘完成：%.2f 秒",computer.uptime()-started))
 local provided=call(NODE,"getProvidedTier")
-assert(type(provided)=="table" and provided.tier>=needed and integer(call(NODE,"getAvailableNanites"))>=64,"蜂群等级或数量不足，保持暂停")
+assert(type(provided)=="table" and provided.tier>=needed and integer(call(NODE,"getAvailableNanites"))>0,"蜂群等级或数量不足，保持暂停")
 lastNaniteTier=needed;lastNaniteFamily=family
 end local function gateFilters(required) assert(type(required)=="table","门过滤需求不可读")
 local result={} for name,n in pairs(required) do assert(mapping[name] and integer(n)>0,"门过滤需求无效: "..tostring(name)) result[#result+1]=name

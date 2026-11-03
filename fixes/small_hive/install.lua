@@ -39,6 +39,12 @@ local old=read(path);local new=patchRuntime(old)
 local bp='/home/bec_v2/lib/bridge.lua'
 local bo=read(bp);local bn,n=bo:gsub('or count<64 or total and count~=math%.min%(total,30720%)','or count<=0 or total and count~=math.min(total,30720)')
 assert(n<=1 and (n==1 or not bo:find('arrayHiveReady=function',1,true) or bo:find('or count<=0 or total and count~=math.min(total,30720)',1,true)),'未知阵列数量校验，未修改')
+local cp='/home/bec_v2/runtime/controller.lua'
+local co=read(cp)
+local key='integer(call(NODE,"getAvailableNanites"))'
+local cn,n=co:gsub('integer%(call%(NODE,"getAvailableNanites"%)%)>=64',key..'>0')
+assert(n==1 or n==0 and co:find(key..'>0',1,true),'未知控制器数量校验，未修改')
+install(cp,co,cn)
 install(bp,bo,bn)
 install(path,old,new)
 print('已取消蜂群盘和阵列校验的64个门槛；等级、实际数量与搬运校验仍有效。')
