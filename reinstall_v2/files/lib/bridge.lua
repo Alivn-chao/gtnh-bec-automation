@@ -370,7 +370,7 @@ function M.environment(cfg,index,engine)
    for _,member in ipairs(inspectionMembers())do
     local count=c.invoke(member.address,'getAvailableNanites')
     local provided=c.invoke(member.address,'getProvidedTier')
-    if type(count)~='number'or count<64 or total and count~=math.min(total,30720)
+    if type(count)~='number'or count<=0 or total and count~=math.min(total,30720)
       or type(provided)~='table'or provided.tier~=tier.tier or provided.name~=tier.name then return false end
    end
    return true

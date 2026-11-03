@@ -1,5 +1,5 @@
 -- BEC_V3_PERFORMANCE_UPDATE_1
-local SELF_SIGNATURE='97419:960090739'
+local SELF_SIGNATURE='97419:2234372726'
 print('BEC V3 performance preview; Q to exit the old UI first')
 local rows={{name='runtime/controller.lua',source=[=[-- BEC_V3_LARGE_BATCH_1: long-sized totals; bounded per-call fluid requests.
 local c = require("component") local ser = require("serialization") local computer = require("computer") local fs = require("filesystem")
@@ -1173,7 +1173,7 @@ function M.environment(cfg,index,engine)
    for _,member in ipairs(inspectionMembers())do
     local count=c.invoke(member.address,'getAvailableNanites')
     local provided=c.invoke(member.address,'getProvidedTier')
-    if type(count)~='number'or count<64 or total and count~=math.min(total,30720)
+    if type(count)~='number'or count<=0 or total and count~=math.min(total,30720)
       or type(provided)~='table'or provided.tier~=tier.tier or provided.name~=tier.name then return false end
    end
    return true
