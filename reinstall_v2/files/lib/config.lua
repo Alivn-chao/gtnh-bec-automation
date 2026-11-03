@@ -7,6 +7,9 @@ local M={ROOT='/home/bec_v2'}
 -- This is in-memory coordination; durable intents remain owned by callers.
 local queued={}
 local fluidBases={}
+local function slotOutOfBounds(reason)
+ return tostring(reason):find('index out of bounds',1,true)~=nil
+end
 local readback={setMinParallel='getMinParallel',setMaxParallel='getMaxParallel',
  setWorkAllowed='isWorkAllowed',setCondensateFilters='getCondensateFilters'}
 local function equal(a,b)
@@ -26,6 +29,16 @@ function M.component(native)
    if name=='invoke'and(method=='getFluidInterfaceConfiguration'or method=='setFluidInterfaceConfiguration')and type(args[3])=='number'then
     local slot=args[3];assert(slot%1==0 and slot>=0 and slot<=5,'内部供液配置槽位须为0–5')
     local base=fluidBases[address]
+    if base~=nil and method=='getFluidInterfaceConfiguration'then
+     -- A bounds failure invalidates the cached base. Re-probe only on reads.
+     local read=table.pack(pcall(native.invoke,address,method,slot+base))
+     if read[1]then
+      probed=table.pack(table.unpack(read,2,read.n))
+     else
+      assert(slotOutOfBounds(read[2]),read[2])
+      fluidBases[address]=nil;base=nil
+     end
+    end
     if base==nil then
      -- Legacy scripts use 0..5. OC's AE2FC driver now exposes 1..6.
      -- Discover using reads only; never retry a setter to guess its base.
@@ -36,7 +49,7 @@ function M.component(native)
        probed={n=check.n-1};for i=2,check.n do probed[i-1]=check[i]end
       end
      else
-      assert(tostring(check[2]):find('index out of bounds',1,true),check[2])
+      assert(slotOutOfBounds(check[2]),check[2])
       local valid,reason=pcall(native.invoke,address,'getFluidInterfaceConfiguration',6)
       assert(valid,reason);base=1
      end
