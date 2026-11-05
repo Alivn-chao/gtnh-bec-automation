@@ -57,14 +57,32 @@ function M.new(cfg,group,C,E,resumeAdmission)
   if resumeReady then for _,v in ipairs(j and j.transfers or{})do assert(v.ok==true,'旧生产搬运未确认')end end
   for _,job in ipairs(j and j.requests or {})do assert(job.state=='done','节点旧AE请求未确认')end
  end end
- local recipes={}
+ local recipes,recipesRevision,recipeIndex
+ local function signature(items)
+  local keys={};for k in pairs(items)do keys[#keys+1]=k end
+  table.sort(keys);return table.concat(keys,'\0')
+ end
+ local function catalogueRevision()
+  local value=C.read(cfg.recipeDirectory..'/.catalogue-revision')
+  return value and value.revision or 0
+ end
+ local function reloadRecipes()
+  local updated={}
  for file in fs.list(cfg.recipeDirectory)do if file:match('%.dat$')then
   local r=C.read(cfg.recipeDirectory..'/'..file)
   if r and r.state=='converted'and type(r.ordinaryInputs)=='table'and #r.ordinaryInputs>0 then
    local ok,items=pcall(itemMap,r.ordinaryInputs)
-   if ok then recipes[#recipes+1]={file=file,items=items,condensates=r.condensates,outputs=r.outputs}end
+   if ok then updated[#updated+1]={file=file,items=items,condensates=r.condensates,outputs=r.outputs}end
   end
  end end
+  recipes=updated;recipeIndex={}
+  for _,r in ipairs(recipes)do
+   local key=signature(r.items);local bucket=recipeIndex[key]or{}
+   bucket[#bucket+1]=r;recipeIndex[key]=bucket
+  end
+  recipesRevision=catalogueRevision()
+ end
+ reloadRecipes()
  local function call(m,...)return c.invoke(settings.transposer,m,...)end
  local function stack(side,slot)return call('getStackInSlot',side,slot)end
  local record
@@ -137,8 +155,9 @@ function M.new(cfg,group,C,E,resumeAdmission)
   assert(not stack(from,sourceSlot)and after and after.name==record.cell and after.size==1,'搬盘后槽位不符，不重复搬运')
   record.pending=nil;save(stage..'-confirmed');return after
  end
- local function parallel(i,from,wanted)
+ local function parallel(i,from,wanted,fresh)
   local n=cfg.nodes[i];local lo,hi=from.min,from.max
+  if fresh and lo==wanted.min and hi==wanted.max then return end
   if lo>wanted.max then c.invoke(n.address,'setMinParallel',wanted.min);lo=wanted.min end
   if hi<wanted.min then c.invoke(n.address,'setMaxParallel',wanted.max);hi=wanted.max end
   if lo~=wanted.min then c.invoke(n.address,'setMinParallel',wanted.min)end
@@ -318,11 +337,12 @@ function M.new(cfg,group,C,E,resumeAdmission)
   assert(not record or not record.pending,'原料盘有未确认操作，禁止自动重放')
   F.observe()
   if not record then
-   if not F.since or clock.uptime()-F.since<(settings.collectSeconds or 10)then
-    F.message=F.since and '同配方攒料10秒' or '等待缓存盘进料';return false
+   if not F.since or clock.uptime()-F.since<(settings.collectSeconds or 2)then
+    F.message=F.since and ('同配方攒料'..tostring(settings.collectSeconds or 2)..'秒') or '等待缓存盘进料';return false
    end
    local checkedAt=clock.uptime()
    if not captureReady()then F.message='等待全部节点空闲';return false end
+   if recipesRevision~=catalogueRevision()then reloadRecipes()end
    drives();local capturedSlots={}
    for _,side in ipairs({settings.sourceSide,settings.productionSide})do
     local rows=inventory(side);capturedSlots[side]=rows
@@ -333,8 +353,10 @@ function M.new(cfg,group,C,E,resumeAdmission)
    record={version=1,kind='cell-feed',binding={settings.transposer,settings.sourceSide,settings.productionSide,settings.sourceSlot,settings.productionSlot},cell=v.name,limits={},quota={},members={}}
    save('capturing')
    local captured=move(settings.sourceSide,settings.productionSide,settings.sourceSlot,settings.productionSlot,'moving-to-production')
-   local items=M.describe(captured);local recipe,count=M.match(items,recipes)
-   E.log(ids[1],string.format('进料识别：准备检查 %.2f秒 / 搬盘与匹配 %.2f秒；攒料时间保持%d秒',checkedSeconds,clock.uptime()-captureAt,settings.collectSeconds or 10))
+   local items=M.describe(captured)
+   local ok,recipe,count=pcall(M.match,items,recipes)
+   if not ok then reloadRecipes();recipe,count=M.match(items,recipes)end
+   E.log(ids[1],string.format('进料识别：准备检查 %.2f秒 / 搬盘与匹配 %.2f秒；攒料时间保持%d秒',checkedSeconds,clock.uptime()-captureAt,settings.collectSeconds or 2))
    record.items=items;record.recipe=recipe.file;record.count=count;record.condensates=recipe.condensates;record.outputs=recipe.outputs
    local planningAt=clock.uptime()
    local limits={}
@@ -348,7 +370,7 @@ function M.new(cfg,group,C,E,resumeAdmission)
    -- Partial or unknown results retain this intent and are never replayed.
    record.pending={kind='set-parallel',nodes=participating};save('configuring')
    for _,i in ipairs(ids)do local q=record.quota[i];if q>0 then
-    enabled();parallel(i,record.limits[i],{min=q,max=q})
+    enabled();parallel(i,record.limits[i],{min=q,max=q},true)
     record.members[#record.members+1]=i
    end end
    record.pending=nil;record.timings={planning=clock.uptime()-planningAt,admissionStarted=clock.uptime()};save('configured')
