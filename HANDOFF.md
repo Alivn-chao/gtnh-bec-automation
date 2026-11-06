@@ -1,3 +1,15 @@
+# 2026-11-07 换蜂库存批量读取已部署
+
+当前运行模块 runtime/nanites_cell.lua 已将 bank/emptyPorts 改为 getAllStacks(side).getAll() 快照。
+实机确认 getAll 的槽号从 0 开始，getStackInSlot/transferItem 从 1 开始，已显式转换。
+盘库仍只管理前 10 格；首轮两 IO 检查全 12 格，后续固定批次检查 1/7。
+搬盘前后精确数量、类型、目标空位核对及 pending 日志不变，未改盘库实际排列。
+实机 34 槽快照与逐槽读取全部一致；每份快照约 0.10 秒，尚未测新版本完整换蜂耗时。
+源文件与部署文件精确回读 20696 字节；备份 runtime/.ochd-mcp/a208c485-701b-4649-a0e0-bea6d5ffed8d.bak。
+feed/cache 都 stopped、16 节点 idle 后正常 pause/Q 退出，重开网页并正常 start，无机箱关机。
+此次更新以 fixes/fixed_hive_checks/files/runtime/nanites_cell.lua 为对应源码。
+前一提交 fd94926 是已部署的启动优化（controller/bridge/engine）；collectSeconds 实际仍为 2。
+
 # 最新：磁物质矿辞别名已装，原23份实机恢复，用户要求优先实测
 
 用户加了磁物质后报unknown hive4143。MCP确认盘库9为15个gregtech:gt.metaitem.03:4143，

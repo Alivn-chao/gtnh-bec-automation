@@ -109,6 +109,16 @@ local function off()
  assert(a and b,'关闭IO红石失败，手动关闭两端：'..tostring(e)..'; '..tostring(f))
 end
 local function stack(side,slot) return call(T,'getStackInSlot',side,slot) end
+-- getAll() uses zero-based keys; getStackInSlot/transferItem use one-based slots.
+local function inventorySnapshot(side)
+ local inventory=call(T,'getAllStacks',side)
+ local rows=inventory.getAll()
+ assert(type(rows)=='table','蜂群库存快照不可读')
+ return function(slot)
+  local item=rows[slot-1]
+  if item and item.name and (item.size or 0)>0 then return item end
+ end
+end
 local function describe(item)
  assert(type(item)=='table' and item.name==CELL and item.size==1,'蜂群硬盘必须是单个数字奇点')
  assert(whole(item.storedItemCount) and type(item.getAvailableItems)=='table','盘内数量不可读')
@@ -189,16 +199,20 @@ local portsChecked=false
 local function emptyPorts()
  local slots={}
  if cfg.fixedBatchChecks and portsChecked then slots={1,7}else for i=1,12 do slots[#slots+1]=i end end
- for _,side in ipairs({2,3}) do for _,slot in ipairs(slots)do
-  assert(stack(side,slot)==nil,'蜂群IO已有硬盘，保留未完成操作')
- end end
+ for _,side in ipairs({2,3}) do
+  local at=inventorySnapshot(side)
+  for _,slot in ipairs(slots)do
+   assert(at(slot)==nil,'蜂群IO已有硬盘，保留未完成操作')
+  end
+ end
  portsChecked=true
 end
 -- BEC_V2_STAGE_LATENCY_V2: only the first ten physical bank slots are managed.
 local function bank(size)
  local cells={}
+ local at=inventorySnapshot(0)
  for slot=1,math.min(size,10)do
-  local item=stack(0,slot)
+  local item=at(slot)
   if item then
    local n,row=describe(item)
    cells[#cells+1]={slot=slot,count=n,item=row,
