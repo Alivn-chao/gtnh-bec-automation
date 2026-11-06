@@ -222,6 +222,32 @@ local function bank(size)
  return cells
 end
 
+
+-- Fixed bank: slot T holds the T-tier disk; the loaded tier leaves its empty
+-- disk at that same home. Slot 11 is a spare and is not a production candidate.
+-- Read only the requested tier and current tier; move() rechecks every transfer.
+local function fixedBank(size,need,h,p)
+ assert(size>=11 and need<=10,'固定蜂群盘库需要11格且需求等级为1-10')
+ local slots={need}
+ if h>0 then
+  assert(p.tier>=1 and p.tier<=10,'仓内蜂群等级不在固定盘库范围')
+  if p.tier~=need then slots[#slots+1]=p.tier end
+ end
+ local cells={}
+ for _,slot in ipairs(slots)do
+  local item=stack(0,slot)
+  assert(item,'固定蜂群盘槽缺盘：'..slot..'；请恢复盘位')
+  local n,row=describe(item)
+  assert(not row or row.tier==slot,'固定蜂群盘槽等级变化：'..slot..'；请恢复盘位')
+  local empty=n==0 and item.canHoldNewItem==true and (item.remainingItemCount or 0)>0
+  if h>0 and slot==p.tier then
+   assert(empty,'当前蜂群对应盘槽应为空盘：'..slot..'；请核对盘库')
+  else assert(row and n>0,'固定蜂群盘槽没有蜂群：'..slot)end
+  cells[#cells+1]={slot=slot,count=n,item=row,empty=empty}
+ end
+ return cells
+end
+
 local function pack(cells,key)
  local candidates={}
  for _,disk in ipairs(cells) do
@@ -348,7 +374,9 @@ function M.ensure(ctx)
  local old=oldRecord();assert(not old or old.stage=='done','旧蜂群IO未完成，保留盘和日志，不自动重放')
  emptyPorts()
  local family;if initial then family=initial.requiredFamily else family=requiredFamily()end
- local cells=bank(size);local h,p=hive();local best=choose(cells,need,family)
+ local h,p=hive()
+ local cells=cfg.fixedTierSlots and fixedBank(size,need,h,p)or bank(size)
+ local best=choose(cells,need,family)
  checkPhysicalHive(h,p)
  local known=old and sameBinding(old.binding)and old.holding
  -- A zero runtime cache after reload is not proof that a previously loaded
@@ -373,7 +401,7 @@ function M.ensure(ctx)
   else for _,disk in ipairs(cells) do if disk.item and disk.item.family==p.name then extra={disk};break end end end
   if #extra==0 then
    M.lastRequirement={tier=need,name=family}
-   print('现有蜂群满足需求，无需搬盘；共享仓、盘库与IO已核对。')
+   print(cfg.fixedTierSlots and '现有蜂群满足需求，无需搬盘；固定等级盘位与IO已核对。' or '现有蜂群满足需求，无需搬盘；共享仓、盘库与IO已核对。')
    return false
   end
  else assert(best or refresh and h>0 and p.tier>=need,

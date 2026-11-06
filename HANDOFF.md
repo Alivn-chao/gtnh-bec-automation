@@ -1,3 +1,18 @@
+# 2026-11-07 固定等级盘库已排序并启用
+
+用户要求先排序再固定搬盘，已实机完成。槽1-10：Carbon65812、Silver37604、Gold39392、
+TranscendentMetal31104、SixPhasedCopper30794、WhiteDwarf31347、BlackDwarf31272、Universium605、
+Eternity507、Magmatter143；槽11空盘。T8是Universium，T9是Eternity，不要按旧快照猜。
+IO输入无法直接取出，输出槽无法插入；同一盘库侧 transferItem(side,side,...) 实测可以。
+初次输出插入返回0，核对未搬动；第二次两空盘停输入，正常IO装空盘/回收T7后取输出。
+诊断 fixed-tier-reorder-1107/b/c.dat 保留完整记录，b/c最终done，未重试未确认移动。
+T7已完整回收31272，当前物理仓空；nanites-cell.journal done/holding=nil/pending=nil。
+config.groups[1].nanites.fixedTierSlots=true 已写入读回；旧配置另存 diagnostics/config-before-fixed-tier-1107.dat。
+运行文件22024字节精确回读，备份 runtime/.ochd-mcp/17777508-9f48-40cd-9c63-e102f9cfccdb.bak。
+固定模式只读取需求等级及当前蜂群等级两个盘位（同等级只读一个），不扫描盘库；
+保留盘位等级/空盘、搬盘前后数量身份和IO日志保护。第11格备用，自动运行不参与选蜂。
+已验证所有盘数量/排序、双IO24槽空、语法，正常重开网页/start；完整换蜂耗时待新订单验证。
+
 # 2026-11-07 换蜂库存批量读取已部署
 
 当前运行模块 runtime/nanites_cell.lua 已将 bank/emptyPorts 改为 getAllStacks(side).getAll() 快照。
