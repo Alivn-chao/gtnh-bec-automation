@@ -6,6 +6,7 @@ local NODE = "b04787f9-5423-4b03-8549-c786d4ef38d0" local GATE_ADDRESS = "cf2a0c
 local NANITES=assert(loadfile("/home/bec_nanites.lua","t",_ENV),"缺少蜂群模块")()
 local lastNaniteTier,lastNaniteFamily
 local startupAt=computer.uptime();local methodLists={};local fastStartup=type(BEC_V3_STARTUP_STATE)=='function'
+local freshAdmission=fastStartup and BEC_V3_FRESH_ADMISSION==true
 local Prep=BEC_V3_PREPARATION;local preparing=false;local prepGateReady=false;local prepConverting=false
 local balanceInventory,maybeConvert,waitForBalance
 local retryRequestLimits
@@ -267,7 +268,7 @@ if preparing then
  record.supplyLedger={version=1,base=stock}
  balanceInventory=function()
   local before=field();local sub=network(SUB);local after=field()
-  return Prep.balance(stock,previous,mapping,before,sub,after)
+  return Prep.balance(stock,previous,mapping,before,sub,after,prepConverting)
  end
  local sequential=not highSpeed
  local function reconcileStock()
@@ -398,14 +399,14 @@ local function productionSnapshot()
  return v
 end
 local function serve() local waiting={idle=true,["assembler-offline"]=true,unpowered=true,["nanite-tier-too-low"]=true}
-local round=0 while not stopping do preparing=Prep~=nil;prepGateReady=false;prepConverting=false;balanceInventory=nil;maybeConvert=nil;waitForBalance=nil;local nanitesChecked=false;pause(15); generator(false) local state=fastStartup and BEC_V3_STARTUP_STATE()or call(NODE,"getState")
+local round=0 while not stopping do preparing=Prep~=nil;prepGateReady=false;prepConverting=false;balanceInventory=nil;maybeConvert=nil;waitForBalance=nil;local nanitesChecked=false;if round>0 or not freshAdmission then pause(15)end;generator(false) local state=fastStartup and BEC_V3_STARTUP_STATE()or call(NODE,"getState")
 if stopping then break end if not fastStartup then state=call(NODE,"getState")end
 if state=="idle" and BEC_V2_COHORT_IDLE then assert(BEC_V2_COHORT_IDLE());print("本批节点已完成，消耗核对通过；结束旧批次并交回设备组调度。") break end
 if not Prep and(state=="paused-immediate" or state=="nanite-tier-too-low")then switchNanites();nanitesChecked=true;state=call(NODE,"getState")end if waiting[state]and not(Prep and state=="nanite-tier-too-low")then
 if state~=record.lastState then print("等待订单/机器就绪: "..state.."；任意数量同配方订单均可，按 Q 停止。") record.lastState=state;save("waiting") end
-field();tick(0.1) else local completed=false;waitUntil(10,function() local v=fastStartup and BEC_V3_STARTUP_STATE()or call(NODE,"getState");completed=completedIdle(v)
+field();tick(0.1) else local completed=false;if not preparationPaused(state)then waitUntil(10,function() local v=fastStartup and BEC_V3_STARTUP_STATE()or call(NODE,"getState");completed=completedIdle(v)
 return preparationPaused(v)or completed,v end,function(v) assert(v=="crafting" or waiting[v],"无法暂停，实际状态: "..tostring(v)) field()
-end,"备料前暂停/完成核对") if completed then print("暂停等待期间本批已完成，消耗核对通过；交回调度。");break end;if not nanitesChecked and not Prep then switchNanites()end;if stopping then break end local parallel;record.required,record.remaining,parallel=current() local target,count=batchTarget(record.required,record.remaining,fastStartup and parallel or nil) local stable=false
+end,"备料前暂停/完成核对")end if completed then print("暂停等待期间本批已完成，消耗核对通过；交回调度。");break end;if not nanitesChecked and not Prep then switchNanites()end;if stopping then break end local parallel;record.required,record.remaining,parallel=current() local target,count=batchTarget(record.required,record.remaining,fastStartup and parallel or nil) local stable=false
 -- A closed frozen cell fixes the quantity; there is no growing CPU order to
 -- debounce. current() above still freshly checks every member and consumption.
 if fastStartup and frozenRecipe then stable=true else
@@ -508,7 +509,11 @@ print("麦克斯韦门: "..GATE.."；过滤: "..ser.serialize(call(GATE,"getCond
 print("子网原液: " .. ser.serialize(network(SUB),false)) if call(NODE,"getState") == "paused-immediate" then local required,remaining=current();local target,count=batchTarget(required,remaining) print("本组当前配方 "..count.." 份")
 plan(target) end print("预览结束：没有开关、搬液、配置或写日志。") return
 end local waitingStates = {idle=true, ["paused-immediate"]=true, ["assembler-offline"]=true, unpowered=true, ["nanite-tier-too-low"]=true} local initialState = startupState()
-assert(waitingStates[initialState], "节点状态不适合启动: " .. tostring(initialState)) emptyConfig(); tanks(4,nil); tanks(5,nil) if fs.exists(JOURNAL) then local f=assert(io.open(JOURNAL,"r"));local contents=f:read("*a");f:close()
+assert(waitingStates[initialState], "节点状态不适合启动: " .. tostring(initialState))
+-- The fresh admitted batch will run the same inlet/configuration checks in
+-- serve(), after the live group snapshot and before starting preparation.
+if not freshAdmission then emptyConfig();tanks(4,nil);tanks(5,nil)end
+if fs.exists(JOURNAL) then local f=assert(io.open(JOURNAL,"r"));local contents=f:read("*a");f:close()
 local old=ser.unserialize(contents);retryRequestLimits=type(old)=='table'and old.requestLimits or nil;local liveSupply=Prep and type(old)=='table'and type(old.supplyLedger)=='table'and old.supplyLedger.version==1 and type(old.supplyLedger.base)=='table'and type(old.secured)=='table'and type(old.target)=='table'and type(old.stage)=='string'and(old.stage:match('^stream%-')or old.stage=='converting');local streaming=type(old)=="table" and type(old.plan)=="table" and (old.stage=="stream-configuring" or old.stage=="stream-transfer-confirmed" or old.stage=="stream-inlet-cleared" or old.stage=="stream-planned")
 and type(old.secured)=="table" and type(old.target)=="table" assert(type(old)=="table" and old.version==1 and old.kind=="continuous" and old.pending==nil and (old.configOwned==false or streaming),"日志无效或有未确认操作，禁止重跑") if mode=="resume" or mode=="restock" then
 local stopped=old.stage=="stopped" and old.plan==nil and type(old.transfers)=="table" local preTransfer=(old.stage=="starting" or old.stage=="waiting" or old.stage=="waiting-stock") and old.plan==nil and type(old.transfers)=="table" and next(old.transfers)==nil and (old.requests==nil or next(old.requests)==nil)

@@ -10,6 +10,9 @@ return function(cfg,C,Bridge,monitor,resumeCellFeed)
   local now=clock.uptime();t.flow=t.flow or {};t.timeline=t.timeline or {}
   if t.phase==phase then return end
   if t.phase then t.flow[t.phase]=(t.flow[t.phase]or 0)+now-(t.phaseAt or now)end
+  if t.phase=='detect'and phase~='fault'then
+   E.log(i,string.format('检测配方实际耗时 %.2f秒%s',now-(t.phaseAt or now),t.freshAdmission and '；复用本批接单关闭回执' or ''))
+  end
   t.phase=phase;t.phaseAt=now
   t.timeline[#t.timeline+1]={phase=phase,at=now}
   if #t.timeline>12 then table.remove(t.timeline,1)end
@@ -50,15 +53,17 @@ return function(cfg,C,Bridge,monitor,resumeCellFeed)
  end
  function E.release(i)if E.fluidOwner==i then E.fluidOwner=nil end end
  local function pause(i)
-  local n=cfg.nodes[i];c.invoke(n.redstone,'setOutput',n.pauseSide,15)
+  local n=cfg.nodes[i];if c.invoke(n.redstone,'getOutput',n.pauseSide)==15 then return end
+  c.invoke(n.redstone,'setOutput',n.pauseSide,15)
   assert(c.invoke(n.redstone,'getOutput',n.pauseSide)==15,'节点暂停回读失败')
  end
  -- BEC_V2_BATCH_STOP_V1: workAllowed gates NEXT recipe acquisition;
  -- the active batch still runs when its immediate-pause signal is released.
  function E.nodeWork(i,enabled)
-  local n=cfg.nodes[i];local methods=c.methods(n.address)
-  assert(methods and methods.setWorkAllowed~=nil and methods.isWorkAllowed~=nil,'传送节点缺少启停接口: '..n.name)
+  local n=cfg.nodes[i]
   if c.invoke(n.address,'isWorkAllowed')==enabled then return end
+  local methods=c.methods(n.address)
+  assert(methods and methods.setWorkAllowed~=nil and methods.isWorkAllowed~=nil,'传送节点缺少启停接口: '..n.name)
   local path=C.path('state/node-'..i..'/batch-stop.dat')
   local intent={version=2,node=n.address,enabled=enabled,stage='pending'}
   C.write(path,intent)
@@ -182,15 +187,16 @@ return function(cfg,C,Bridge,monitor,resumeCellFeed)
   end
   for group in ipairs(cfg.groups)do if not E.groupOwner[group]then
    local feed=E.cellFeeds[group]
-   local feedReady=true
+   local feedReady,freshAdmission=true,false
    if feed then
     local disabled,leader=false,nil
     for i,n in ipairs(cfg.nodes)do if n.group==group then leader=leader or i;if E.tasks[i].disabled or E.tasks[i].fault then disabled=true end end end
     feedReady=false
     if not disabled then
+     local wasReady=feed.ready
      local ok,result=pcall(feed.step)
      if ok then
-      feedReady=result
+      feedReady=result;freshAdmission=result and not wasReady
       if not result then for i,n in ipairs(cfg.nodes)do if n.group==group then E.tasks[i].status=feed.message end end end
      else
       E.log(leader,'原料盘保护暂停：'..tostring(result));local t=E.tasks[leader];t.fault=true;t.startedAt=t.startedAt or clock.uptime();t.endedAt=clock.uptime();E.phase(leader,'fault');E.pauseNode(leader)
@@ -221,6 +227,13 @@ return function(cfg,C,Bridge,monitor,resumeCellFeed)
       end
       t.members={};t.entries={};t.normalized=normalized;t.released=false
       t.fixedBatch=feed and feed.plan()or nil
+      local plan=t.fixedBatch
+      -- Only the step that just committed the closed admission wave may reuse
+      -- its proof. Restarts and interrupted cohorts take the full pause path.
+      t.freshAdmission=freshAdmission and not unfinished and
+       (not journal or journal.stage=='stopped'and not journal.pending and journal.configOwned==false)and
+       plan and plan.stage=='ready'and plan.waveClosed and not plan.pending and
+       plan.cursor==#plan.members+1 or false
       if unfinished then
        assert(i==saved.leader and type(saved.members)=='table'and type(saved.entries)=='table','旧生产组记录不可恢复')
        t.members=saved.members;t.entries=saved.entries;t.normalized=saved.normalized
@@ -249,7 +262,9 @@ return function(cfg,C,Bridge,monitor,resumeCellFeed)
       require('filesystem').makeDirectory(C.path('state/node-'..i))
       C.write(cohortPath(group),{version=2,stage='working',leader=i,members=t.members,entries=t.entries,normalized=t.normalized})
       t.co=coroutine.create(function()
-       for j,v in ipairs(cfg.nodes)do if v.group==group then pause(j);E.nodeWork(j,false)end end
+       if not t.freshAdmission then
+        for j,v in ipairs(cfg.nodes)do if v.group==group then pause(j);E.nodeWork(j,false)end end
+       end
        E.acquire(i);Bridge.environment(cfg,i,E)(journal and 'resume'or 'run')
       end)
       advance(i);break

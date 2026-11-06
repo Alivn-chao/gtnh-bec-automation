@@ -241,6 +241,11 @@ function M.environment(cfg,index,engine)
    if m=='setWorkAllowed' then
     if args[1]and preparation then assert(preparation.gateReady,'韦门确认前禁止并行转换')end
     generatorsChecked=false
+    if args[1]==false then
+     local off=true
+     for _,address in ipairs(g.generators)do if c.invoke(address,'isWorkAllowed')~=false then off=false end end
+     if off then return true end
+    end
     local intent={version=2,node=index,enabled=args[1],stage='pending'}
     C.write(C.path('state/group-'..n.group..'/generators.dat'),intent)
     for _,address in ipairs(g.generators) do
@@ -302,6 +307,7 @@ function M.environment(cfg,index,engine)
   if type(task.fixedBatch.recipe)=='string'and type(task.fixedBatch.condensates)=='table'and type(task.fixedBatch.outputs)=='table'then
    env.BEC_V3_FROZEN_RECIPE=task.fixedBatch
   end
+  env.BEC_V3_FRESH_ADMISSION=task.freshAdmission==true
   env.BEC_V3_BOUND_COMPONENTS={redstone=n.redstone,generator=g.generators[1],gate=n.gate}
   env.BEC_V3_STARTUP_STATE=function()return representative.inspection(true).state end
  end
