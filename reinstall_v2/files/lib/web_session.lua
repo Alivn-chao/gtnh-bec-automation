@@ -99,7 +99,16 @@ return function(C,B,W,options)
  function H.handle(name,args,request)
   assert(type(args)=='table','页面参数必须为对象')
   assert(type(request)=='number'and request==math.floor(request)and request>0,'请求编号无效')
-  if name=='recheck_all'then
+  if name=='reset_feed'then
+   idleEditor()
+   assert(args.revision==revision(),'绑定已变化，请等待最新页面');cleanDraft()
+   local disk=storage.status();assert(disk.known and disk.ok,'磁盘不足，无法保存重置记录')
+   local reset=assert(loadfile(C.path('lib/feed_reset.lua')))()
+   local changed=reset(C,cfg,H.group)
+   if changed then E=nil;H.started=false;displayed={};displayJobs=nil end
+   H.notice=changed and '接单已重置；确认配方后可启动，从接取物料开始。' or '当前没有需要重置的接单批次。'
+   return H.notice
+  elseif name=='recheck_all'then
    assert(not H.running and not(P and P.co),'请先暂停自动化并等待工作器收尾')
    assert(not cache().busy,'缓存工作器尚未收尾，请稍候再检查')
    assert(args.revision==revision(),'绑定已变化，请等待最新页面');cleanDraft()
